@@ -1,0 +1,464 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #000000;
+  --foreground: #ffffff;
+  --cinematic-deep: #0a1628;
+  --cinematic-teal: #0d3b4f;
+  --cinematic-amber: #d4a04a;
+  --cinematic-blue: #1a2744;
+}
+
+/* THE FIX: Lock the native body completely. */
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  /* Stop the body from fighting Drei's ScrollControls */
+  overscroll-behavior: none;
+  /* Kill iOS Safari bounce and pull-to-refresh */
+}
+
+/* Hero container — flush to top without safe-area inset or webkit hacks */
+.hero-container {
+  margin-top: 0;
+  padding-top: 0;
+  min-height: 100dvh;
+}
+
+/* Mobile scroll fix — touch devices only */
+@media (pointer: coarse) {
+
+  html,
+  body {
+    /* Force lock on mobile to guarantee swipe events go to Drei */
+    overflow: hidden !important;
+    overscroll-behavior: none !important;
+  }
+
+  /* Prevent the 3D canvas from swallowing swipe events instead of the scroll wrapper */
+  canvas {
+    touch-action: none !important;
+  }
+}
+
+body {
+  color: var(--foreground);
+  background: var(--background);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::selection {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+@keyframes rec-pulse {
+
+  0%,
+  100% {
+    opacity: 0.35;
+    box-shadow: 0 0 4px rgba(239, 68, 68, 0.25);
+  }
+
+  40% {
+    opacity: 1;
+    box-shadow: 0 0 10px rgba(239, 68, 68, 0.8), 0 0 20px rgba(239, 68, 68, 0.3);
+  }
+
+  50% {
+    opacity: 0.9;
+    box-shadow: 0 0 6px rgba(239, 68, 68, 0.5);
+  }
+
+  60% {
+    opacity: 1;
+    box-shadow: 0 0 12px rgba(239, 68, 68, 0.75);
+  }
+}
+
+@keyframes orb-breathe {
+
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.5;
+  }
+
+  50% {
+    transform: scale(1.15);
+    opacity: 0.8;
+  }
+}
+
+@keyframes particle-float {
+  0% {
+    transform: translateY(0) translateX(0);
+    opacity: 0;
+  }
+
+  10% {
+    opacity: 1;
+  }
+
+  90% {
+    opacity: 0.6;
+  }
+
+  100% {
+    transform: translateY(-100dvh) translateX(20px);
+    opacity: 0;
+  }
+}
+
+@keyframes light-sweep {
+  0% {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+
+  40% {
+    opacity: 0.3;
+  }
+
+  100% {
+    opacity: 0;
+    transform: scale(1.4);
+  }
+}
+
+@keyframes hero-haze {
+
+  0%,
+  100% {
+    opacity: 0.3;
+    transform: translateX(-2%);
+  }
+
+  50% {
+    opacity: 0.5;
+    transform: translateX(2%);
+  }
+}
+
+@keyframes hero-drift {
+  0% {
+    transform: scale(1.06) translate(0px, 0px);
+  }
+
+  50% {
+    transform: scale(1.12) translate(2px, 3px);
+  }
+
+  100% {
+    transform: scale(1.06) translate(0px, 0px);
+  }
+}
+
+/* CTA ambient pulsing glow */
+@keyframes cta-glow-pulse {
+
+  0%,
+  100% {
+    box-shadow: 0 0 14px rgba(100, 200, 220, 0.12), 0 0 35px rgba(13, 59, 79, 0.08);
+  }
+
+  50% {
+    box-shadow: 0 0 24px rgba(100, 200, 220, 0.24), 0 0 55px rgba(13, 59, 79, 0.16);
+  }
+}
+
+/* CTA subtle scale pulse */
+@keyframes pulse-scale {
+
+  0%,
+  100% {
+    transform: scale(1);
+  }
+
+  50% {
+    transform: scale(1.03);
+  }
+}
+
+/* Form Glow Animation */
+@keyframes gradient-xy {
+
+  0%,
+  100% {
+    background-position: 0% 50%;
+  }
+
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
+/* General pulse animation */
+@keyframes pulse {
+  0% {
+    transform: scale(1);
+  }
+
+  50% {
+    transform: scale(1.03);
+  }
+
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* Live production: subtle exposure shift */
+@keyframes exposure-shift {
+
+  0%,
+  100% {
+    opacity: 0;
+  }
+
+  40% {
+    opacity: 0.06;
+  }
+
+  60% {
+    opacity: 0.03;
+  }
+}
+
+/* Live production: gentle focus pulse */
+@keyframes focus-pulse {
+
+  0%,
+  85%,
+  100% {
+    filter: blur(0px);
+    opacity: 0;
+  }
+
+  90% {
+    filter: blur(1.5px);
+    opacity: 0.08;
+  }
+
+  95% {
+    filter: blur(0.5px);
+    opacity: 0.04;
+  }
+}
+
+/* Live production: cinematic scanline pass */
+@keyframes scanline-pass {
+  0% {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+
+  5% {
+    opacity: 0.06;
+  }
+
+  95% {
+    opacity: 0.06;
+  }
+
+  100% {
+    transform: translateY(100dvh);
+    opacity: 0;
+  }
+}
+
+/* Overlay micro-tension drift */
+@keyframes overlay-drift {
+
+  0%,
+  100% {
+    opacity: 0.88;
+  }
+
+  50% {
+    opacity: 1;
+  }
+}
+
+/* Cinematic grain noise */
+@keyframes grain {
+
+  0%,
+  100% {
+    background-position: 0 0;
+  }
+
+  10% {
+    background-position: -5% -10%;
+  }
+
+  20% {
+    background-position: -15% 5%;
+  }
+
+  30% {
+    background-position: 7% -25%;
+  }
+
+  40% {
+    background-position: -5% 25%;
+  }
+
+  50% {
+    background-position: -15% 10%;
+  }
+
+  60% {
+    background-position: 15% 0%;
+  }
+
+  70% {
+    background-position: 0% 15%;
+  }
+
+  80% {
+    background-position: 3% 35%;
+  }
+
+  90% {
+    background-position: -10% 10%;
+  }
+}
+
+/* Shimmer effect for loading states */
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.animate-shimmer {
+  animation: shimmer 2s infinite;
+}
+
+/* Hero headline — mobile shadow boost (visual polish only) */
+@media (max-width: 640px) {
+  .hero-headline {
+    filter: drop-shadow(0 2px 24px rgba(0, 0, 0, 0.55)) drop-shadow(0 6px 48px rgba(0, 0, 0, 0.4)) !important;
+  }
+}
+
+/* ─── Pipeline cinematic sequence keyframes ─── */
+
+/* Screenplay — text line scan shimmer */
+@keyframes pipeline-text-scan {
+
+  0%,
+  100% {
+    opacity: 0.3;
+  }
+
+  50% {
+    opacity: 0.8;
+  }
+}
+
+/* World Gen — concentric ring pulse */
+@keyframes pipeline-ring-pulse {
+
+  0%,
+  100% {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 0.04;
+  }
+
+  50% {
+    transform: translate(-50%, -50%) scale(1.08);
+    opacity: 0.07;
+  }
+}
+
+/* Orchestration — connection line pulse */
+@keyframes pipeline-line-draw {
+
+  0%,
+  100% {
+    stroke-opacity: 0.15;
+  }
+
+  50% {
+    stroke-opacity: 0.5;
+  }
+}
+
+/* Orchestration — node breathing */
+@keyframes pipeline-node-pulse {
+
+  0%,
+  100% {
+    r: 1.5;
+    opacity: 0.4;
+  }
+
+  50% {
+    r: 2.5;
+    opacity: 0.8;
+  }
+}
+
+/* ─── Concept 2: Gaussian Spine Keyframes ─── */
+@keyframes data-waterfall {
+  0% {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+
+  10% {
+    opacity: 1;
+  }
+
+  90% {
+    opacity: 1;
+  }
+
+  100% {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+}
+
+@keyframes particle-drift {
+  0% {
+    transform: translate(0, 0) scale(0.8);
+    opacity: 0;
+  }
+
+  20% {
+    opacity: 0.8;
+  }
+
+  80% {
+    opacity: 0.8;
+  }
+
+  100% {
+    transform: translate(var(--tx), var(--ty)) scale(1.2);
+    opacity: 0;
+  }
+}
+
+@keyframes orbit-ring {
+  0% {
+    transform: rotateX(var(--rx)) rotateY(var(--ry)) rotateZ(0deg);
+  }
+
+  100% {
+    transform: rotateX(var(--rx)) rotateY(var(--ry)) rotateZ(360deg);
+  }
+}

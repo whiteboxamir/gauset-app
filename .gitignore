@@ -1,0 +1,48 @@
+# dependencies
+node_modules/
+/.pnp
+.pnp.js
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# local env files
+.env*.local
+.env
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# local development artifacts
+.next-local/
+.next_broken_*/
+node_modules_broken*/
+node_modules_locked2/
+backend_venv/
+backend_venv_*/
+backend/ml-sharp/
+backend/TripoSR/
+uploads/
+assets/
+scenes/
+get-pip.py
+.fakehome/
+.agentrules
+.cursorrules
