@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Camera, Focus, MapPin, Maximize2, Minimize2, ScanLine, Video } from "lucide-react";
+import { usePathname } from "next/navigation";
 import ThreeOverlay from "./ThreeOverlay";
 import { describeEnvironment, resolveEnvironmentRenderState } from "@/lib/mvp-product";
 import {
@@ -52,6 +53,8 @@ export default function ViewerPanel({
     onSelectView?: (viewId: string | null) => void;
     focusRequest?: FocusRequest;
 }) {
+    const pathname = usePathname();
+    const isPreviewRoute = pathname === "/mvp/preview";
     const normalizedSceneGraph = useMemo(() => normalizeWorkspaceSceneGraph(sceneGraph), [sceneGraph]);
     const [captureRequestKey, setCaptureRequestKey] = useState(0);
     const [isPinPlacementEnabled, setIsPinPlacementEnabled] = useState(false);
@@ -59,6 +62,7 @@ export default function ViewerPanel({
     const [isRecordingPath, setIsRecordingPath] = useState(false);
     const [localFocusRequest, setLocalFocusRequest] = useState<FocusRequest>(null);
     const [isFullscreen, setIsFullscreen] = useState(false);
+    const [isPreviewHudMinimized, setIsPreviewHudMinimized] = useState(false);
     const [viewerReady, setViewerReady] = useState(false);
     const containerRef = useRef<HTMLDivElement | null>(null);
     const captureFallbackTimerRef = useRef<number | null>(null);
@@ -92,6 +96,14 @@ export default function ViewerPanel({
             captureFallbackTimerRef.current = null;
         }
     }, [viewerReady]);
+
+    useEffect(() => {
+        if (!isPreviewRoute) {
+            setIsPreviewHudMinimized(false);
+            return;
+        }
+        setIsPreviewHudMinimized(true);
+    }, [isPreviewRoute]);
 
     useEffect(() => {
         const handleEscape = (event: KeyboardEvent) => {
@@ -345,18 +357,52 @@ export default function ViewerPanel({
 
     const viewerActionDisabled = readOnly || !viewerReady;
     const viewerActionClassName = viewerActionDisabled ? "cursor-not-allowed opacity-50" : "";
+    const showPreviewHudMinimized = isPreviewRoute && isPreviewHudMinimized;
+    const previewHudToggleLabel = showPreviewHudMinimized ? "Expand HUD" : "Minimize HUD";
+
+    const lensPresetControls = (
+        <div className="flex items-center gap-2 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <div className="flex shrink-0 items-center gap-2 rounded-full border border-neutral-800 bg-black/30 px-3 py-2">
+                <Camera className="h-3.5 w-3.5 text-neutral-400" />
+                <span className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">Lens</span>
+            </div>
+            {LENS_PRESETS.map((lensMm) => {
+                const active = Math.round(normalizedSceneGraph.viewer.lens_mm) === lensMm;
+                return (
+                    <button
+                        key={lensMm}
+                        type="button"
+                        onClick={() => setLens(lensMm)}
+                        className={`shrink-0 rounded-full border px-3 py-2 text-[11px] transition-colors ${
+                            active
+                                ? "border-white/20 bg-white text-black"
+                                : "border-neutral-800 bg-neutral-900 text-neutral-300 hover:border-neutral-700 hover:text-white"
+                        }`}
+                    >
+                        {lensMm}mm
+                    </button>
+                );
+            })}
+        </div>
+    );
 
     return (
         <div
             className="relative flex h-full w-full flex-col bg-[radial-gradient(circle_at_top,rgba(56,189,248,0.08),transparent_24%),linear-gradient(180deg,#050608_0%,#040507_100%)]"
             ref={containerRef}
         >
-            <div className="absolute top-0 left-0 right-0 p-5 shrink-0 z-30">
-                <div className="relative overflow-hidden rounded-[30px] border border-white/10 bg-[linear-gradient(180deg,rgba(9,12,18,0.84),rgba(7,9,13,0.74))] p-4 shadow-[0_24px_60px_rgba(0,0,0,0.38)] backdrop-blur-xl">
-                    <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-cyan-200/40 via-white/10 to-transparent" />
-                    <div className="flex flex-wrap items-start justify-between gap-4">
-                        <div className="min-w-[220px] max-w-sm">
-                            <div className="flex items-center gap-3">
+            <div
+                className={
+                    showPreviewHudMinimized
+                        ? "pointer-events-none absolute left-1/2 top-5 z-30 w-[min(92vw,56rem)] -translate-x-1/2"
+                        : "absolute top-0 left-0 right-0 p-5 shrink-0 z-30"
+                }
+            >
+                {showPreviewHudMinimized ? (
+                    <div className="pointer-events-auto relative overflow-hidden rounded-full border border-white/12 bg-[linear-gradient(180deg,rgba(9,12,18,0.76),rgba(7,9,13,0.7))] px-3 py-3 shadow-[0_20px_50px_rgba(0,0,0,0.3)] backdrop-blur-xl">
+                        <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-cyan-200/40 via-white/10 to-transparent" />
+                        <div className="flex flex-wrap items-center justify-center gap-3">
+                            <div className="flex shrink-0 items-center gap-3 rounded-full border border-white/10 bg-black/20 px-3 py-2">
                                 <div
                                     className={`h-2.5 w-2.5 rounded-full ${
                                         hasEnvironment && !isReferenceOnlyDemo && !isLegacyDemoWorld
@@ -364,195 +410,215 @@ export default function ViewerPanel({
                                             : "bg-neutral-600"
                                     }`}
                                 />
-                                <div>
+                                <div className="min-w-0">
                                     <p className="text-[10px] uppercase tracking-[0.3em] text-cyan-200/65">GAUSET Director</p>
-                                    <span className="text-sm font-medium text-neutral-100">{environmentState.label}</span>
+                                    <p className="truncate text-xs font-medium text-neutral-100">{environmentState.label}</p>
                                 </div>
                             </div>
-                            <p className="mt-2 text-[11px] text-neutral-400">{environmentState.note}</p>
-                            {environmentState.detail ? <p className="mt-1 text-[11px] text-neutral-500">{environmentState.detail}</p> : null}
-                            {clarityMode ? (
-                                <div className="mt-3 grid gap-2">
-                                    <div className="rounded-2xl border border-emerald-500/15 bg-emerald-950/20 px-3 py-2">
-                                        <p className="text-[10px] uppercase tracking-[0.16em] text-emerald-200/80">Persistent world</p>
-                                        <p className="mt-1 text-[11px] leading-5 text-emerald-50/90">
-                                            Environment and placed assets stay fixed until you rebuild or replace the world.
-                                        </p>
-                                    </div>
-                                    <div className="rounded-2xl border border-sky-500/15 bg-sky-950/20 px-3 py-2">
-                                        <p className="text-[10px] uppercase tracking-[0.16em] text-sky-200/80">Scene direction</p>
-                                        <p className="mt-1 text-[11px] leading-5 text-sky-50/90">
-                                            Views, notes, pins, and lens choices change only the shot you are directing.
-                                        </p>
-                                    </div>
-                                </div>
-                            ) : null}
-                        </div>
-
-                        <div className="flex max-w-[32rem] flex-wrap items-center justify-end gap-2">
-                            {typeof qualityScore === "number" ? (
-                                <div className="rounded-2xl border border-neutral-800 bg-black/30 px-3 py-2 text-right">
-                                    <p className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">Quality</p>
-                                    <p className="text-sm text-white">{qualityScore.toFixed(1)}</p>
-                                </div>
-                            ) : null}
-                            {!readOnly ? (
-                                <>
-                                    <button
-                                        type="button"
-                                        onClick={requestViewCapture}
-                                        disabled={viewerActionDisabled}
-                                        className={`rounded-full border border-neutral-800 bg-neutral-900 px-3 py-2 text-[11px] text-white transition-colors hover:border-blue-500/50 hover:text-blue-200 disabled:hover:border-neutral-800 disabled:hover:text-white ${viewerActionClassName}`}
-                                    >
-                                        Save camera view
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => setIsPinPlacementEnabled((value) => !value)}
-                                        disabled={viewerActionDisabled}
-                                        className={`rounded-full border px-3 py-2 text-[11px] transition-colors ${
-                                            isPinPlacementEnabled
-                                                ? "border-sky-500/60 bg-sky-500/15 text-sky-200"
-                                                : "border-neutral-800 bg-neutral-900 text-white hover:border-sky-500/40 hover:text-sky-200"
-                                        } disabled:hover:border-neutral-800 disabled:hover:text-white ${viewerActionClassName}`}
-                                    >
-                                        <MapPin className="mr-1 inline h-3.5 w-3.5" />
-                                        {isPinPlacementEnabled ? "Drop scene note" : "Scene notes"}
-                                    </button>
-                                    <select
-                                        value={pinType}
-                                        onChange={(event) => setPinType(event.target.value as SpatialPinType)}
-                                        disabled={viewerActionDisabled}
-                                        className={`rounded-full border border-neutral-800 bg-neutral-900 px-3 py-2 text-[11px] text-white outline-none focus:border-sky-500/50 ${viewerActionClassName}`}
-                                        aria-label="Pin type"
-                                    >
-                                        <option value="general">General</option>
-                                        <option value="egress">Egress</option>
-                                        <option value="lighting">Lighting</option>
-                                        <option value="hazard">Hazard</option>
-                                    </select>
-                                    <button
-                                        type="button"
-                                        onClick={() => setIsRecordingPath((value) => !value)}
-                                        disabled={viewerActionDisabled}
-                                        className={`rounded-full border px-3 py-2 text-[11px] transition-colors ${
-                                            isRecordingPath
-                                                ? "border-amber-500/60 bg-amber-500/15 text-amber-200"
-                                                : "border-neutral-800 bg-neutral-900 text-white hover:border-amber-500/40 hover:text-amber-200"
-                                        } disabled:hover:border-neutral-800 disabled:hover:text-white ${viewerActionClassName}`}
-                                    >
-                                        <Video className="mr-1 inline h-3.5 w-3.5" />
-                                        {isRecordingPath ? "Stop path" : "Record camera path"}
-                                    </button>
-                                </>
-                            ) : null}
+                            <div className="min-w-0 flex-1 overflow-hidden">{lensPresetControls}</div>
                             <button
                                 type="button"
-                                onClick={toggleFullscreen}
-                                className="rounded-full border border-neutral-800 bg-neutral-900 px-3 py-2 text-[11px] text-white transition-colors hover:border-neutral-700 hover:text-neutral-100"
+                                onClick={() => setIsPreviewHudMinimized(false)}
+                                className="shrink-0 rounded-full border border-neutral-800 bg-neutral-900 px-3 py-2 text-[11px] text-white transition-colors hover:border-neutral-700 hover:text-neutral-100"
+                                aria-label={previewHudToggleLabel}
                             >
-                                {isFullscreen ? <Minimize2 className="mr-1 inline h-3.5 w-3.5" /> : <Maximize2 className="mr-1 inline h-3.5 w-3.5" />}
-                                {isFullscreen ? "Exit" : "Expand"}
+                                <Maximize2 className="mr-1 inline h-3.5 w-3.5" />
+                                {previewHudToggleLabel}
                             </button>
                         </div>
                     </div>
+                ) : (
+                    <div className="relative overflow-hidden rounded-[30px] border border-white/10 bg-[linear-gradient(180deg,rgba(9,12,18,0.84),rgba(7,9,13,0.74))] p-4 shadow-[0_24px_60px_rgba(0,0,0,0.38)] backdrop-blur-xl">
+                        <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-cyan-200/40 via-white/10 to-transparent" />
+                        <div className="flex flex-wrap items-start justify-between gap-4">
+                            <div className="min-w-[220px] max-w-sm">
+                                <div className="flex items-center gap-3">
+                                    <div
+                                        className={`h-2.5 w-2.5 rounded-full ${
+                                            hasEnvironment && !isReferenceOnlyDemo && !isLegacyDemoWorld
+                                                ? "bg-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.8)]"
+                                                : "bg-neutral-600"
+                                        }`}
+                                    />
+                                    <div>
+                                        <p className="text-[10px] uppercase tracking-[0.3em] text-cyan-200/65">GAUSET Director</p>
+                                        <span className="text-sm font-medium text-neutral-100">{environmentState.label}</span>
+                                    </div>
+                                </div>
+                                <p className="mt-2 text-[11px] text-neutral-400">{environmentState.note}</p>
+                                {environmentState.detail ? <p className="mt-1 text-[11px] text-neutral-500">{environmentState.detail}</p> : null}
+                                {clarityMode ? (
+                                    <div className="mt-3 grid gap-2">
+                                        <div className="rounded-2xl border border-emerald-500/15 bg-emerald-950/20 px-3 py-2">
+                                            <p className="text-[10px] uppercase tracking-[0.16em] text-emerald-200/80">Persistent world</p>
+                                            <p className="mt-1 text-[11px] leading-5 text-emerald-50/90">
+                                                Environment and placed assets stay fixed until you rebuild or replace the world.
+                                            </p>
+                                        </div>
+                                        <div className="rounded-2xl border border-sky-500/15 bg-sky-950/20 px-3 py-2">
+                                            <p className="text-[10px] uppercase tracking-[0.16em] text-sky-200/80">Scene direction</p>
+                                            <p className="mt-1 text-[11px] leading-5 text-sky-50/90">
+                                                Views, notes, pins, and lens choices change only the shot you are directing.
+                                            </p>
+                                        </div>
+                                    </div>
+                                ) : null}
+                            </div>
 
-                    {processingStatus ? (
-                        <div className="mt-4 rounded-2xl border border-cyan-300/15 bg-cyan-400/10 px-3 py-3">
-                            <p className="text-xs font-medium text-white">{processingStatus.label}</p>
-                            {processingStatus.detail ? <p className="mt-1 text-[11px] leading-5 text-neutral-300">{processingStatus.detail}</p> : null}
-                            {processingStatus.busy ? (
-                                <p className="mt-2 text-[10px] uppercase tracking-[0.16em] text-cyan-100/80">
-                                    Current output stays visible until the new result finishes.
-                                </p>
-                            ) : null}
-                        </div>
-                    ) : null}
-
-                    <div className="mt-4 flex items-center gap-2 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-                        <div className="flex shrink-0 items-center gap-2 rounded-full border border-neutral-800 bg-black/30 px-3 py-2">
-                            <Camera className="h-3.5 w-3.5 text-neutral-400" />
-                            <span className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">Lens</span>
-                        </div>
-                        {LENS_PRESETS.map((lensMm) => {
-                            const active = Math.round(normalizedSceneGraph.viewer.lens_mm) === lensMm;
-                            return (
+                            <div className="flex max-w-[32rem] flex-wrap items-center justify-end gap-2">
+                                {typeof qualityScore === "number" ? (
+                                    <div className="rounded-2xl border border-neutral-800 bg-black/30 px-3 py-2 text-right">
+                                        <p className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">Quality</p>
+                                        <p className="text-sm text-white">{qualityScore.toFixed(1)}</p>
+                                    </div>
+                                ) : null}
+                                {!readOnly ? (
+                                    <>
+                                        <button
+                                            type="button"
+                                            onClick={requestViewCapture}
+                                            disabled={viewerActionDisabled}
+                                            className={`rounded-full border border-neutral-800 bg-neutral-900 px-3 py-2 text-[11px] text-white transition-colors hover:border-blue-500/50 hover:text-blue-200 disabled:hover:border-neutral-800 disabled:hover:text-white ${viewerActionClassName}`}
+                                        >
+                                            Save camera view
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setIsPinPlacementEnabled((value) => !value)}
+                                            disabled={viewerActionDisabled}
+                                            className={`rounded-full border px-3 py-2 text-[11px] transition-colors ${
+                                                isPinPlacementEnabled
+                                                    ? "border-sky-500/60 bg-sky-500/15 text-sky-200"
+                                                    : "border-neutral-800 bg-neutral-900 text-white hover:border-sky-500/40 hover:text-sky-200"
+                                            } disabled:hover:border-neutral-800 disabled:hover:text-white ${viewerActionClassName}`}
+                                        >
+                                            <MapPin className="mr-1 inline h-3.5 w-3.5" />
+                                            {isPinPlacementEnabled ? "Drop scene note" : "Scene notes"}
+                                        </button>
+                                        <select
+                                            value={pinType}
+                                            onChange={(event) => setPinType(event.target.value as SpatialPinType)}
+                                            disabled={viewerActionDisabled}
+                                            className={`rounded-full border border-neutral-800 bg-neutral-900 px-3 py-2 text-[11px] text-white outline-none focus:border-sky-500/50 ${viewerActionClassName}`}
+                                            aria-label="Pin type"
+                                        >
+                                            <option value="general">General</option>
+                                            <option value="egress">Egress</option>
+                                            <option value="lighting">Lighting</option>
+                                            <option value="hazard">Hazard</option>
+                                        </select>
+                                        <button
+                                            type="button"
+                                            onClick={() => setIsRecordingPath((value) => !value)}
+                                            disabled={viewerActionDisabled}
+                                            className={`rounded-full border px-3 py-2 text-[11px] transition-colors ${
+                                                isRecordingPath
+                                                    ? "border-amber-500/60 bg-amber-500/15 text-amber-200"
+                                                    : "border-neutral-800 bg-neutral-900 text-white hover:border-amber-500/40 hover:text-amber-200"
+                                            } disabled:hover:border-neutral-800 disabled:hover:text-white ${viewerActionClassName}`}
+                                        >
+                                            <Video className="mr-1 inline h-3.5 w-3.5" />
+                                            {isRecordingPath ? "Stop path" : "Record camera path"}
+                                        </button>
+                                    </>
+                                ) : null}
+                                {isPreviewRoute ? (
+                                    <button
+                                        type="button"
+                                        onClick={() => setIsPreviewHudMinimized(true)}
+                                        className="rounded-full border border-neutral-800 bg-neutral-900 px-3 py-2 text-[11px] text-white transition-colors hover:border-neutral-700 hover:text-neutral-100"
+                                        aria-label={previewHudToggleLabel}
+                                    >
+                                        <Minimize2 className="mr-1 inline h-3.5 w-3.5" />
+                                        {previewHudToggleLabel}
+                                    </button>
+                                ) : null}
                                 <button
-                                    key={lensMm}
                                     type="button"
-                                    onClick={() => setLens(lensMm)}
-                                    className={`shrink-0 rounded-full border px-3 py-2 text-[11px] transition-colors ${
-                                        active
-                                            ? "border-white/20 bg-white text-black"
-                                            : "border-neutral-800 bg-neutral-900 text-neutral-300 hover:border-neutral-700 hover:text-white"
-                                    }`}
+                                    onClick={toggleFullscreen}
+                                    className="rounded-full border border-neutral-800 bg-neutral-900 px-3 py-2 text-[11px] text-white transition-colors hover:border-neutral-700 hover:text-neutral-100"
                                 >
-                                    {lensMm}mm
+                                    {isFullscreen ? <Minimize2 className="mr-1 inline h-3.5 w-3.5" /> : <Maximize2 className="mr-1 inline h-3.5 w-3.5" />}
+                                    {isFullscreen ? "Exit" : "Expand"}
                                 </button>
-                            );
-                        })}
-                    </div>
-
-                    {(normalizedSceneGraph.camera_views.length > 0 || normalizedSceneGraph.pins.length > 0) && (
-                        <div className="mt-4 grid gap-3 lg:grid-cols-2">
-                            <div className="rounded-2xl border border-neutral-800 bg-black/25 p-3">
-                                <div className="mb-2 flex items-center gap-2 text-[10px] uppercase tracking-[0.18em] text-neutral-500">
-                                    <ScanLine className="h-3.5 w-3.5" />
-                                    Saved Camera Views
-                                </div>
-                                {normalizedSceneGraph.camera_views.length > 0 ? (
-                                    <div className="flex flex-wrap gap-2">
-                                        {normalizedSceneGraph.camera_views.map((view) => (
-                                            <button
-                                                key={view.id}
-                                                type="button"
-                                                onClick={() => focusView(view)}
-                                                className={`rounded-full border px-3 py-1.5 text-xs transition-colors ${
-                                                    view.id === selectedViewId
-                                                        ? "border-white/20 bg-white text-black"
-                                                        : "border-neutral-800 bg-neutral-900 text-neutral-300 hover:border-blue-500/40 hover:text-blue-200"
-                                                }`}
-                                            >
-                                                {view.label}
-                                            </button>
-                                        ))}
-                                    </div>
-                                ) : (
-                                    <p className="text-xs text-neutral-500">Save a camera view for scout angles, director setups, and review handoff.</p>
-                                )}
-                            </div>
-                            <div className="rounded-2xl border border-neutral-800 bg-black/25 p-3">
-                                <div className="mb-2 flex items-center gap-2 text-[10px] uppercase tracking-[0.18em] text-neutral-500">
-                                    <MapPin className="h-3.5 w-3.5" />
-                                    Scene Notes
-                                </div>
-                                {normalizedSceneGraph.pins.length > 0 ? (
-                                    <div className="flex flex-wrap gap-2">
-                                        {normalizedSceneGraph.pins.map((pin) => (
-                                            <button
-                                                key={pin.id}
-                                                type="button"
-                                                onClick={() => {
-                                                    onSelectPin?.(pin.id);
-                                                    onSelectView?.(null);
-                                                }}
-                                                className={`rounded-full border px-3 py-1.5 text-xs transition-colors ${
-                                                    pin.id === selectedPinId
-                                                        ? "border-white/20 bg-white text-black"
-                                                        : "border-neutral-800 bg-neutral-900 text-neutral-300 hover:border-sky-500/40 hover:text-sky-200"
-                                                }`}
-                                            >
-                                                {pin.label}
-                                            </button>
-                                        ))}
-                                    </div>
-                                ) : (
-                                    <p className="text-xs text-neutral-500">Add typed pins for access, lighting, hazards, and handoff notes.</p>
-                                )}
                             </div>
                         </div>
-                    )}
-                </div>
+
+                        {processingStatus ? (
+                            <div className="mt-4 rounded-2xl border border-cyan-300/15 bg-cyan-400/10 px-3 py-3">
+                                <p className="text-xs font-medium text-white">{processingStatus.label}</p>
+                                {processingStatus.detail ? <p className="mt-1 text-[11px] leading-5 text-neutral-300">{processingStatus.detail}</p> : null}
+                                {processingStatus.busy ? (
+                                    <p className="mt-2 text-[10px] uppercase tracking-[0.16em] text-cyan-100/80">
+                                        Current output stays visible until the new result finishes.
+                                    </p>
+                                ) : null}
+                            </div>
+                        ) : null}
+
+                        <div className="mt-4">{lensPresetControls}</div>
+
+                        {(normalizedSceneGraph.camera_views.length > 0 || normalizedSceneGraph.pins.length > 0) && (
+                            <div className="mt-4 grid gap-3 lg:grid-cols-2">
+                                <div className="rounded-2xl border border-neutral-800 bg-black/25 p-3">
+                                    <div className="mb-2 flex items-center gap-2 text-[10px] uppercase tracking-[0.18em] text-neutral-500">
+                                        <ScanLine className="h-3.5 w-3.5" />
+                                        Saved Camera Views
+                                    </div>
+                                    {normalizedSceneGraph.camera_views.length > 0 ? (
+                                        <div className="flex flex-wrap gap-2">
+                                            {normalizedSceneGraph.camera_views.map((view) => (
+                                                <button
+                                                    key={view.id}
+                                                    type="button"
+                                                    onClick={() => focusView(view)}
+                                                    className={`rounded-full border px-3 py-1.5 text-xs transition-colors ${
+                                                        view.id === selectedViewId
+                                                            ? "border-white/20 bg-white text-black"
+                                                            : "border-neutral-800 bg-neutral-900 text-neutral-300 hover:border-blue-500/40 hover:text-blue-200"
+                                                    }`}
+                                                >
+                                                    {view.label}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <p className="text-xs text-neutral-500">Save a camera view for scout angles, director setups, and review handoff.</p>
+                                    )}
+                                </div>
+                                <div className="rounded-2xl border border-neutral-800 bg-black/25 p-3">
+                                    <div className="mb-2 flex items-center gap-2 text-[10px] uppercase tracking-[0.18em] text-neutral-500">
+                                        <MapPin className="h-3.5 w-3.5" />
+                                        Scene Notes
+                                    </div>
+                                    {normalizedSceneGraph.pins.length > 0 ? (
+                                        <div className="flex flex-wrap gap-2">
+                                            {normalizedSceneGraph.pins.map((pin) => (
+                                                <button
+                                                    key={pin.id}
+                                                    type="button"
+                                                    onClick={() => {
+                                                        onSelectPin?.(pin.id);
+                                                        onSelectView?.(null);
+                                                    }}
+                                                    className={`rounded-full border px-3 py-1.5 text-xs transition-colors ${
+                                                        pin.id === selectedPinId
+                                                            ? "border-white/20 bg-white text-black"
+                                                            : "border-neutral-800 bg-neutral-900 text-neutral-300 hover:border-sky-500/40 hover:text-sky-200"
+                                                    }`}
+                                                >
+                                                    {pin.label}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <p className="text-xs text-neutral-500">Add typed pins for access, lighting, hazards, and handoff notes.</p>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                )}
             </div>
 
             <div
