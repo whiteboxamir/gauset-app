@@ -360,6 +360,7 @@ export interface EnvironmentReleaseGates {
 export interface GeneratedEnvironmentMetadata {
     lane?: "preview" | "reconstruction";
     truth_label?: string;
+    reference_image?: string;
     quality_tier?: string;
     faithfulness?: string;
     lane_truth?: string;
@@ -383,6 +384,55 @@ export interface GeneratedEnvironmentMetadata {
     release_gates?: EnvironmentReleaseGates;
     quality?: EnvironmentQualityMetrics;
     delivery?: EnvironmentDeliveryProfile;
+}
+
+function normalizeEnvironmentString(value: unknown) {
+    return typeof value === "string" ? value.trim() : "";
+}
+
+function containsReferenceOnlyFlag(value: unknown) {
+    return normalizeEnvironmentString(value).toLowerCase().includes("reference-only");
+}
+
+export function resolveEnvironmentRenderState(environment: any) {
+    const urls = environment?.urls && typeof environment.urls === "object" ? environment.urls : {};
+    const metadata = environment?.metadata && typeof environment.metadata === "object" ? environment.metadata : null;
+    const rendering = metadata?.rendering && typeof metadata.rendering === "object" ? metadata.rendering : null;
+    const quality = metadata?.quality && typeof metadata.quality === "object" ? metadata.quality : null;
+    const delivery = metadata?.delivery && typeof metadata.delivery === "object" ? metadata.delivery : null;
+    const warnings = Array.isArray(quality?.warnings) ? quality.warnings : [];
+
+    const viewerUrl = normalizeEnvironmentString(urls?.viewer) || normalizeEnvironmentString(rendering?.viewer_source);
+    const splatUrl = normalizeEnvironmentString(urls?.splats);
+    const referenceImage =
+        normalizeEnvironmentString(environment?.demo_reference_image) ||
+        normalizeEnvironmentString(metadata?.reference_image) ||
+        normalizeEnvironmentString(environment?.previewImage) ||
+        "";
+    const hasRenderableOutput = Boolean(splatUrl || viewerUrl);
+    const isReferenceOnlyDemo =
+        Boolean(referenceImage) &&
+        !hasRenderableOutput &&
+        (Boolean(normalizeEnvironmentString(environment?.demo_reference_image)) ||
+            containsReferenceOnlyFlag(metadata?.truth_label) ||
+            normalizeEnvironmentString(quality?.band).toLowerCase() === "reference_only" ||
+            containsReferenceOnlyFlag(delivery?.label) ||
+            warnings.some((warning: string) => containsReferenceOnlyFlag(warning)));
+    const isLegacyDemoWorld =
+        Boolean(referenceImage) &&
+        !hasRenderableOutput &&
+        !isReferenceOnlyDemo &&
+        (/demo world/i.test(normalizeEnvironmentString(environment?.statusLabel)) ||
+            /demo world/i.test(normalizeEnvironmentString(environment?.label)));
+
+    return {
+        viewerUrl,
+        splatUrl,
+        referenceImage: referenceImage || null,
+        hasRenderableOutput,
+        isReferenceOnlyDemo,
+        isLegacyDemoWorld,
+    };
 }
 
 type LegacySetupStatusResponse = SetupStatusResponse & {
@@ -491,7 +541,7 @@ export function normalizeSetupStatus(raw: unknown): SetupStatusResponse {
 
 export function describeEnvironment(environment: any) {
     const lane = typeof environment?.lane === "string" ? environment.lane : environment?.metadata?.lane;
-    const isReferenceOnlyDemo = Boolean(environment?.demo_reference_image) && !environment?.urls?.splats && !environment?.urls?.viewer;
+    const renderState = resolveEnvironmentRenderState(environment);
     const laneTruth =
         typeof environment?.metadata?.lane_truth === "string" ? environment.metadata.lane_truth.replaceAll("_", " ") : null;
     const reconstructionStatus =
@@ -506,9 +556,13 @@ export function describeEnvironment(environment: any) {
         typeof environment?.metadata?.delivery?.label === "string" ? environment.metadata.delivery.label : null;
     const colorEncoding =
         typeof environment?.metadata?.rendering?.color_encoding === "string" ? environment.metadata.rendering.color_encoding : null;
+    const legacyStatusLabel = normalizeEnvironmentString(environment?.statusLabel);
+    const legacyLabel = normalizeEnvironmentString(environment?.label);
     const label =
-        isReferenceOnlyDemo
+        renderState.isReferenceOnlyDemo
             ? "Reference-only Demo"
+            : renderState.isLegacyDemoWorld
+              ? legacyStatusLabel || legacyLabel || "Demo World Loaded"
             : lane === "reconstruction"
             ? environment?.metadata?.release_gates?.world_class_ready
                 ? "Benchmarked Reconstruction Loaded"
@@ -519,7 +573,9 @@ export function describeEnvironment(environment: any) {
                 ? "Environment Loaded"
                 : "Awaiting Environment";
     const badge =
-        lane === "reconstruction"
+        renderState.isReferenceOnlyDemo || renderState.isLegacyDemoWorld
+            ? "DEMO"
+        : lane === "reconstruction"
             ? environment?.metadata?.release_gates?.world_class_ready
                 ? "3DGS"
                 : "HYBRID"
@@ -527,7 +583,11 @@ export function describeEnvironment(environment: any) {
               ? "PREVIEW"
               : "ENV";
     const note =
-        lane === "reconstruction"
+        renderState.isReferenceOnlyDemo
+            ? "Reference-only onboarding state"
+        : renderState.isLegacyDemoWorld
+          ? "Legacy demo world state"
+        : lane === "reconstruction"
             ? environment?.metadata?.release_gates?.world_class_ready
                 ? "Benchmarked multi-view reconstruction"
                 : "Hybrid local reconstruction"

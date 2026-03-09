@@ -5,9 +5,13 @@ import { Canvas, useFrame, useLoader, useThree } from "@react-three/fiber";
 import { ContactShadows, Environment, Grid, Html, OrbitControls, PivotControls } from "@react-three/drei";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
+import { TAARenderPass } from "three/examples/jsm/postprocessing/TAARenderPass.js";
 import { clone } from "three/examples/jsm/utils/SkeletonUtils.js";
 import { MapPin } from "lucide-react";
 import EnvironmentSplat from "./EnvironmentSplat";
+import { toProxyUrl } from "@/lib/mvp-api";
+import { resolveEnvironmentRenderState } from "@/lib/mvp-product";
 import {
     CameraPathFrame,
     CameraPose,
@@ -34,6 +38,7 @@ type SceneAsset = {
 };
 
 type FocusRequest = (CameraPose & { token: number }) | null;
+type TAARenderPassInternal = TAARenderPass & { accumulateIndex: number };
 
 type ThreeOverlayFallbackProps = {
     message?: string;
@@ -442,6 +447,76 @@ function CameraRig({
     return null;
 }
 
+function TemporalAntialiasingComposer() {
+    const { camera, gl, scene, size } = useThree();
+    const composerRef = useRef<EffectComposer | null>(null);
+    const taaPassRef = useRef<TAARenderPassInternal | null>(null);
+    const lastCameraPositionRef = useRef(new THREE.Vector3(Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY));
+    const lastCameraQuaternionRef = useRef(new THREE.Quaternion());
+    const lastProjectionMatrixRef = useRef(new THREE.Matrix4());
+
+    useEffect(() => {
+        const composer = new EffectComposer(gl);
+        composer.setPixelRatio(gl.getPixelRatio());
+        composer.setSize(size.width, size.height);
+
+        const taaPass = new TAARenderPass(scene, camera, 0x000000, 0) as TAARenderPassInternal;
+        taaPass.unbiased = true;
+        taaPass.sampleLevel = 2;
+        taaPass.accumulate = true;
+        taaPass.accumulateIndex = -1;
+        composer.addPass(taaPass);
+
+        composerRef.current = composer;
+        taaPassRef.current = taaPass;
+        lastCameraPositionRef.current.copy(camera.position);
+        lastCameraQuaternionRef.current.copy(camera.quaternion);
+        lastProjectionMatrixRef.current.copy(camera.projectionMatrix);
+
+        return () => {
+            taaPass.dispose();
+            composer.dispose();
+            composerRef.current = null;
+            taaPassRef.current = null;
+        };
+    }, [camera, gl, scene, size.height, size.width]);
+
+    useEffect(() => {
+        const composer = composerRef.current;
+        const taaPass = taaPassRef.current;
+        if (!composer || !taaPass) {
+            return;
+        }
+
+        composer.setPixelRatio(gl.getPixelRatio());
+        composer.setSize(size.width, size.height);
+        taaPass.accumulateIndex = -1;
+    }, [gl, size.height, size.width]);
+
+    useFrame((_, delta) => {
+        const composer = composerRef.current;
+        const taaPass = taaPassRef.current;
+        if (!composer || !taaPass) {
+            return;
+        }
+
+        const positionDeltaSq = lastCameraPositionRef.current.distanceToSquared(camera.position);
+        const rotationDelta = 1 - Math.abs(lastCameraQuaternionRef.current.dot(camera.quaternion));
+        const projectionChanged = !lastProjectionMatrixRef.current.equals(camera.projectionMatrix);
+
+        if (positionDeltaSq > 1e-8 || rotationDelta > 1e-8 || projectionChanged) {
+            taaPass.accumulateIndex = -1;
+            lastCameraPositionRef.current.copy(camera.position);
+            lastCameraQuaternionRef.current.copy(camera.quaternion);
+            lastProjectionMatrixRef.current.copy(camera.projectionMatrix);
+        }
+
+        composer.render(delta);
+    }, 1);
+
+    return null;
+}
+
 export default function ThreeOverlay({
     sceneGraph,
     setSceneGraph,
@@ -476,16 +551,15 @@ export default function ThreeOverlay({
     const [renderMode, setRenderMode] = useState<"webgl" | "fallback">("webgl");
     const [renderError, setRenderError] = useState("");
     const [isViewerReady, setIsViewerReady] = useState(false);
-    const environmentViewerUrl =
-        typeof normalizedSceneGraph.environment === "object" ? normalizedSceneGraph.environment?.urls?.viewer ?? "" : "";
-    const environmentSplatUrl =
-        typeof normalizedSceneGraph.environment === "object" ? normalizedSceneGraph.environment?.urls?.splats ?? "" : "";
+    const environmentRenderState = useMemo(
+        () => resolveEnvironmentRenderState(normalizedSceneGraph.environment),
+        [normalizedSceneGraph.environment],
+    );
+    const environmentViewerUrl = toProxyUrl(environmentRenderState.viewerUrl);
+    const environmentSplatUrl = toProxyUrl(environmentRenderState.splatUrl);
     const environmentMetadata =
         typeof normalizedSceneGraph.environment === "object" ? normalizedSceneGraph.environment?.metadata ?? null : null;
-    const referenceImage =
-        typeof normalizedSceneGraph.environment === "object"
-            ? normalizedSceneGraph.environment?.demo_reference_image ?? normalizedSceneGraph.environment?.metadata?.reference_image ?? null
-            : null;
+    const referenceImage = environmentRenderState.referenceImage;
 
     useEffect(() => {
         if (canCreateWebGLContext()) return;
@@ -534,14 +608,26 @@ export default function ThreeOverlay({
             <CanvasErrorBoundary onError={handleCanvasError}>
                 <Canvas
                     camera={{ position: [5, 4, 6], fov: normalizedSceneGraph.viewer.fov }}
+                    dpr={[1, 3]}
+                    gl={{
+                        powerPreference: "high-performance",
+                        antialias: true,
+                        alpha: true,
+                        depth: true,
+                        stencil: false,
+                    }}
                     shadows
-                    onCreated={() => {
+                    onCreated={({ gl }) => {
+                        gl.outputColorSpace = THREE.SRGBColorSpace;
+                        gl.toneMapping = THREE.ACESFilmicToneMapping;
+                        gl.toneMappingExposure = 1;
                         setRenderError("");
                         setIsViewerReady(true);
                     }}
                     onPointerMissed={() => onSelectPin?.(null)}
                 >
                     <color attach="background" args={["#0a0a0a"]} />
+                    <TemporalAntialiasingComposer />
                     <ambientLight intensity={0.65} />
                     <directionalLight position={[8, 12, 6]} intensity={1.2} castShadow />
 

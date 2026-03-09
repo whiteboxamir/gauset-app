@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Camera, Focus, MapPin, Maximize2, Minimize2, ScanLine, Video } from "lucide-react";
 import ThreeOverlay from "./ThreeOverlay";
-import { describeEnvironment } from "@/lib/mvp-product";
+import { describeEnvironment, resolveEnvironmentRenderState } from "@/lib/mvp-product";
 import {
     CameraPathFrame,
     CameraPose,
@@ -173,12 +173,11 @@ export default function ViewerPanel({
     const hasEnvironment = Boolean(normalizedSceneGraph.environment);
     const environmentState = describeEnvironment(normalizedSceneGraph.environment);
     const qualityScore = normalizedSceneGraph.environment?.metadata?.quality?.score;
-    const hasEnvironmentSplat = Boolean(normalizedSceneGraph.environment?.urls?.splats || normalizedSceneGraph.environment?.urls?.viewer);
-    const isReferenceOnlyDemo = Boolean(normalizedSceneGraph.environment?.demo_reference_image) && !hasEnvironmentSplat;
-    const referenceImage =
-        normalizedSceneGraph.environment?.demo_reference_image ??
-        normalizedSceneGraph.environment?.metadata?.reference_image ??
-        null;
+    const environmentRenderState = resolveEnvironmentRenderState(normalizedSceneGraph.environment);
+    const hasEnvironmentSplat = environmentRenderState.hasRenderableOutput;
+    const isReferenceOnlyDemo = environmentRenderState.isReferenceOnlyDemo;
+    const isLegacyDemoWorld = environmentRenderState.isLegacyDemoWorld;
+    const referenceImage = environmentRenderState.referenceImage;
     const selectedView = normalizedSceneGraph.camera_views.find((view) => view.id === selectedViewId) ?? null;
     const selectedPin = normalizedSceneGraph.pins.find((pin) => pin.id === selectedPinId) ?? null;
     const combinedFocusRequest =
@@ -360,7 +359,7 @@ export default function ViewerPanel({
                             <div className="flex items-center gap-3">
                                 <div
                                     className={`h-2.5 w-2.5 rounded-full ${
-                                        hasEnvironment && !isReferenceOnlyDemo
+                                        hasEnvironment && !isReferenceOnlyDemo && !isLegacyDemoWorld
                                             ? "bg-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.8)]"
                                             : "bg-neutral-600"
                                     }`}
@@ -579,23 +578,26 @@ export default function ViewerPanel({
                 />
 
                 {viewerReady && !hasEnvironmentSplat && referenceImage ? (
-                    <div className="pointer-events-none absolute inset-0 z-20 p-6">
-                        <div className="flex h-full items-end">
-                            <div className="w-full max-w-xl overflow-hidden rounded-[28px] border border-white/12 bg-[linear-gradient(180deg,rgba(8,11,16,0.9),rgba(7,10,14,0.95))] shadow-[0_24px_70px_rgba(0,0,0,0.4)] backdrop-blur-xl">
-                                <div className="relative aspect-[16/10] w-full overflow-hidden">
-                                    <div className="absolute inset-0 bg-cover bg-center" style={{ backgroundImage: `url(${referenceImage})` }} />
-                                    <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(0,0,0,0.1),rgba(0,0,0,0.55))]" />
-                                    <div className="absolute bottom-0 left-0 right-0 p-5">
-                                        <p className="text-[10px] uppercase tracking-[0.18em] text-cyan-100/70">Reference view</p>
-                                        <p className="mt-2 text-lg font-medium text-white">
-                                            {isReferenceOnlyDemo ? "Reference-only demo" : "Reference image"}
-                                        </p>
-                                        <p className="mt-2 max-w-md text-sm leading-6 text-neutral-200">
-                                            {isReferenceOnlyDemo
-                                                ? "This is a mocked reference state only. Import or generate your own world before treating the viewer as a real environment."
-                                                : "Use this visual to understand the world before a splat or reconstruction is loaded. The viewer will keep the current result visible while new generations run."}
-                                        </p>
-                                    </div>
+                    <div className="pointer-events-none absolute bottom-6 left-6 right-6 z-20 md:right-auto">
+                        <div
+                            className="w-full max-w-sm overflow-hidden rounded-[24px] border border-white/12 bg-[linear-gradient(180deg,rgba(8,11,16,0.92),rgba(7,10,14,0.96))] shadow-[0_24px_70px_rgba(0,0,0,0.38)] backdrop-blur-xl"
+                            data-testid="mvp-reference-card"
+                        >
+                            <div className="relative aspect-[16/10] w-full overflow-hidden">
+                                <div className="absolute inset-0 bg-cover bg-center" style={{ backgroundImage: `url(${referenceImage})` }} />
+                                <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(0,0,0,0.08),rgba(0,0,0,0.68))]" />
+                                <div className="absolute bottom-0 left-0 right-0 p-4">
+                                    <p className="text-[10px] uppercase tracking-[0.18em] text-cyan-100/70">Reference view</p>
+                                    <p className="mt-2 text-base font-medium text-white">
+                                        {isReferenceOnlyDemo ? "Reference-only demo" : isLegacyDemoWorld ? "Demo world" : "Reference image"}
+                                    </p>
+                                    <p className="mt-2 max-w-xs text-xs leading-5 text-neutral-200">
+                                        {isReferenceOnlyDemo
+                                            ? "This draft is reference-only. Build or import a real world before treating the viewer as a persistent environment."
+                                            : isLegacyDemoWorld
+                                              ? "Recovered an older demo world state. Open the preview intro or replace it with your own world when you are ready."
+                                              : "Using the source still as a fallback while the viewer waits for a renderable environment."}
+                                    </p>
                                 </div>
                             </div>
                         </div>

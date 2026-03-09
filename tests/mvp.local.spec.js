@@ -320,3 +320,55 @@ test("wave16 preview route keeps back control visible on laptop viewports", asyn
         await context.close();
     }
 });
+
+test("wave17 legacy reference-only drafts do not claim preview is loaded", async ({ page }) => {
+    const legacyReferenceOnlyDraft = {
+        activeScene: null,
+        sceneGraph: {
+            environment: {
+                id: "scene_legacy_reference",
+                lane: "preview",
+                metadata: {
+                    lane: "preview",
+                    truth_label: "Reference-only demo",
+                    reference_image: "/images/hero/interior_daylight.png",
+                    quality: {
+                        score: 6.2,
+                        band: "reference_only",
+                        warnings: [
+                            "Reference-only demo. Generate or import your own still before treating this as a real world.",
+                        ],
+                    },
+                    delivery: {
+                        label: "Reference-only preview",
+                        summary: "This is a mocked reference state for onboarding, not a generated splat or validated reconstruction.",
+                    },
+                },
+            },
+            assets: [],
+            camera_views: [],
+            pins: [],
+            director_path: [],
+            director_brief: "",
+            viewer: {
+                fov: 45,
+                lens_mm: 35,
+            },
+        },
+        assetsList: [],
+        updatedAt: "2026-03-09T18:00:00.000Z",
+    };
+
+    await page.addInitScript(
+        ({ key, draft }) => {
+            window.localStorage.setItem(key, JSON.stringify(draft));
+        },
+        { key: "gauset:mvp:draft:v1", draft: legacyReferenceOnlyDraft },
+    );
+
+    await page.goto(`${BASE}/mvp`, { waitUntil: "networkidle" });
+    await waitForBackendReady(page);
+
+    await expect(page.getByText(/^Reference-only Demo$/i).first()).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText(/Preview Loaded/i)).toHaveCount(0);
+});
