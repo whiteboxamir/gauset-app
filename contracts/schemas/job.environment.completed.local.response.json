@@ -1,0 +1,23 @@
+{
+  "id": "scene_093091ff",
+  "type": "environment",
+  "status": "completed",
+  "image_id": "f4b084ff24d74594afce790592f2abfb",
+  "created_at": "2026-03-08T09:33:53.301000+00:00",
+  "updated_at": "2026-03-08T09:33:54.020000+00:00",
+  "error": null,
+  "result": {
+    "scene_id": "scene_093091ff",
+    "environment_dir": "/Users/amirboz/gauset-app/scenes/scene_093091ff/environment",
+    "files": {
+      "splats": "/Users/amirboz/gauset-app/scenes/scene_093091ff/environment/splats.ply",
+      "cameras": "/Users/amirboz/gauset-app/scenes/scene_093091ff/environment/cameras.json",
+      "metadata": "/Users/amirboz/gauset-app/scenes/scene_093091ff/environment/metadata.json"
+    },
+    "urls": {
+      "splats": "/storage/scenes/scene_093091ff/environment/splats.ply",
+      "cameras": "/storage/scenes/scene_093091ff/environment/cameras.json",
+      "metadata": "/storage/scenes/scene_093091ff/environment/metadata.json"
+    }
+  }
+}

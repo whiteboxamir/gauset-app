@@ -1,0 +1,23 @@
+{
+  "id": "asset_5b5eace3",
+  "type": "asset",
+  "status": "completed",
+  "image_id": "1c3835684eac44859e8347e321ca69b0",
+  "created_at": "2026-03-08T15:25:26.910000+00:00",
+  "updated_at": "2026-03-08T15:25:28.110000+00:00",
+  "error": null,
+  "result": {
+    "asset_id": "asset_5b5eace3",
+    "asset_dir": "assets/asset_5b5eace3",
+    "files": {
+      "mesh": "assets/asset_5b5eace3/mesh.glb",
+      "texture": "assets/asset_5b5eace3/texture.png",
+      "preview": "assets/asset_5b5eace3/preview.png"
+    },
+    "urls": {
+      "mesh": "/storage/assets/asset_5b5eace3/mesh.glb",
+      "texture": "/storage/assets/asset_5b5eace3/texture.png",
+      "preview": "/storage/assets/asset_5b5eace3/preview.png"
+    }
+  }
+}

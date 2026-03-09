@@ -1,0 +1,5 @@
+{
+  "code": "BACKEND_PROXY_ERROR",
+  "message": "The Gauset frontend reached its proxy route, but the backend could not be contacted from the server.",
+  "detail": "connect ECONNREFUSED 127.0.0.1:8000"
+}

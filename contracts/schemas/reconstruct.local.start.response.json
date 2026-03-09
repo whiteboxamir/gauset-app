@@ -1,0 +1,84 @@
+{
+  "session_id": "capture_7e379c2e",
+  "lane": "reconstruction",
+  "status": "queued",
+  "created_at": "2026-03-08T15:18:29.803766+00:00",
+  "updated_at": "2026-03-08T15:18:31.100000+00:00",
+  "minimum_images": 8,
+  "recommended_images": 8,
+  "max_images": 32,
+  "frame_count": 8,
+  "coverage_percent": 100,
+  "ready_for_reconstruction": true,
+  "frames": [
+    {
+      "image_id": "f3f09b9e6bfd4349b09090d8549f6645",
+      "filename": "f3f09b9e6bfd4349b09090d8549f6645.png",
+      "url": "/storage/uploads/images/f3f09b9e6bfd4349b09090d8549f6645.png",
+      "added_at": "2026-03-08T15:18:29.811626+00:00"
+    },
+    {
+      "image_id": "2a2ef8e30dd142caa3b86c5de27c594a",
+      "filename": "2a2ef8e30dd142caa3b86c5de27c594a.png",
+      "url": "/storage/uploads/images/2a2ef8e30dd142caa3b86c5de27c594a.png",
+      "added_at": "2026-03-08T15:18:29.811780+00:00"
+    },
+    {
+      "image_id": "86d28ec96f5e41ebbe7f73f9c719c91d",
+      "filename": "86d28ec96f5e41ebbe7f73f9c719c91d.png",
+      "url": "/storage/uploads/images/86d28ec96f5e41ebbe7f73f9c719c91d.png",
+      "added_at": "2026-03-08T15:18:29.811904+00:00"
+    },
+    {
+      "image_id": "6d6a36eb0a81418d9436098502d54b4f",
+      "filename": "6d6a36eb0a81418d9436098502d54b4f.png",
+      "url": "/storage/uploads/images/6d6a36eb0a81418d9436098502d54b4f.png",
+      "added_at": "2026-03-08T15:18:29.812036+00:00"
+    },
+    {
+      "image_id": "67838d17720147fe94effd4617edfeea",
+      "filename": "67838d17720147fe94effd4617edfeea.png",
+      "url": "/storage/uploads/images/67838d17720147fe94effd4617edfeea.png",
+      "added_at": "2026-03-08T15:18:29.812160+00:00"
+    },
+    {
+      "image_id": "403129fd3d0748c2adb36c23efe58f4c",
+      "filename": "403129fd3d0748c2adb36c23efe58f4c.png",
+      "url": "/storage/uploads/images/403129fd3d0748c2adb36c23efe58f4c.png",
+      "added_at": "2026-03-08T15:18:29.812280+00:00"
+    },
+    {
+      "image_id": "293896044fb048299550386052e44be5",
+      "filename": "293896044fb048299550386052e44be5.png",
+      "url": "/storage/uploads/images/293896044fb048299550386052e44be5.png",
+      "added_at": "2026-03-08T15:18:29.812418+00:00"
+    },
+    {
+      "image_id": "c1fb5193cf8b4108b0ce8814e051abb4",
+      "filename": "c1fb5193cf8b4108b0ce8814e051abb4.png",
+      "url": "/storage/uploads/images/c1fb5193cf8b4108b0ce8814e051abb4.png",
+      "added_at": "2026-03-08T15:18:29.812541+00:00"
+    }
+  ],
+  "quality_summary": {
+    "score": 88.4,
+    "band": "excellent",
+    "frame_count": 8,
+    "sharp_frame_count": 8,
+    "duplicate_frames": 0,
+    "warnings": []
+  },
+  "guidance": [
+    "Walk an arc around the subject or environment instead of standing in one spot.",
+    "Keep 60-80% overlap between neighboring views.",
+    "Avoid motion blur, mirrors, and moving people crossing the frame.",
+    "Capture a full orbit or forward path with height variation before starting reconstruction."
+  ],
+  "job_id": "scene_b31b63b0",
+  "scene_id": "scene_b31b63b0",
+  "urls": {
+    "splats": "/storage/scenes/scene_b31b63b0/environment/splats.ply",
+    "cameras": "/storage/scenes/scene_b31b63b0/environment/cameras.json",
+    "metadata": "/storage/scenes/scene_b31b63b0/environment/metadata.json"
+  }
+}

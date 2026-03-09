@@ -1,0 +1,10 @@
+{
+  "asset_id": "asset_e34a4a3a",
+  "job_id": "asset_e34a4a3a",
+  "status": "processing",
+  "urls": {
+    "mesh": "/storage/assets/asset_e34a4a3a/mesh.glb",
+    "texture": "/storage/assets/asset_e34a4a3a/texture.png",
+    "preview": "/storage/assets/asset_e34a4a3a/preview.png"
+  }
+}

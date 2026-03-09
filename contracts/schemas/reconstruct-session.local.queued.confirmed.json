@@ -1,0 +1,57 @@
+{
+  "session_id": "capture_ab12cd34",
+  "lane": "reconstruction",
+  "status": "queued",
+  "created_at": "2026-03-08T15:10:00.000000+00:00",
+  "updated_at": "2026-03-08T15:12:03.000000+00:00",
+  "minimum_images": 8,
+  "recommended_images": 12,
+  "max_images": 32,
+  "frame_count": 8,
+  "coverage_percent": 67,
+  "ready_for_reconstruction": true,
+  "frames": [
+    {
+      "image_id": "49dcbaff76a843bc9f2c4d43320fab91",
+      "filename": "49dcbaff76a843bc9f2c4d43320fab91.png",
+      "url": "/storage/uploads/images/49dcbaff76a843bc9f2c4d43320fab91.png",
+      "added_at": "2026-03-08T15:10:14.000000+00:00",
+      "analysis": {
+        "technical_score": 84.6,
+        "band": "strong",
+        "cinematic_use": "Strong coverage frame",
+        "aspect_ratio": 1.0,
+        "sharpness_score": 87.4,
+        "exposure_score": 79.2,
+        "contrast_score": 81.8,
+        "saturation_score": 73.1,
+        "brightness_mean": 0.447,
+        "contrast_std": 0.18,
+        "saturation_mean": 0.175,
+        "file_hash": "0d2d4a93b31f",
+        "warnings": []
+      }
+    }
+  ],
+  "quality_summary": {
+    "score": 79.4,
+    "band": "strong",
+    "frame_count": 8,
+    "sharp_frame_count": 7,
+    "duplicate_frames": 0,
+    "warnings": []
+  },
+  "guidance": [
+    "Walk an arc around the subject or environment instead of standing in one spot.",
+    "Keep 60-80% overlap between neighboring views.",
+    "Avoid motion blur, mirrors, and moving people crossing the frame.",
+    "Capture a full orbit or forward path with height variation before starting reconstruction."
+  ],
+  "job_id": "scene_a783245e",
+  "scene_id": "scene_a783245e",
+  "urls": {
+    "splats": "/storage/scenes/scene_a783245e/environment/splats.ply",
+    "cameras": "/storage/scenes/scene_a783245e/environment/cameras.json",
+    "metadata": "/storage/scenes/scene_a783245e/environment/metadata.json"
+  }
+}

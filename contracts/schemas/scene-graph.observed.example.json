@@ -1,0 +1,46 @@
+{
+  "environment": {
+    "id": "scene_093091ff",
+    "lane": "preview",
+    "urls": {
+      "splats": "/api/mvp/storage/scenes/scene_093091ff/environment/splats.ply",
+      "cameras": "/api/mvp/storage/scenes/scene_093091ff/environment/cameras.json",
+      "metadata": "/api/mvp/storage/scenes/scene_093091ff/environment/metadata.json"
+    },
+    "files": {
+      "splats": "/Users/amirboz/gauset-app/scenes/scene_093091ff/environment/splats.ply",
+      "cameras": "/Users/amirboz/gauset-app/scenes/scene_093091ff/environment/cameras.json",
+      "metadata": "/Users/amirboz/gauset-app/scenes/scene_093091ff/environment/metadata.json"
+    },
+    "metadata": {
+      "lane": "preview",
+      "truth_label": "Instant Preview",
+      "quality_tier": "single_image_preview"
+    }
+  },
+  "assets": [
+    {
+      "id": "asset_e34a4a3a",
+      "name": "asset_e34a4a3a",
+      "mesh": "/api/mvp/storage/assets/asset_e34a4a3a/mesh.glb",
+      "texture": "/api/mvp/storage/assets/asset_e34a4a3a/texture.png",
+      "preview": "/api/mvp/storage/assets/asset_e34a4a3a/preview.png",
+      "instanceId": "inst_1772962390273_hw80n",
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ]
+    }
+  ]
+}

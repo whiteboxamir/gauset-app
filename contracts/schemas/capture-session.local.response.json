@@ -1,0 +1,71 @@
+{
+  "session_id": "capture_24744093",
+  "lane": "reconstruction",
+  "status": "collecting",
+  "created_at": "2026-03-08T15:18:01.100000+00:00",
+  "updated_at": "2026-03-08T15:18:07.400000+00:00",
+  "minimum_images": 8,
+  "recommended_images": 12,
+  "max_images": 32,
+  "frame_count": 2,
+  "coverage_percent": 17,
+  "ready_for_reconstruction": false,
+  "frames": [
+    {
+      "image_id": "f3f09b9e6bfd4349b09090d8549f6645",
+      "filename": "f3f09b9e6bfd4349b09090d8549f6645.png",
+      "url": "/storage/uploads/images/f3f09b9e6bfd4349b09090d8549f6645.png",
+      "added_at": "2026-03-08T15:18:03.100000+00:00",
+      "analysis": {
+        "technical_score": 88.2,
+        "band": "excellent",
+        "cinematic_use": "Hero-grade frame",
+        "aspect_ratio": 1.0,
+        "sharpness_score": 91.4,
+        "exposure_score": 86.3,
+        "contrast_score": 82.0,
+        "saturation_score": 90.1,
+        "brightness_mean": 0.472,
+        "contrast_std": 0.179,
+        "saturation_mean": 0.214,
+        "file_hash": "4d3a9c8102ab",
+        "warnings": []
+      }
+    },
+    {
+      "image_id": "2a2ef8e30dd142caa3b86c5de27c594a",
+      "filename": "2a2ef8e30dd142caa3b86c5de27c594a.png",
+      "url": "/storage/uploads/images/2a2ef8e30dd142caa3b86c5de27c594a.png",
+      "added_at": "2026-03-08T15:18:07.400000+00:00",
+      "analysis": {
+        "technical_score": 79.1,
+        "band": "strong",
+        "cinematic_use": "Strong coverage frame",
+        "aspect_ratio": 1.0,
+        "sharpness_score": 73.8,
+        "exposure_score": 80.5,
+        "contrast_score": 77.9,
+        "saturation_score": 83.7,
+        "brightness_mean": 0.451,
+        "contrast_std": 0.164,
+        "saturation_mean": 0.201,
+        "file_hash": "7fa3811b9e04",
+        "warnings": []
+      }
+    }
+  ],
+  "quality_summary": {
+    "score": 83.7,
+    "band": "strong",
+    "frame_count": 2,
+    "sharp_frame_count": 2,
+    "duplicate_frames": 0,
+    "warnings": []
+  },
+  "guidance": [
+    "Walk an arc around the subject or environment instead of standing in one spot.",
+    "Keep 60-80% overlap between neighboring views.",
+    "Avoid motion blur, mirrors, and moving people crossing the frame.",
+    "Capture a full orbit or forward path with height variation before starting reconstruction."
+  ]
+}

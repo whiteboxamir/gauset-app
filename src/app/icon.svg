@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Bright Yellow Circle -->
+  <circle cx="50" cy="50" r="50" fill="#FFD700" />
+  
+  <!-- Inscribed Black Equilateral Triangle -->
+  <!-- Center is (50, 50), Radius is 50 -->
+  <!-- Top vertex: (50, 0) -->
+  <!-- Bottom Right: (50 + 50*cos(30), 50 + 50*sin(30)) -> (93.30127, 75) -->
+  <!-- Bottom Left:  (50 - 50*cos(30), 50 + 50*sin(30)) -> (6.69873, 75) -->
+  <polygon points="50,0 93.30127,75 6.69873,75" fill="#000000" />
+  
+  <!-- Small Yellow Circle inside the triangle -->
+  <circle cx="50" cy="50" r="10" fill="#FFD700" />
+</svg>

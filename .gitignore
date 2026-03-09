@@ -46,3 +46,11 @@ get-pip.py
 .fakehome/
 .agentrules
 .cursorrules
+.cache/
+.tmp-gauset-com-fix/
+.env.localopen
+__pycache__/
+*.pyc
+captures/
+reconstruction_cache/
+gauset.db

@@ -1,0 +1,10 @@
+{
+  "scene_id": "scene_9d53efc8",
+  "job_id": "scene_9d53efc8",
+  "status": "processing",
+  "urls": {
+    "splats": "/storage/scenes/scene_9d53efc8/environment/splats.ply",
+    "cameras": "/storage/scenes/scene_9d53efc8/environment/cameras.json",
+    "metadata": "/storage/scenes/scene_9d53efc8/environment/metadata.json"
+  }
+}

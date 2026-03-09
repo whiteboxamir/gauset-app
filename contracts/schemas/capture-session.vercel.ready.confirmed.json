@@ -1,0 +1,27 @@
+{
+  "session_id": "capture_097ea0e2",
+  "lane": "reconstruction",
+  "status": "ready",
+  "created_at": "2026-03-08T15:19:13.366581+00:00",
+  "updated_at": "2026-03-08T15:19:13.375710+00:00",
+  "minimum_images": 8,
+  "recommended_images": 8,
+  "max_images": 32,
+  "frame_count": 8,
+  "coverage_percent": 100,
+  "ready_for_reconstruction": true,
+  "frames": [
+    {
+      "image_id": "49dcbaff76a843bc9f2c4d43320fab91",
+      "filename": "49dcbaff76a843bc9f2c4d43320fab91.png",
+      "url": "/storage/uploads/images/49dcbaff76a843bc9f2c4d43320fab91.png",
+      "added_at": "2026-03-08T15:19:13.374731+00:00"
+    }
+  ],
+  "guidance": [
+    "Walk an arc around the subject or environment instead of shooting from one locked view.",
+    "Keep 60-80% overlap between neighboring frames.",
+    "Avoid motion blur, mirrors, and fast-moving people crossing the scene.",
+    "Collect a full orbit or forward path with some height variation before reconstructing."
+  ]
+}

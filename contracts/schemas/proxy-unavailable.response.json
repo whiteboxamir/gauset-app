@@ -1,0 +1,9 @@
+{
+  "code": "BACKEND_UNAVAILABLE",
+  "message": "The Gauset backend is not connected. Start the local backend or configure GAUSET_BACKEND_URL for this deployment.",
+  "checklist": [
+    "Run the Python backend locally on port 8000, or set GAUSET_BACKEND_URL in the hosting environment.",
+    "Verify /api/mvp/health returns a healthy response.",
+    "Confirm the backend exposes preview, asset, or capture capabilities and can write to uploads/assets/scenes."
+  ]
+}

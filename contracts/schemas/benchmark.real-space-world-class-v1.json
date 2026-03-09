@@ -1,0 +1,60 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "RealSpaceWorldClassBenchmarkReport",
+  "type": "object",
+  "required": ["suite_id", "executed_at", "scenes"],
+  "properties": {
+    "suite_id": {
+      "type": "string",
+      "const": "real_space_world_class_v1"
+    },
+    "executed_at": {
+      "type": "string"
+    },
+    "scenes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["scene_key", "capture_contract", "tools"],
+        "properties": {
+          "scene_key": {
+            "type": "string"
+          },
+          "capture_contract": {
+            "type": "object"
+          },
+          "tools": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["tool", "registered_views", "signage_legibility", "wall_ceiling_straightness", "floaters", "runtime"],
+              "properties": {
+                "tool": {
+                  "type": "string"
+                },
+                "registered_views": {
+                  "type": "number"
+                },
+                "signage_legibility": {
+                  "type": "number"
+                },
+                "wall_ceiling_straightness": {
+                  "type": "number"
+                },
+                "floaters": {
+                  "type": "number"
+                },
+                "runtime": {
+                  "type": "object"
+                },
+                "notes": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

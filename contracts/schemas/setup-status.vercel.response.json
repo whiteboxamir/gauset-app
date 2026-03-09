@@ -1,0 +1,71 @@
+{
+  "status": "ok",
+  "python_version": "3.12.2",
+  "backend": {
+    "label": "Production Preview Backend",
+    "kind": "single-image-preview-and-asset",
+    "deployment": "vercel",
+    "truth": "This deployment provides single-photo preview and asset generation. Production-grade multi-view Gaussian reconstruction requires a separate GPU worker."
+  },
+  "capabilities": {
+    "preview": {
+      "available": true,
+      "label": "Instant Preview",
+      "summary": "Generate a single-photo Gaussian preview for nearby camera moves.",
+      "truth": "This output is a synthesized preview, not a faithful multi-view reconstruction.",
+      "input_strategy": "1 photo",
+      "min_images": 1,
+      "recommended_images": 1
+    },
+    "reconstruction": {
+      "available": false,
+      "label": "Production Reconstruction",
+      "summary": "Collect a multi-view capture set for real 3D Gaussian reconstruction.",
+      "truth": "The public backend can collect capture frames, but it does not run pose estimation or Gaussian optimization yet.",
+      "input_strategy": "8-32 overlapping photos or short orbit video",
+      "min_images": 8,
+      "recommended_images": 12
+    },
+    "asset": {
+      "available": true,
+      "label": "Single-Image Asset",
+      "summary": "Generate a hero prop mesh from one reference image.",
+      "truth": "This lane is object-focused generation, not environment reconstruction.",
+      "input_strategy": "1 photo",
+      "min_images": 1,
+      "recommended_images": 1
+    }
+  },
+  "capture": {
+    "minimum_images": 8,
+    "recommended_images": 12,
+    "max_images": 32,
+    "guidance": [
+      "Walk an arc around the subject or environment instead of shooting from one locked view.",
+      "Keep 60-80% overlap between neighboring frames.",
+      "Avoid motion blur, mirrors, and fast-moving people crossing the scene.",
+      "Collect a full orbit or forward path with some height variation before reconstructing."
+    ]
+  },
+  "storage_mode": "blob",
+  "generator": {
+    "environment": "gauset-depth-synth-v1",
+    "asset": "gauset-relief-mesh-v1"
+  },
+  "directories": {
+    "uploads": true,
+    "assets": true,
+    "scenes": true
+  },
+  "models": {
+    "preview_generator": "gauset-depth-synth-v1",
+    "asset_generator": "gauset-relief-mesh-v1",
+    "ml_sharp": false,
+    "triposr": false
+  },
+  "torch": {
+    "installed": true,
+    "version": "service",
+    "mps_available": false
+  }
+}

@@ -1,0 +1,16 @@
+.git
+.next
+.next-local
+.cache
+node_modules
+backend
+backend_venv
+backend_venv_broken_*
+uploads
+assets
+scenes
+captures
+reconstruction_cache
+test-results
+tests
+vercel-backend

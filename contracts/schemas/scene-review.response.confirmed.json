@@ -1,0 +1,24 @@
+{
+  "scene_id": "scene_093091ff",
+  "metadata": {
+    "project_name": "Wave night Project",
+    "scene_title": "night validation",
+    "location_name": "night set",
+    "owner": "Codex QA",
+    "notes": "night live production validation"
+  },
+  "approval": {
+    "state": "in_review",
+    "updated_at": "2026-03-08T09:33:55.252875+00:00",
+    "updated_by": "Codex QA",
+    "note": "night approval note",
+    "history": [
+      {
+        "state": "in_review",
+        "updated_at": "2026-03-08T09:33:55.252875+00:00",
+        "updated_by": "Codex QA",
+        "note": "night approval note"
+      }
+    ]
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "image_id": "0b1d1458cd514126bf43951620543964",
+  "filename": "0b1d1458cd514126bf43951620543964.png",
+  "filepath": "/Users/amirboz/gauset-app/uploads/images/0b1d1458cd514126bf43951620543964.png",
+  "url": "/storage/uploads/images/0b1d1458cd514126bf43951620543964.png",
+  "analysis": {
+    "technical_score": 82.6,
+    "band": "strong",
+    "cinematic_use": "Strong coverage frame",
+    "aspect_ratio": 1.0,
+    "sharpness_score": 84.2,
+    "exposure_score": 76.5,
+    "contrast_score": 80.1,
+    "saturation_score": 74.8,
+    "brightness_mean": 0.455,
+    "contrast_std": 0.176,
+    "saturation_mean": 0.182,
+    "file_hash": "21f6bcf307ab",
+    "warnings": []
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "id": "scene_b31b63b0",
+  "type": "reconstruction",
+  "status": "completed",
+  "session_id": "capture_7e379c2e",
+  "created_at": "2026-03-08T15:18:31.100000+00:00",
+  "updated_at": "2026-03-08T15:18:46.017430+00:00",
+  "error": null,
+  "result": {
+    "scene_id": "scene_b31b63b0",
+    "environment_dir": "/Users/amirboz/gauset-app/scenes/scene_b31b63b0/environment",
+    "files": {
+      "splats": "/Users/amirboz/gauset-app/scenes/scene_b31b63b0/environment/splats.ply",
+      "cameras": "/Users/amirboz/gauset-app/scenes/scene_b31b63b0/environment/cameras.json",
+      "metadata": "/Users/amirboz/gauset-app/scenes/scene_b31b63b0/environment/metadata.json"
+    },
+    "urls": {
+      "splats": "/storage/scenes/scene_b31b63b0/environment/splats.ply",
+      "cameras": "/storage/scenes/scene_b31b63b0/environment/cameras.json",
+      "metadata": "/storage/scenes/scene_b31b63b0/environment/metadata.json"
+    },
+    "stats": {
+      "frame_count": 8,
+      "point_count": 350000
+    }
+  }
+}

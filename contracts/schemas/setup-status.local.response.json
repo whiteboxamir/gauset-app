@@ -1,0 +1,71 @@
+{
+  "status": "ok",
+  "python_version": "3.11.8",
+  "project_root": "/Users/amirboz/gauset-app",
+  "backend": {
+    "label": "Local Inference Sandbox",
+    "kind": "local-preview-reconstruction-asset",
+    "deployment": "local",
+    "truth": "Single-photo preview, hybrid multi-view reconstruction, and asset generation are available locally."
+  },
+  "capabilities": {
+    "preview": {
+      "available": true,
+      "label": "Instant Preview",
+      "summary": "Generate a single-photo Gaussian preview for nearby camera moves.",
+      "truth": "This is a synthesized preview, not a faithful multi-view reconstruction.",
+      "input_strategy": "1 photo",
+      "min_images": 1,
+      "recommended_images": 1
+    },
+    "reconstruction": {
+      "available": true,
+      "label": "Production Reconstruction",
+      "summary": "Collect a multi-view capture set and fuse SHARP gaussians into a reconstruction scene.",
+      "truth": "This backend runs a real local hybrid reconstruction: SHARP per-view gaussians fused with OpenCV pose alignment.",
+      "input_strategy": "8-32 overlapping photos or short orbit video",
+      "min_images": 8,
+      "recommended_images": 12
+    },
+    "asset": {
+      "available": true,
+      "label": "Single-Image Asset",
+      "summary": "Generate a hero prop mesh from one reference image.",
+      "truth": "This lane is object-focused generation, not environment reconstruction.",
+      "input_strategy": "1 photo",
+      "min_images": 1,
+      "recommended_images": 1
+    }
+  },
+  "capture": {
+    "minimum_images": 8,
+    "recommended_images": 12,
+    "max_images": 32,
+    "guidance": [
+      "Walk an arc around the subject or environment instead of standing in one spot.",
+      "Keep 60-80% overlap between neighboring views.",
+      "Avoid motion blur, mirrors, and moving people crossing the frame.",
+      "Capture a full orbit or forward path with height variation before starting reconstruction."
+    ]
+  },
+  "directories": {
+    "uploads": true,
+    "assets": true,
+    "scenes": true
+  },
+  "models": {
+    "preview_generator": "ml-sharp",
+    "asset_generator": "triposr",
+    "reconstruction_generator": "sharp-fusion",
+    "ml_sharp": true,
+    "triposr": true
+  },
+  "torch": {
+    "installed": true,
+    "version": "2.6.0",
+    "mps_available": true
+  },
+  "errors": {
+    "reconstruction_import": null
+  }
+}
