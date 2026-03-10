@@ -26,6 +26,38 @@ function formatPathDuration(path: CameraPathFrame[]) {
     return `${duration.toFixed(1)}s`;
 }
 
+function EmptyViewerState({ clarityMode }: { clarityMode: boolean }) {
+    return (
+        <div
+            className="absolute inset-0 z-20 overflow-hidden bg-[radial-gradient(circle_at_top,rgba(56,189,248,0.1),transparent_24%),linear-gradient(180deg,#06080c_0%,#040507_100%)]"
+            data-testid="mvp-empty-viewer-state"
+        >
+            <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(135deg,rgba(8,14,22,0.2),transparent_38%,rgba(34,197,94,0.08)_100%)]" />
+            <div className="relative flex h-full items-center justify-center p-6">
+                <div className="w-full max-w-xl rounded-[30px] border border-white/10 bg-[linear-gradient(180deg,rgba(9,12,18,0.9),rgba(7,9,13,0.86))] p-6 text-center shadow-[0_30px_80px_rgba(0,0,0,0.42)] backdrop-blur-xl">
+                    <p className="text-[10px] uppercase tracking-[0.28em] text-cyan-100/75">Viewer standby</p>
+                    <p className="mt-3 text-2xl font-medium text-white">No world loaded yet</p>
+                    <p className="mt-3 text-sm leading-6 text-neutral-300">
+                        Import a scout still, generate a preview world, or reopen a real saved draft before the live viewer boots.
+                    </p>
+                    <div className="mt-5 grid gap-3 text-left sm:grid-cols-2">
+                        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                            <p className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">World state</p>
+                            <p className="mt-2 text-sm text-white">The viewer now stays in a dark standby state until it has renderable scene content.</p>
+                        </div>
+                        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                            <p className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">Next move</p>
+                            <p className="mt-2 text-sm text-white">
+                                {clarityMode ? "Open the demo world or upload a still to build the first persistent scene." : "Upload one still or resume a saved scene with a real world output."}
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
+
 export default function ViewerPanel({
     clarityMode = false,
     processingStatus,
@@ -190,10 +222,18 @@ export default function ViewerPanel({
     const isReferenceOnlyDemo = environmentRenderState.isReferenceOnlyDemo;
     const isLegacyDemoWorld = environmentRenderState.isLegacyDemoWorld;
     const referenceImage = environmentRenderState.referenceImage;
+    const shouldRenderInteractiveViewer =
+        hasEnvironmentSplat || Boolean(referenceImage) || normalizedSceneGraph.assets.length > 0 || normalizedSceneGraph.pins.length > 0;
     const selectedView = normalizedSceneGraph.camera_views.find((view) => view.id === selectedViewId) ?? null;
     const selectedPin = normalizedSceneGraph.pins.find((pin) => pin.id === selectedPinId) ?? null;
     const combinedFocusRequest =
         localFocusRequest && (!focusRequest || localFocusRequest.token >= focusRequest.token) ? localFocusRequest : focusRequest ?? null;
+
+    useEffect(() => {
+        if (!shouldRenderInteractiveViewer) {
+            setViewerReady(false);
+        }
+    }, [shouldRenderInteractiveViewer]);
 
     const requestFocus = (pose: CameraPose) => {
         setSceneGraph((prev: any) => {
@@ -622,26 +662,32 @@ export default function ViewerPanel({
             </div>
 
             <div
-                className="flex-1 border border-neutral-800/50 m-6 rounded-[32px] overflow-hidden relative shadow-2xl bg-neutral-900"
+                className="relative m-6 flex-1 overflow-hidden rounded-[32px] border border-neutral-800/50 bg-[radial-gradient(circle_at_top,rgba(56,189,248,0.08),transparent_24%),linear-gradient(180deg,#050608_0%,#040507_100%)] shadow-2xl"
                 data-testid="mvp-viewer-surface"
                 onDrop={handleDrop}
                 onDragOver={handleDragOver}
             >
-                <ThreeOverlay
-                    sceneGraph={normalizedSceneGraph}
-                    setSceneGraph={setSceneGraph}
-                    readOnly={readOnly}
-                    selectedPinId={selectedPinId}
-                    onSelectPin={onSelectPin}
-                    focusRequest={combinedFocusRequest}
-                    captureRequestKey={captureRequestKey}
-                    onCapturePose={handleCapturePose}
-                    isPinPlacementEnabled={isPinPlacementEnabled}
-                    pinType={pinType}
-                    isRecordingPath={isRecordingPath}
-                    onPathRecorded={handlePathRecorded}
-                    onViewerReadyChange={setViewerReady}
-                />
+                {shouldRenderInteractiveViewer ? (
+                    <ThreeOverlay
+                        sceneGraph={normalizedSceneGraph}
+                        setSceneGraph={setSceneGraph}
+                        readOnly={readOnly}
+                        isPreviewRoute={isPreviewRoute}
+                        backgroundColor={isPreviewRoute ? "#040507" : undefined}
+                        selectedPinId={selectedPinId}
+                        onSelectPin={onSelectPin}
+                        focusRequest={combinedFocusRequest}
+                        captureRequestKey={captureRequestKey}
+                        onCapturePose={handleCapturePose}
+                        isPinPlacementEnabled={isPinPlacementEnabled}
+                        pinType={pinType}
+                        isRecordingPath={isRecordingPath}
+                        onPathRecorded={handlePathRecorded}
+                        onViewerReadyChange={setViewerReady}
+                    />
+                ) : (
+                    <EmptyViewerState clarityMode={clarityMode} />
+                )}
 
                 {viewerReady && !hasEnvironmentSplat && referenceImage ? (
                     <div className="pointer-events-none absolute bottom-6 left-6 right-6 z-20 md:right-auto">
@@ -670,10 +716,12 @@ export default function ViewerPanel({
                     </div>
                 ) : null}
 
-                <div className="absolute top-1/2 left-1/2 z-30 -translate-x-1/2 -translate-y-1/2 opacity-20 pointer-events-none">
-                    <div className="absolute top-1/2 left-1/2 h-[1px] w-8 -translate-x-1/2 -translate-y-1/2 bg-white" />
-                    <div className="absolute top-1/2 left-1/2 h-8 w-[1px] -translate-x-1/2 -translate-y-1/2 bg-white" />
-                </div>
+                {shouldRenderInteractiveViewer ? (
+                    <div className="absolute top-1/2 left-1/2 z-30 -translate-x-1/2 -translate-y-1/2 opacity-20 pointer-events-none">
+                        <div className="absolute top-1/2 left-1/2 h-[1px] w-8 -translate-x-1/2 -translate-y-1/2 bg-white" />
+                        <div className="absolute top-1/2 left-1/2 h-8 w-[1px] -translate-x-1/2 -translate-y-1/2 bg-white" />
+                    </div>
+                ) : null}
             </div>
 
             {(selectedPin || selectedView || normalizedSceneGraph.director_path.length > 0) && (

@@ -1,5 +1,7 @@
 "use client";
 
+import { toProxyUrl } from "@/lib/mvp-api";
+
 export type Vector3Tuple = [number, number, number];
 export type QuaternionTuple = [number, number, number, number];
 export type SpatialPinType = "general" | "egress" | "lighting" | "hazard";
@@ -243,10 +245,46 @@ export function normalizeWorkspaceSceneGraph(sceneGraph: unknown): WorkspaceScen
         Number.isFinite(viewerInput.lens_mm) && Number(viewerInput.lens_mm) > 0
             ? Number(viewerInput.lens_mm)
             : fovToLensMm(fov);
+    const environmentRecord = raw.environment && typeof raw.environment === "object" ? (raw.environment as Record<string, unknown>) : null;
+    const environmentUrls =
+        environmentRecord?.urls && typeof environmentRecord.urls === "object"
+            ? (environmentRecord.urls as Record<string, unknown>)
+            : null;
+
+    const environment =
+        environmentRecord
+            ? {
+                  ...environmentRecord,
+                  urls: environmentUrls
+                      ? {
+                            ...environmentUrls,
+                            viewer: typeof environmentUrls.viewer === "string" ? toProxyUrl(String(environmentUrls.viewer)) : environmentUrls.viewer,
+                            splats: typeof environmentUrls.splats === "string" ? toProxyUrl(String(environmentUrls.splats)) : environmentUrls.splats,
+                            cameras: typeof environmentUrls.cameras === "string" ? toProxyUrl(String(environmentUrls.cameras)) : environmentUrls.cameras,
+                            metadata:
+                                typeof environmentUrls.metadata === "string" ? toProxyUrl(String(environmentUrls.metadata)) : environmentUrls.metadata,
+                        }
+                      : environmentRecord.urls,
+              }
+            : raw.environment ?? null;
+    const assets = Array.isArray(raw.assets)
+        ? raw.assets.map((asset) => {
+              if (!asset || typeof asset !== "object") {
+                  return asset;
+              }
+              const assetRecord = asset as Record<string, unknown>;
+              return {
+                  ...assetRecord,
+                  mesh: typeof assetRecord.mesh === "string" ? toProxyUrl(assetRecord.mesh) : assetRecord.mesh,
+                  texture: typeof assetRecord.texture === "string" ? toProxyUrl(assetRecord.texture) : assetRecord.texture,
+                  preview: typeof assetRecord.preview === "string" ? toProxyUrl(assetRecord.preview) : assetRecord.preview,
+              };
+          })
+        : [];
 
     return {
-        environment: raw.environment ?? null,
-        assets: Array.isArray(raw.assets) ? raw.assets : [],
+        environment,
+        assets,
         camera_views: Array.isArray(raw.camera_views)
             ? raw.camera_views.map(normalizeCameraView).filter(Boolean) as CameraView[]
             : [],

@@ -4,7 +4,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import LeftPanel from "@/components/Editor/LeftPanel";
 import ViewerPanel from "@/components/Editor/ViewerPanel";
 import RightPanel from "@/components/Editor/RightPanel";
-import { MVP_API_BASE_URL } from "@/lib/mvp-api";
+import { MVP_API_BASE_URL, toProxyUrl } from "@/lib/mvp-api";
+import { resolveEnvironmentRenderState } from "@/lib/mvp-product";
 import MVPClarityLaunchpad from "./_components/MVPClarityLaunchpad";
 import { MvpActivityEntry, buildChangeSummary, createActivityEntry, createDemoWorldPreset } from "./_lib/clarity";
 import { trackMvpEvent } from "./_lib/analytics";
@@ -51,15 +52,79 @@ interface GenerationTelemetry {
 
 const createSceneId = () => `scene_${Date.now().toString(36)}`;
 
+const hasTextContent = (value: unknown) => typeof value === "string" && value.trim().length > 0;
+
+const shouldKeepEnvironment = (environment: any) => {
+    if (!environment || typeof environment !== "object") {
+        return false;
+    }
+
+    const renderState = resolveEnvironmentRenderState(environment);
+    return (
+        renderState.hasRenderableOutput ||
+        Boolean(renderState.referenceImage) ||
+        hasTextContent(environment?.sourceLabel) ||
+        hasTextContent(environment?.statusLabel) ||
+        hasTextContent(environment?.label) ||
+        hasTextContent(environment?.lane) ||
+        hasTextContent(environment?.metadata?.truth_label) ||
+        hasTextContent(environment?.metadata?.reconstruction_status)
+    );
+};
+
+const normalizeEnvironmentResourceUrls = (environment: any) => {
+    if (!environment || typeof environment !== "object") {
+        return environment ?? null;
+    }
+
+    const urls = environment.urls && typeof environment.urls === "object" ? environment.urls : null;
+    const normalized = {
+        ...environment,
+        ...(urls
+            ? {
+                  urls: {
+                      ...urls,
+                      viewer: typeof urls.viewer === "string" ? toProxyUrl(urls.viewer) : urls.viewer,
+                      splats: typeof urls.splats === "string" ? toProxyUrl(urls.splats) : urls.splats,
+                      cameras: typeof urls.cameras === "string" ? toProxyUrl(urls.cameras) : urls.cameras,
+                      metadata: typeof urls.metadata === "string" ? toProxyUrl(urls.metadata) : urls.metadata,
+                      holdout_report: typeof urls.holdout_report === "string" ? toProxyUrl(urls.holdout_report) : urls.holdout_report,
+                      capture_scorecard:
+                          typeof urls.capture_scorecard === "string" ? toProxyUrl(urls.capture_scorecard) : urls.capture_scorecard,
+                      benchmark_report:
+                          typeof urls.benchmark_report === "string" ? toProxyUrl(urls.benchmark_report) : urls.benchmark_report,
+                  },
+              }
+            : {}),
+    };
+
+    return shouldKeepEnvironment(normalized) ? normalized : null;
+};
+
+const normalizeAssetEntries = (assets: any[]) =>
+    assets.map((asset) =>
+        asset && typeof asset === "object"
+            ? {
+                  ...asset,
+                  mesh: typeof asset.mesh === "string" ? toProxyUrl(asset.mesh) : asset.mesh,
+                  texture: typeof asset.texture === "string" ? toProxyUrl(asset.texture) : asset.texture,
+                  preview: typeof asset.preview === "string" ? toProxyUrl(asset.preview) : asset.preview,
+              }
+            : asset,
+    );
+
 const normalizeSceneGraph = (sceneGraph: any) => ({
-    environment: sceneGraph?.environment ?? null,
-    assets: Array.isArray(sceneGraph?.assets) ? sceneGraph.assets : [],
+    environment: normalizeEnvironmentResourceUrls(sceneGraph?.environment),
+    assets: Array.isArray(sceneGraph?.assets) ? normalizeAssetEntries(sceneGraph.assets) : [],
     sceneDirectionNote: typeof sceneGraph?.sceneDirectionNote === "string" ? sceneGraph.sceneDirectionNote : "",
 });
 
 const hasSceneContent = (sceneGraph: any) => {
     const normalized = normalizeSceneGraph(sceneGraph);
-    return Boolean(normalized.environment) || normalized.assets.length > 0;
+    return (
+        normalized.assets.length > 0 ||
+        (normalized.environment ? resolveEnvironmentRenderState(normalized.environment).hasRenderableOutput || Boolean(resolveEnvironmentRenderState(normalized.environment).referenceImage) : false)
+    );
 };
 
 const formatTimestamp = (value?: string | null) => {
@@ -176,10 +241,11 @@ export default function MVPRouteClient({ clarityMode = false }: { clarityMode?: 
             },
         ) => {
             const normalizedSceneGraph = normalizeSceneGraph(snapshot.sceneGraph);
+            const normalizedAssetsList = normalizeAssetEntries(Array.isArray(snapshot.assetsList) ? snapshot.assetsList : []);
             markProgrammaticSceneChange();
             setActiveScene(snapshot.activeScene);
             setSceneGraph(normalizedSceneGraph);
-            setAssetsList(snapshot.assetsList);
+            setAssetsList(normalizedAssetsList);
             setVersions([]);
             setSaveState(snapshot.saveState);
             setSaveError("");
@@ -195,7 +261,7 @@ export default function MVPRouteClient({ clarityMode = false }: { clarityMode?: 
                 lastSavedFingerprintRef.current = JSON.stringify({
                     activeScene: snapshot.activeScene,
                     sceneGraph: normalizedSceneGraph,
-                    assetsList: snapshot.assetsList,
+                    assetsList: normalizedAssetsList,
                 });
             } else {
                 setLastOutputSceneGraph(null);
@@ -394,7 +460,7 @@ export default function MVPRouteClient({ clarityMode = false }: { clarityMode?: 
             if (!draft || !draft.sceneGraph) return;
 
             const restoredGraph = normalizeSceneGraph(draft.sceneGraph);
-            const restoredAssetsList = Array.isArray(draft.assetsList) ? draft.assetsList : [];
+            const restoredAssetsList = Array.isArray(draft.assetsList) ? normalizeAssetEntries(draft.assetsList) : [];
             const restoredSceneId = typeof draft.activeScene === "string" ? draft.activeScene : null;
 
             if (!hasSceneContent(restoredGraph) && restoredAssetsList.length === 0) return;
@@ -406,6 +472,7 @@ export default function MVPRouteClient({ clarityMode = false }: { clarityMode?: 
                 updatedAt: draft.updatedAt,
             };
 
+            window.localStorage.setItem(LOCAL_DRAFT_KEY, JSON.stringify(nextDraft));
             setStoredDraft(nextDraft);
 
             if (!clarityMode) {
@@ -445,7 +512,7 @@ export default function MVPRouteClient({ clarityMode = false }: { clarityMode?: 
             JSON.stringify({
                 activeScene,
                 sceneGraph: normalizeSceneGraph(sceneGraph),
-                assetsList,
+                assetsList: normalizeAssetEntries(assetsList),
                 updatedAt: new Date().toISOString(),
             }),
         );

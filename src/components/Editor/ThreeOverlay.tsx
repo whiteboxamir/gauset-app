@@ -1,10 +1,11 @@
 "use client";
 
 import React, { Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { Canvas, useFrame, useLoader, useThree } from "@react-three/fiber";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { ContactShadows, Environment, Grid, Html, OrbitControls, PivotControls } from "@react-three/drei";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
 import { TAARenderPass } from "three/examples/jsm/postprocessing/TAARenderPass.js";
 import { clone } from "three/examples/jsm/utils/SkeletonUtils.js";
@@ -36,6 +37,16 @@ type SceneAsset = {
     rotation?: TransformTuple;
     scale?: TransformTuple;
 };
+
+type ParsedMeshAsset = {
+    format: "glb" | "gltf" | "obj";
+    scene: THREE.Object3D;
+};
+
+const EDITOR_CAMERA_NEAR = 0.01;
+const EDITOR_CAMERA_FAR = 500;
+const DEFAULT_EDITOR_VIEWER_BACKGROUND = "#0a0a0a";
+const sceneBackgroundScratchColor = new THREE.Color();
 
 type FocusRequest = (CameraPose & { token: number }) | null;
 type TAARenderPassInternal = TAARenderPass & { accumulateIndex: number };
@@ -91,6 +102,25 @@ function canCreateWebGLContext() {
     const loseContext = context.getExtension?.("WEBGL_lose_context");
     loseContext?.loseContext();
     return true;
+}
+
+function isSingleImagePreviewEnvironment(metadata: any) {
+    const lane = String(metadata?.lane ?? "").trim().toLowerCase();
+    const qualityTier = String(metadata?.quality_tier ?? "").trim().toLowerCase();
+    const truthLabel = String(metadata?.truth_label ?? "").trim().toLowerCase();
+    const sourceFormat = String(metadata?.rendering?.source_format ?? "").trim().toLowerCase();
+
+    return (
+        lane === "preview" &&
+        (qualityTier.includes("single_image_preview") ||
+            sourceFormat.includes("dense_preview") ||
+            truthLabel === "instant preview")
+    );
+}
+
+function applyEditorCameraClipping(camera: THREE.PerspectiveCamera) {
+    camera.near = EDITOR_CAMERA_NEAR;
+    camera.far = EDITOR_CAMERA_FAR;
 }
 
 function LoadingLabel({ text }: { text: string }) {
@@ -178,7 +208,77 @@ function AssetFallbackMesh({
     );
 }
 
-function GLBAsset({
+function detectMeshFormat(buffer: ArrayBuffer) {
+    const headerBytes = new Uint8Array(buffer, 0, Math.min(buffer.byteLength, 64));
+    if (headerBytes.length >= 4) {
+        const magic = String.fromCharCode(headerBytes[0] ?? 0, headerBytes[1] ?? 0, headerBytes[2] ?? 0, headerBytes[3] ?? 0);
+        if (magic === "glTF") {
+            return "glb" as const;
+        }
+    }
+
+    const headerText = new TextDecoder("utf-8").decode(headerBytes).replace(/^\uFEFF/, "").trimStart();
+    if (headerText.startsWith("{")) {
+        return "gltf" as const;
+    }
+
+    if (/^(?:#.*\n\s*)*(?:mtllib|o|g|v|vt|vn|usemtl|s|f)\b/m.test(headerText)) {
+        return "obj" as const;
+    }
+
+    throw new Error("Unsupported mesh payload format.");
+}
+
+function parseGltfAsset(loader: GLTFLoader, payload: ArrayBuffer | string, resourcePath: string) {
+    return new Promise<ParsedMeshAsset>((resolve, reject) => {
+        loader.parse(
+            payload,
+            resourcePath,
+            (gltf) => {
+                resolve({
+                    format: payload instanceof ArrayBuffer ? "glb" : "gltf",
+                    scene: gltf.scene || new THREE.Group(),
+                });
+            },
+            (error) => {
+                reject(error instanceof Error ? error : new Error("GLTF parse failed."));
+            },
+        );
+    });
+}
+
+async function loadMeshAsset(meshUrl: string, signal: AbortSignal) {
+    const resolvedUrl = toProxyUrl(meshUrl);
+    const response = await fetch(resolvedUrl, {
+        cache: "force-cache",
+        signal,
+    });
+    if (!response.ok) {
+        throw new Error(`Could not load ${resolvedUrl}: ${response.status} ${response.statusText}`.trim());
+    }
+
+    const payload = await response.arrayBuffer();
+    const format = detectMeshFormat(payload);
+    const resourcePath = new URL("./", new URL(resolvedUrl, window.location.href)).toString();
+
+    if (format === "obj") {
+        const text = new TextDecoder("utf-8").decode(payload);
+        return {
+            format,
+            scene: new OBJLoader().parse(text),
+        } satisfies ParsedMeshAsset;
+    }
+
+    const gltfLoader = new GLTFLoader();
+    if (format === "glb") {
+        return parseGltfAsset(gltfLoader, payload, resourcePath);
+    }
+
+    const text = new TextDecoder("utf-8").decode(payload);
+    return parseGltfAsset(gltfLoader, text, resourcePath);
+}
+
+function MeshAsset({
     asset,
     updateAssetTransform,
     readOnly,
@@ -188,8 +288,52 @@ function GLBAsset({
     readOnly: boolean;
 }) {
     const [active, setActive] = useState(false);
-    const gltf = useLoader(GLTFLoader, asset.mesh || "");
-    const scene = useMemo(() => clone(gltf.scene), [gltf.scene]);
+    const [parsedAsset, setParsedAsset] = useState<ParsedMeshAsset | null>(null);
+    const [loadError, setLoadError] = useState<Error | null>(null);
+
+    useEffect(() => {
+        if (!asset.mesh) {
+            setParsedAsset(null);
+            setLoadError(null);
+            return;
+        }
+
+        const abortController = new AbortController();
+        let ignore = false;
+        setParsedAsset(null);
+        setLoadError(null);
+
+        void loadMeshAsset(asset.mesh, abortController.signal)
+            .then((nextAsset) => {
+                if (ignore || abortController.signal.aborted) {
+                    return;
+                }
+                setParsedAsset(nextAsset);
+            })
+            .catch((error) => {
+                if (ignore || abortController.signal.aborted) {
+                    return;
+                }
+                const resolvedError = error instanceof Error ? error : new Error("Mesh load failed.");
+                console.error(`[ThreeOverlay] Mesh asset load failed for ${asset.mesh}`, resolvedError);
+                setLoadError(resolvedError);
+            });
+
+        return () => {
+            ignore = true;
+            abortController.abort();
+        };
+    }, [asset.mesh]);
+
+    const scene = useMemo(() => (parsedAsset ? clone(parsedAsset.scene) : null), [parsedAsset]);
+
+    if (loadError) {
+        return <AssetFallbackMesh asset={asset} updateAssetTransform={updateAssetTransform} readOnly={readOnly} />;
+    }
+
+    if (!scene) {
+        return <LoadingLabel text="Loading mesh..." />;
+    }
 
     return (
         <PivotControls
@@ -238,14 +382,10 @@ function SceneAssetNode({
     readOnly: boolean;
 }) {
     if (asset.mesh) {
-        return (
-            <Suspense fallback={<LoadingLabel text="Loading mesh..." />}>
-                <GLBAsset asset={asset} updateAssetTransform={updateAssetTransform} readOnly={readOnly} />
-            </Suspense>
-        );
+        return <MeshAsset asset={asset} updateAssetTransform={updateAssetTransform} readOnly={readOnly} />;
     }
 
-    return <AssetFallbackMesh asset={asset} updateAssetTransform={updateAssetTransform} readOnly={readOnly} />;
+    return null;
 }
 
 function pinColors(type: SpatialPinType, isSelected: boolean) {
@@ -374,6 +514,7 @@ function CameraRig({
     const startTimeRef = useRef<number>(0);
 
     useEffect(() => {
+        applyEditorCameraClipping(perspectiveCamera);
         perspectiveCamera.fov = viewerFov;
         perspectiveCamera.updateProjectionMatrix();
     }, [perspectiveCamera, viewerFov]);
@@ -382,6 +523,7 @@ function CameraRig({
         if (!focusRequest || focusRequest.token === lastFocusTokenRef.current) return;
         lastFocusTokenRef.current = focusRequest.token;
         perspectiveCamera.position.set(...focusRequest.position);
+        applyEditorCameraClipping(perspectiveCamera);
         perspectiveCamera.fov = focusRequest.fov;
         perspectiveCamera.updateProjectionMatrix();
         if (controlsRef.current?.target) {
@@ -517,10 +659,51 @@ function TemporalAntialiasingComposer() {
     return null;
 }
 
+function SceneBackgroundLock({ backgroundColor }: { backgroundColor: string }) {
+    const { gl, scene } = useThree();
+    const background = useMemo(() => new THREE.Color(backgroundColor), [backgroundColor]);
+    const previousBackgroundRef = useRef<THREE.Color | THREE.Texture | THREE.CubeTexture | null>(null);
+    const previousClearColorRef = useRef(new THREE.Color());
+    const previousClearAlphaRef = useRef(1);
+
+    useEffect(() => {
+        previousBackgroundRef.current = scene.background;
+        gl.getClearColor(previousClearColorRef.current);
+        previousClearAlphaRef.current = gl.getClearAlpha();
+
+        scene.background = background;
+        gl.setClearColor(background, 1);
+        gl.domElement.style.backgroundColor = backgroundColor;
+
+        return () => {
+            scene.background = previousBackgroundRef.current;
+            gl.setClearColor(previousClearColorRef.current, previousClearAlphaRef.current);
+        };
+    }, [background, backgroundColor, gl, scene]);
+
+    useFrame(() => {
+        if (!(scene.background instanceof THREE.Color) || !scene.background.equals(background)) {
+            scene.background = background;
+        }
+
+        if (!gl.getClearColor(sceneBackgroundScratchColor).equals(background) || gl.getClearAlpha() !== 1) {
+            gl.setClearColor(background, 1);
+        }
+
+        if (gl.domElement.style.backgroundColor !== backgroundColor) {
+            gl.domElement.style.backgroundColor = backgroundColor;
+        }
+    }, -1);
+
+    return null;
+}
+
 export default function ThreeOverlay({
     sceneGraph,
     setSceneGraph,
     readOnly = false,
+    isPreviewRoute = false,
+    backgroundColor = DEFAULT_EDITOR_VIEWER_BACKGROUND,
     selectedPinId,
     onSelectPin,
     focusRequest,
@@ -535,6 +718,8 @@ export default function ThreeOverlay({
     sceneGraph: any;
     setSceneGraph: React.Dispatch<React.SetStateAction<any>>;
     readOnly?: boolean;
+    isPreviewRoute?: boolean;
+    backgroundColor?: string;
     selectedPinId?: string | null;
     onSelectPin?: (pinId: string | null) => void;
     focusRequest?: FocusRequest;
@@ -548,6 +733,7 @@ export default function ThreeOverlay({
 }) {
     const normalizedSceneGraph = useMemo(() => normalizeWorkspaceSceneGraph(sceneGraph), [sceneGraph]);
     const controlsRef = useRef<any>(null);
+    const canvasEventCleanupRef = useRef<(() => void) | null>(null);
     const [renderMode, setRenderMode] = useState<"webgl" | "fallback">("webgl");
     const [renderError, setRenderError] = useState("");
     const [isViewerReady, setIsViewerReady] = useState(false);
@@ -560,12 +746,20 @@ export default function ThreeOverlay({
     const environmentMetadata =
         typeof normalizedSceneGraph.environment === "object" ? normalizedSceneGraph.environment?.metadata ?? null : null;
     const referenceImage = environmentRenderState.referenceImage;
+    const isSingleImagePreview = isSingleImagePreviewEnvironment(environmentMetadata);
 
     useEffect(() => {
         if (canCreateWebGLContext()) return;
         setIsViewerReady(false);
         setRenderMode("fallback");
         setRenderError("WebGL could not be initialized in this environment.");
+    }, []);
+
+    useEffect(() => {
+        return () => {
+            canvasEventCleanupRef.current?.();
+            canvasEventCleanupRef.current = null;
+        };
     }, []);
 
     useEffect(() => {
@@ -607,8 +801,9 @@ export default function ThreeOverlay({
         <div className="absolute inset-0 pointer-events-auto z-20">
             <CanvasErrorBoundary onError={handleCanvasError}>
                 <Canvas
-                    camera={{ position: [5, 4, 6], fov: normalizedSceneGraph.viewer.fov }}
-                    dpr={[1, 3]}
+                    camera={{ position: [5, 4, 6], fov: normalizedSceneGraph.viewer.fov, near: EDITOR_CAMERA_NEAR, far: EDITOR_CAMERA_FAR }}
+                    dpr={isSingleImagePreview ? [1, 2] : [1, 3]}
+                    style={{ background: backgroundColor, touchAction: "none" }}
                     gl={{
                         powerPreference: "high-performance",
                         antialias: true,
@@ -616,8 +811,27 @@ export default function ThreeOverlay({
                         depth: true,
                         stencil: false,
                     }}
-                    shadows
+                    shadows={!isSingleImagePreview}
                     onCreated={({ gl }) => {
+                        canvasEventCleanupRef.current?.();
+                        const handleContextLost = (event: Event) => {
+                            event.preventDefault();
+                            setIsViewerReady(false);
+                            setRenderMode("fallback");
+                            setRenderError("WebGL context was lost while rendering the viewer.");
+                        };
+                        const handleContextRestored = () => {
+                            setRenderError("");
+                        };
+                        gl.domElement.addEventListener("webglcontextlost", handleContextLost, false);
+                        gl.domElement.addEventListener("webglcontextrestored", handleContextRestored, false);
+                        canvasEventCleanupRef.current = () => {
+                            gl.domElement.removeEventListener("webglcontextlost", handleContextLost, false);
+                            gl.domElement.removeEventListener("webglcontextrestored", handleContextRestored, false);
+                        };
+
+                        gl.setClearColor(backgroundColor, 1);
+                        gl.domElement.style.backgroundColor = backgroundColor;
                         gl.outputColorSpace = THREE.SRGBColorSpace;
                         gl.toneMapping = THREE.ACESFilmicToneMapping;
                         gl.toneMappingExposure = 1;
@@ -626,13 +840,13 @@ export default function ThreeOverlay({
                     }}
                     onPointerMissed={() => onSelectPin?.(null)}
                 >
-                    <color attach="background" args={["#0a0a0a"]} />
-                    <TemporalAntialiasingComposer />
-                    <ambientLight intensity={0.65} />
-                    <directionalLight position={[8, 12, 6]} intensity={1.2} castShadow />
+                    <SceneBackgroundLock backgroundColor={backgroundColor} />
+                    {!isSingleImagePreview ? <TemporalAntialiasingComposer /> : null}
+                    <ambientLight intensity={isSingleImagePreview ? 0.35 : 0.65} />
+                    {!isSingleImagePreview ? <directionalLight position={[8, 12, 6]} intensity={1.2} castShadow /> : null}
 
                     <OrbitControls ref={controlsRef} makeDefault enableDamping dampingFactor={0.08} />
-                    <Environment preset="city" />
+                    {!isSingleImagePreview ? <Environment preset="city" background={false} /> : null}
                     <CameraRig
                         viewerFov={normalizedSceneGraph.viewer.fov}
                         controlsRef={controlsRef}
@@ -643,19 +857,23 @@ export default function ThreeOverlay({
                         onPathRecorded={onPathRecorded}
                     />
 
-                    <Grid
-                        args={[30, 30]}
-                        cellSize={1}
-                        cellThickness={0.8}
-                        cellColor="#3f3f46"
-                        sectionSize={5}
-                        sectionThickness={1.2}
-                        sectionColor="#71717a"
-                        fadeDistance={45}
-                        fadeStrength={1}
-                    />
+                    {!isSingleImagePreview ? (
+                        <>
+                            <Grid
+                                args={[30, 30]}
+                                cellSize={1}
+                                cellThickness={0.8}
+                                cellColor="#3f3f46"
+                                sectionSize={5}
+                                sectionThickness={1.2}
+                                sectionColor="#71717a"
+                                fadeDistance={45}
+                                fadeStrength={1}
+                            />
 
-                    <ContactShadows position={[0, -0.5, 0]} opacity={0.35} scale={30} blur={2.2} far={8} />
+                            <ContactShadows position={[0, -0.5, 0]} opacity={0.35} scale={30} blur={2.2} far={8} />
+                        </>
+                    ) : null}
 
                     {environmentSplatUrl || environmentViewerUrl ? (
                         <Suspense fallback={<LoadingLabel text="Loading environment splat..." />}>
