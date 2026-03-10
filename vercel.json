@@ -10,8 +10,10 @@
       "use": "@vercel/python",
       "config": {
         "includeFiles": [
-          "vercel-backend/**",
-          "requirements.txt"
+          "../../vercel-backend/**",
+          "../../requirements.txt",
+          "../../pyproject.toml",
+          "../../.python-version"
         ],
         "maxLambdaSize": "50mb"
       }
