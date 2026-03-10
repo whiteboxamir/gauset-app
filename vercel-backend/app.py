@@ -160,6 +160,16 @@ STORAGE = _storage_backend()
 CAPTURE_MIN_IMAGES = 8
 CAPTURE_RECOMMENDED_IMAGES = 12
 CAPTURE_MAX_IMAGES = 32
+SYNTH_PREVIEW_BASE_SIZE = max(256, int(os.getenv("GAUSET_SYNTH_PREVIEW_SIZE", "384")))
+SYNTH_PREVIEW_DENSITY_MULTIPLIER = max(1, int(os.getenv("GAUSET_SYNTH_PREVIEW_DENSITY_MULTIPLIER", "5")))
+SYNTH_PREVIEW_JITTER_RADIUS = float(os.getenv("GAUSET_SYNTH_PREVIEW_JITTER_RADIUS", "0.38"))
+SYNTH_PREVIEW_SCALE_SHRINK = float(os.getenv("GAUSET_SYNTH_PREVIEW_SCALE_SHRINK", "0.84"))
+SYNTH_PREVIEW_SATURATION_BOOST = float(os.getenv("GAUSET_SYNTH_PREVIEW_SATURATION_BOOST", "1.08"))
+SYNTH_PREVIEW_TARGET_P75 = float(os.getenv("GAUSET_SYNTH_PREVIEW_TARGET_P75", "0.74"))
+SYNTH_PREVIEW_TARGET_MEAN = float(os.getenv("GAUSET_SYNTH_PREVIEW_TARGET_MEAN", "0.44"))
+SYNTH_PREVIEW_MAX_GAIN = float(os.getenv("GAUSET_SYNTH_PREVIEW_MAX_GAIN", "1.7"))
+SYNTH_PREVIEW_MIN_GAMMA = float(os.getenv("GAUSET_SYNTH_PREVIEW_MIN_GAMMA", "0.84"))
+SYNTH_PREVIEW_MAX_GAMMA = float(os.getenv("GAUSET_SYNTH_PREVIEW_MAX_GAMMA", "1.0"))
 
 
 def _write_json(path: str, payload: Any) -> None:
@@ -191,6 +201,165 @@ def _logit(value: np.ndarray) -> np.ndarray:
     return np.log(value / (1.0 - value))
 
 
+def _preview_luma(colors: np.ndarray) -> np.ndarray:
+    return (colors[..., 0] * 0.299) + (colors[..., 1] * 0.587) + (colors[..., 2] * 0.114)
+
+
+def _compute_preview_color_stats(colors: np.ndarray) -> Dict[str, Any]:
+    luma = _preview_luma(colors)
+    flattened = colors.reshape(-1, 3)
+    return {
+        "mean_rgb": [round(float(value), 4) for value in flattened.mean(axis=0)],
+        "mean_luma": round(float(luma.mean()), 4),
+        "p75_luma": round(float(np.quantile(luma, 0.75)), 4),
+        "p90_luma": round(float(np.quantile(luma, 0.90)), 4),
+    }
+
+
+def _apply_preview_exposure_correction(colors: np.ndarray) -> tuple[np.ndarray, Dict[str, Any]]:
+    luma = _preview_luma(colors)
+    mean_luma = float(luma.mean())
+    p75_luma = float(np.quantile(luma, 0.75))
+
+    gain = max(1.0, min(SYNTH_PREVIEW_MAX_GAIN, SYNTH_PREVIEW_TARGET_P75 / max(p75_luma, 1e-3)))
+    lifted = np.clip(colors * gain, 0.0, 1.0)
+
+    post_gain_luma = _preview_luma(lifted)
+    post_gain_mean = float(post_gain_luma.mean())
+    gamma = 1.0
+    if post_gain_mean < SYNTH_PREVIEW_TARGET_MEAN:
+        gamma = float(
+            max(
+                SYNTH_PREVIEW_MIN_GAMMA,
+                min(
+                    SYNTH_PREVIEW_MAX_GAMMA,
+                    math.log(SYNTH_PREVIEW_TARGET_MEAN) / math.log(max(post_gain_mean, 1e-3)),
+                ),
+            )
+        )
+
+    gamma_corrected = np.clip(lifted, 0.0, 1.0) ** gamma
+    neutral = _preview_luma(gamma_corrected)[..., None]
+    corrected = np.clip(neutral + (gamma_corrected - neutral) * SYNTH_PREVIEW_SATURATION_BOOST, 0.0, 1.0)
+    final_luma = _preview_luma(corrected)
+
+    return corrected.astype(np.float32), {
+        "gain": round(gain, 4),
+        "gamma": round(gamma, 4),
+        "saturation_boost": round(SYNTH_PREVIEW_SATURATION_BOOST, 4),
+        "mean_luma_before": round(mean_luma, 4),
+        "mean_luma_after": round(float(final_luma.mean()), 4),
+        "p75_luma_before": round(p75_luma, 4),
+        "p75_luma_after": round(float(np.quantile(final_luma, 0.75)), 4),
+    }
+
+
+def _densify_synth_preview(
+    *,
+    x: np.ndarray,
+    y: np.ndarray,
+    z: np.ndarray,
+    depth: np.ndarray,
+    edges: np.ndarray,
+    colors: np.ndarray,
+    base_alpha: np.ndarray,
+    scale_0: np.ndarray,
+    scale_1: np.ndarray,
+    scale_2: np.ndarray,
+) -> tuple[Dict[str, np.ndarray], Dict[str, Any]]:
+    height, width = z.shape
+    density_multiplier = max(1, SYNTH_PREVIEW_DENSITY_MULTIPLIER)
+    source_count = int(width * height)
+
+    if density_multiplier == 1:
+        return {
+            "x": x.reshape(-1).astype(np.float32),
+            "y": y.reshape(-1).astype(np.float32),
+            "z": z.reshape(-1).astype(np.float32),
+            "f_dc_0": colors[..., 0].reshape(-1).astype(np.float32),
+            "f_dc_1": colors[..., 1].reshape(-1).astype(np.float32),
+            "f_dc_2": colors[..., 2].reshape(-1).astype(np.float32),
+            "opacity": _logit(base_alpha).reshape(-1).astype(np.float32),
+            "scale_0": scale_0.reshape(-1).astype(np.float32),
+            "scale_1": scale_1.reshape(-1).astype(np.float32),
+            "scale_2": scale_2.reshape(-1).astype(np.float32),
+        }, {
+            "multiplier": 1,
+            "source_count": source_count,
+            "output_count": source_count,
+            "jitter_radius": round(SYNTH_PREVIEW_JITTER_RADIUS, 4),
+            "scale_shrink": 1.0,
+        }
+
+    patterns = np.array(
+        [
+            [0.0, 0.0],
+            [0.70710678, 0.70710678],
+            [-0.70710678, 0.70710678],
+            [0.70710678, -0.70710678],
+            [-0.70710678, -0.70710678],
+            [1.0, 0.0],
+            [-1.0, 0.0],
+            [0.0, 1.0],
+            [0.0, -1.0],
+        ],
+        dtype=np.float32,
+    )
+    if density_multiplier > patterns.shape[0]:
+        repeats = math.ceil(density_multiplier / patterns.shape[0])
+        patterns = np.tile(patterns, (repeats, 1))
+    patterns = patterns[:density_multiplier]
+
+    pixel_span_x = np.full_like(depth, 1.56 / max(width, 1), dtype=np.float32)
+    pixel_span_y = np.full_like(depth, 1.08 / max(height, 1), dtype=np.float32)
+    jitter_strength = SYNTH_PREVIEW_JITTER_RADIUS * (0.55 + (0.45 * np.clip(edges + (0.35 * depth), 0.0, 1.0)))
+    per_copy_alpha = 1.0 - np.power(1.0 - np.clip(base_alpha, 0.0, 0.995), 1.0 / density_multiplier)
+    per_copy_alpha = np.clip(per_copy_alpha, 0.12, 0.995)
+
+    copy_shrink = np.ones(density_multiplier, dtype=np.float32)
+    if density_multiplier > 1:
+        copy_shrink[1:] = SYNTH_PREVIEW_SCALE_SHRINK
+    copy_scale_adjust = np.log(np.clip(copy_shrink, 1e-3, None)).astype(np.float32)
+
+    payload: Dict[str, List[np.ndarray]] = {
+        "x": [],
+        "y": [],
+        "z": [],
+        "f_dc_0": [],
+        "f_dc_1": [],
+        "f_dc_2": [],
+        "opacity": [],
+        "scale_0": [],
+        "scale_1": [],
+        "scale_2": [],
+    }
+
+    for copy_index, (offset_x_factor, offset_y_factor) in enumerate(patterns):
+        offset_scale = 0.0 if copy_index == 0 else 1.0
+        world_offset_x = pixel_span_x * offset_x_factor * jitter_strength * offset_scale
+        world_offset_y = pixel_span_y * offset_y_factor * jitter_strength * offset_scale
+        world_offset_z = (depth - 0.5) * 0.008 * (offset_x_factor + offset_y_factor) * offset_scale
+
+        payload["x"].append((x + world_offset_x).reshape(-1).astype(np.float32))
+        payload["y"].append((y + world_offset_y).reshape(-1).astype(np.float32))
+        payload["z"].append((z + world_offset_z).reshape(-1).astype(np.float32))
+        payload["f_dc_0"].append(colors[..., 0].reshape(-1).astype(np.float32))
+        payload["f_dc_1"].append(colors[..., 1].reshape(-1).astype(np.float32))
+        payload["f_dc_2"].append(colors[..., 2].reshape(-1).astype(np.float32))
+        payload["opacity"].append(_logit(per_copy_alpha).reshape(-1).astype(np.float32))
+        payload["scale_0"].append((scale_0 + copy_scale_adjust[copy_index]).reshape(-1).astype(np.float32))
+        payload["scale_1"].append((scale_1 + copy_scale_adjust[copy_index]).reshape(-1).astype(np.float32))
+        payload["scale_2"].append((scale_2 + copy_scale_adjust[copy_index]).reshape(-1).astype(np.float32))
+
+    return {key: np.concatenate(value, axis=0) for key, value in payload.items()}, {
+        "multiplier": density_multiplier,
+        "source_count": source_count,
+        "output_count": source_count * density_multiplier,
+        "jitter_radius": round(SYNTH_PREVIEW_JITTER_RADIUS, 4),
+        "scale_shrink": round(SYNTH_PREVIEW_SCALE_SHRINK, 4),
+    }
+
+
 def _image_signals(image: Image.Image, size: int) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     square = Image.open(io.BytesIO(_square_image(image, size)))
     pixels = np.asarray(square, dtype=np.float32) / 255.0
@@ -204,36 +373,48 @@ def _image_signals(image: Image.Image, size: int) -> tuple[np.ndarray, np.ndarra
 
 def _binary_splat_payload(image_bytes: bytes, filename: str) -> Dict[str, bytes]:
     image = _load_image(image_bytes)
-    pixels, luma, saturation, edges = _image_signals(image, 320)
+    pixels, luma, saturation, edges = _image_signals(image, SYNTH_PREVIEW_BASE_SIZE)
     height, width, _ = pixels.shape
 
     xs = np.linspace(0.0, 1.0, width, dtype=np.float32)
     ys = np.linspace(0.0, 1.0, height, dtype=np.float32)
     grid_x, grid_y = np.meshgrid(xs, ys)
 
-    # Heuristic monocular depth: sky/top stays far, lower saturated detail pulls forward.
+    # Keep fallback previews as a front-facing scout card with mild local relief.
     depth = (
-        0.52 * (1.0 - grid_y)
-        + 0.24 * (1.0 - luma)
-        + 0.14 * edges
-        + 0.10 * np.abs(grid_x - 0.5)
+        0.48 * (1.0 - luma)
+        + 0.30 * edges
+        + 0.22 * saturation
     )
     depth = (depth - depth.min()) / max(float(depth.max() - depth.min()), 1e-6)
 
-    z = 0.8 + (depth * 3.3)
-    x = (grid_x - 0.5) * (1.6 + (0.95 * z))
-    y = (0.5 - grid_y) * (1.0 + (0.55 * z)) + ((luma - 0.5) * 0.18)
+    z = 1.45 + (depth * 0.42)
+    x = (grid_x - 0.5) * 1.56
+    y = (0.5 - grid_y) * 1.08 + ((luma - 0.5) * 0.04)
 
-    colors = np.clip(np.power(pixels, 0.95), 0.0, 1.0)
+    raw_colors = np.clip(np.power(pixels, 0.95), 0.0, 1.0)
+    color_stats_before = _compute_preview_color_stats(raw_colors)
+    colors, exposure = _apply_preview_exposure_correction(raw_colors)
+    color_stats_after = _compute_preview_color_stats(colors)
     sh_c0 = 0.28209479177387814
-    f_dc = (colors - 0.5) / sh_c0
+    base_alpha = np.clip(0.76 + (0.16 * saturation) - (0.06 * edges) + (0.04 * (1.0 - luma)), 0.44, 0.992)
+    scale_0 = -5.25 + (0.85 * depth) - (0.22 * edges)
+    scale_1 = -5.4 + (0.72 * depth) - (0.18 * edges)
+    scale_2 = -6.2 + (0.5 * edges)
+    densified_payload, densification = _densify_synth_preview(
+        x=x,
+        y=y,
+        z=z,
+        depth=depth,
+        edges=edges,
+        colors=(colors - 0.5) / sh_c0,
+        base_alpha=base_alpha,
+        scale_0=scale_0,
+        scale_1=scale_1,
+        scale_2=scale_2,
+    )
 
-    opacity = _logit(np.clip(0.70 + (0.18 * saturation) - (0.10 * edges), 0.38, 0.97))
-    scale_0 = -5.9 + (0.8 * depth) - (0.35 * edges)
-    scale_1 = -6.1 + (0.7 * depth) - (0.25 * edges)
-    scale_2 = -6.9 + (0.45 * edges)
-
-    count = width * height
+    count = densified_payload["x"].shape[0]
     vertex_dtype = np.dtype(
         [
             ("x", "<f4"),
@@ -253,16 +434,16 @@ def _binary_splat_payload(image_bytes: bytes, filename: str) -> Dict[str, bytes]
         ]
     )
     vertices = np.empty(count, dtype=vertex_dtype)
-    vertices["x"] = x.astype(np.float32).reshape(-1)
-    vertices["y"] = y.astype(np.float32).reshape(-1)
-    vertices["z"] = z.astype(np.float32).reshape(-1)
-    vertices["f_dc_0"] = f_dc[..., 0].astype(np.float32).reshape(-1)
-    vertices["f_dc_1"] = f_dc[..., 1].astype(np.float32).reshape(-1)
-    vertices["f_dc_2"] = f_dc[..., 2].astype(np.float32).reshape(-1)
-    vertices["opacity"] = opacity.astype(np.float32).reshape(-1)
-    vertices["scale_0"] = scale_0.astype(np.float32).reshape(-1)
-    vertices["scale_1"] = scale_1.astype(np.float32).reshape(-1)
-    vertices["scale_2"] = scale_2.astype(np.float32).reshape(-1)
+    vertices["x"] = densified_payload["x"]
+    vertices["y"] = densified_payload["y"]
+    vertices["z"] = densified_payload["z"]
+    vertices["f_dc_0"] = densified_payload["f_dc_0"]
+    vertices["f_dc_1"] = densified_payload["f_dc_1"]
+    vertices["f_dc_2"] = densified_payload["f_dc_2"]
+    vertices["opacity"] = densified_payload["opacity"]
+    vertices["scale_0"] = densified_payload["scale_0"]
+    vertices["scale_1"] = densified_payload["scale_1"]
+    vertices["scale_2"] = densified_payload["scale_2"]
     vertices["rot_0"] = 0.0
     vertices["rot_1"] = 0.0
     vertices["rot_2"] = 0.0
@@ -354,10 +535,10 @@ def _binary_splat_payload(image_bytes: bytes, filename: str) -> Dict[str, bytes]
         "generator": "gauset-mvp-backend",
         "lane": "preview",
         "mode": "heuristic",
-        "model": "gauset-depth-synth-v1",
+        "model": "gauset-depth-synth-v2",
         "execution_mode": "real",
         "truth_label": "Instant Preview",
-        "quality_tier": "single_image_preview",
+        "quality_tier": "single_image_preview_dense_fallback",
         "faithfulness": "approximate",
         "lane_truth": "preview_only_single_image",
         "capture_mode": "single_still",
@@ -430,10 +611,10 @@ def _binary_splat_payload(image_bytes: bytes, filename: str) -> Dict[str, bytes]
             ],
         },
         "delivery": {
-            "score": 32.0,
+            "score": 38.0,
             "readiness": "preview_only",
             "label": "Preview only",
-            "summary": "This lane is good for scouting look and camera intent, but it is not a faithful world reconstruction.",
+            "summary": "This lane is still a synthesized preview, but the fallback is now densified for stronger framing and look scouting.",
             "recommended_viewer_mode": "editor",
             "blocking_issues": [
                 "A single photo cannot resolve hidden geometry or full scene coverage.",
@@ -443,14 +624,14 @@ def _binary_splat_payload(image_bytes: bytes, filename: str) -> Dict[str, bytes]
             ],
             "axes": {
                 "geometry": {"score": 18.0, "status": "critical", "note": "Single-view geometry is fundamentally underconstrained."},
-                "color": {"score": 68.0, "status": "watch", "note": "Color can look strong, but it is not fused across views."},
+                "color": {"score": 72.0, "status": "watch", "note": "Fallback preview color is exposure-lifted for better look development, but it is not fused across views."},
                 "coverage": {"score": 6.0, "status": "critical", "note": "Only one camera angle is available."},
-                "density": {"score": 55.0, "status": "watch", "note": "The scene may look dense nearby but lacks full-world support."},
+                "density": {"score": 74.0, "status": "watch", "note": "Fallback preview density is expanded with jittered splat supersampling for a fuller viewer result."},
             },
             "render_targets": {
                 "desktop_fps": 60,
                 "mobile_fps": 30,
-                "preferred_point_budget": 120000,
+                "preferred_point_budget": count,
             },
         },
         "rendering": {
@@ -458,8 +639,19 @@ def _binary_splat_payload(image_bytes: bytes, filename: str) -> Dict[str, bytes]
             "viewer_decode": "srgb = clamp(f_dc * 0.28209479177388 + 0.5, 0, 1)",
             "has_explicit_vertex_colors": False,
             "viewer_renderer": "sharp_gaussian_direct",
-            "source_format": "sharp_ply",
+            "source_format": "sharp_ply_dense_preview_fallback",
+            "preview_density_multiplier": densification["multiplier"],
+            "apply_preview_orientation": False,
             "viewer_source": "/storage/scene/environment",
+        },
+        "preview_enhancement": {
+            "source_renderer": "gauset-depth-synth-fallback",
+            "point_count_before": densification["source_count"],
+            "point_count_after": densification["output_count"],
+            "density": densification,
+            "exposure": exposure,
+            "color_stats_before": color_stats_before,
+            "color_stats_after": color_stats_after,
         },
         "input_filename": filename,
         "generated_at": _utc_now(),

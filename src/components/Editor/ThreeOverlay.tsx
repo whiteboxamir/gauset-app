@@ -734,9 +734,11 @@ export default function ThreeOverlay({
     const normalizedSceneGraph = useMemo(() => normalizeWorkspaceSceneGraph(sceneGraph), [sceneGraph]);
     const controlsRef = useRef<any>(null);
     const canvasEventCleanupRef = useRef<(() => void) | null>(null);
+    const previewAutofocusKeyRef = useRef("");
     const [renderMode, setRenderMode] = useState<"webgl" | "fallback">("webgl");
     const [renderError, setRenderError] = useState("");
     const [isViewerReady, setIsViewerReady] = useState(false);
+    const [previewAutofocusRequest, setPreviewAutofocusRequest] = useState<FocusRequest>(null);
     const environmentRenderState = useMemo(
         () => resolveEnvironmentRenderState(normalizedSceneGraph.environment),
         [normalizedSceneGraph.environment],
@@ -747,6 +749,10 @@ export default function ThreeOverlay({
         typeof normalizedSceneGraph.environment === "object" ? normalizedSceneGraph.environment?.metadata ?? null : null;
     const referenceImage = environmentRenderState.referenceImage;
     const isSingleImagePreview = isSingleImagePreviewEnvironment(environmentMetadata);
+    const effectiveFocusRequest =
+        previewAutofocusRequest && (!focusRequest || previewAutofocusRequest.token >= focusRequest.token)
+            ? previewAutofocusRequest
+            : focusRequest ?? null;
 
     useEffect(() => {
         if (canCreateWebGLContext()) return;
@@ -765,6 +771,11 @@ export default function ThreeOverlay({
     useEffect(() => {
         onViewerReadyChange?.(isViewerReady && renderMode === "webgl");
     }, [isViewerReady, onViewerReadyChange, renderMode]);
+
+    useEffect(() => {
+        previewAutofocusKeyRef.current = "";
+        setPreviewAutofocusRequest(null);
+    }, [environmentSplatUrl, environmentViewerUrl, isSingleImagePreview]);
 
     const updateAssetTransform = (instanceId: string, patch: Partial<SceneAsset>) => {
         setSceneGraph((prev: any) => {
@@ -791,6 +802,30 @@ export default function ThreeOverlay({
         setIsViewerReady(false);
         setRenderMode("fallback");
         setRenderError(error.message || "WebGL viewer failed to initialize.");
+    };
+
+    const handlePreviewBounds = (bounds: { center: [number, number, number]; radius: number }) => {
+        if (!isSingleImagePreview) {
+            return;
+        }
+
+        const key = `${environmentSplatUrl}|${bounds.center.join(",")}|${bounds.radius.toFixed(4)}|${normalizedSceneGraph.viewer.fov.toFixed(2)}`;
+        if (previewAutofocusKeyRef.current === key) {
+            return;
+        }
+        previewAutofocusKeyRef.current = key;
+
+        const radius = Math.max(0.1, bounds.radius);
+        const verticalFovRadians = THREE.MathUtils.degToRad(normalizedSceneGraph.viewer.fov);
+        const distance = Math.max(radius * 2.2, (radius / Math.tan(verticalFovRadians * 0.5)) * 1.08);
+
+        setPreviewAutofocusRequest({
+            position: [bounds.center[0], bounds.center[1], bounds.center[2] + distance],
+            target: bounds.center,
+            fov: normalizedSceneGraph.viewer.fov,
+            lens_mm: Math.round(fovToLensMm(normalizedSceneGraph.viewer.fov) * 10) / 10,
+            token: Date.now(),
+        });
     };
 
     if (renderMode === "fallback") {
@@ -850,7 +885,7 @@ export default function ThreeOverlay({
                     <CameraRig
                         viewerFov={normalizedSceneGraph.viewer.fov}
                         controlsRef={controlsRef}
-                        focusRequest={focusRequest ?? null}
+                        focusRequest={effectiveFocusRequest}
                         captureRequestKey={captureRequestKey}
                         onCapturePose={onCapturePose}
                         isRecordingPath={isRecordingPath}
@@ -881,6 +916,7 @@ export default function ThreeOverlay({
                                 plyUrl={environmentSplatUrl}
                                 viewerUrl={environmentViewerUrl}
                                 metadata={environmentMetadata}
+                                onPreviewBounds={handlePreviewBounds}
                             />
                         </Suspense>
                     ) : null}

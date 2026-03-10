@@ -318,6 +318,7 @@ type EnvironmentSplatProps = {
     plyUrl?: string | null;
     viewerUrl?: string | null;
     metadata?: GeneratedEnvironmentMetadata | null;
+    onPreviewBounds?: (bounds: { center: [number, number, number]; radius: number }) => void;
 };
 
 type SharpGaussianChunk = {
@@ -504,6 +505,14 @@ function isSingleImagePreviewMetadata(metadata?: GeneratedEnvironmentMetadata | 
             sourceFormat.includes("dense_preview") ||
             truthLabel === "instant preview")
     );
+}
+
+function shouldApplyPreviewOrientation(metadata?: GeneratedEnvironmentMetadata | null) {
+    if (typeof metadata?.rendering?.apply_preview_orientation === "boolean") {
+        return metadata.rendering.apply_preview_orientation;
+    }
+
+    return isSingleImagePreviewMetadata(metadata);
 }
 
 function decodeSharpPlyHeader(source: ArrayBuffer) {
@@ -1026,7 +1035,7 @@ function buildSharpGaussianPayload(
         return createEmptySharpGaussianPayload();
     }
 
-    if (isSingleImagePreviewMetadata(metadata)) {
+    if (shouldApplyPreviewOrientation(metadata)) {
         applyPreviewOrientationToSourceGeometry(sourceGeometry);
     }
 
@@ -1375,7 +1384,7 @@ async function buildSharpGaussianPayloadInWorker({
                 maxTextureSize,
                 colorEncoding: metadata?.rendering?.color_encoding ?? null,
                 isSingleImagePreview: isSingleImagePreviewMetadata(metadata),
-                applyPreviewOrientation: isSingleImagePreviewMetadata(metadata),
+                applyPreviewOrientation: shouldApplyPreviewOrientation(metadata),
             },
             [sourceBuffer],
         );
@@ -1553,9 +1562,11 @@ function LumaEnvironmentSplat({ source }: { source: string }) {
 function SharpGaussianEnvironmentSplat({
     source,
     metadata,
+    onPreviewBounds,
 }: {
     source: string;
     metadata?: GeneratedEnvironmentMetadata | null;
+    onPreviewBounds?: (bounds: { center: [number, number, number]; radius: number }) => void;
 }) {
     const { gl, size } = useThree();
     const meshRef = useRef<THREE.Mesh<THREE.InstancedBufferGeometry, THREE.ShaderMaterial> | null>(null);
@@ -2026,6 +2037,22 @@ function SharpGaussianEnvironmentSplat({
         };
     }, [material]);
 
+    useEffect(() => {
+        if (!payload || !onPreviewBounds || !isSingleImagePreview) {
+            return;
+        }
+
+        const sphere = payload.geometry.boundingSphere;
+        if (!sphere) {
+            return;
+        }
+
+        onPreviewBounds({
+            center: [sphere.center.x, sphere.center.y, sphere.center.z],
+            radius: Math.max(1e-3, sphere.radius),
+        });
+    }, [isSingleImagePreview, onPreviewBounds, payload]);
+
     if (loadState.phase === "error") {
         return <SplatStatusLabel text={`Environment splat failed: ${loadState.message}`} tone="error" />;
     }
@@ -2052,7 +2079,7 @@ export default function EnvironmentSplat(props: EnvironmentSplatProps) {
     }
 
     if (resolved.mode === "sharp") {
-        return <SharpGaussianEnvironmentSplat source={resolved.source} metadata={props.metadata} />;
+        return <SharpGaussianEnvironmentSplat source={resolved.source} metadata={props.metadata} onPreviewBounds={props.onPreviewBounds} />;
     }
 
     return null;

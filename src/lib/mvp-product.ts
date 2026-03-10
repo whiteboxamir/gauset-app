@@ -226,6 +226,7 @@ export interface EnvironmentRenderingMetadata {
     viewer_renderer?: string;
     source_format?: string;
     viewer_source?: string;
+    apply_preview_orientation?: boolean;
 }
 
 export interface EnvironmentDeliveryAxis {
