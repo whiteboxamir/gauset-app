@@ -1,4 +1,30 @@
 {
-  "framework": "nextjs",
-  "installCommand": "npm install --legacy-peer-deps"
+  "installCommand": "npm install --legacy-peer-deps",
+  "builds": [
+    {
+      "src": "package.json",
+      "use": "@vercel/next"
+    },
+    {
+      "src": "api/_mvp_backend/*.py",
+      "use": "@vercel/python",
+      "config": {
+        "includeFiles": [
+          "vercel-backend/**",
+          "requirements.txt"
+        ],
+        "maxLambdaSize": "50mb"
+      }
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/_mvp_backend",
+      "dest": "/api/_mvp_backend/index.py"
+    },
+    {
+      "src": "/api/_mvp_backend/(.*)",
+      "dest": "/api/_mvp_backend/[...path].py"
+    }
+  ]
 }
