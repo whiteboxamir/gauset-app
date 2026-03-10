@@ -170,6 +170,16 @@ SYNTH_PREVIEW_TARGET_MEAN = float(os.getenv("GAUSET_SYNTH_PREVIEW_TARGET_MEAN", 
 SYNTH_PREVIEW_MAX_GAIN = float(os.getenv("GAUSET_SYNTH_PREVIEW_MAX_GAIN", "1.7"))
 SYNTH_PREVIEW_MIN_GAMMA = float(os.getenv("GAUSET_SYNTH_PREVIEW_MIN_GAMMA", "0.84"))
 SYNTH_PREVIEW_MAX_GAMMA = float(os.getenv("GAUSET_SYNTH_PREVIEW_MAX_GAMMA", "1.0"))
+SYNTH_PREVIEW_ALPHA_FLOOR = float(os.getenv("GAUSET_SYNTH_PREVIEW_ALPHA_FLOOR", "0.12"))
+SYNTH_PREVIEW_DARK_SCENE_MEAN_THRESHOLD = float(os.getenv("GAUSET_SYNTH_PREVIEW_DARK_SCENE_MEAN_THRESHOLD", "0.26"))
+SYNTH_PREVIEW_DARK_SCENE_P75_THRESHOLD = float(os.getenv("GAUSET_SYNTH_PREVIEW_DARK_SCENE_P75_THRESHOLD", "0.28"))
+SYNTH_PREVIEW_DARK_TARGET_P75 = float(os.getenv("GAUSET_SYNTH_PREVIEW_DARK_TARGET_P75", "0.82"))
+SYNTH_PREVIEW_DARK_TARGET_MEAN = float(os.getenv("GAUSET_SYNTH_PREVIEW_DARK_TARGET_MEAN", "0.5"))
+SYNTH_PREVIEW_DARK_MAX_GAIN = float(os.getenv("GAUSET_SYNTH_PREVIEW_DARK_MAX_GAIN", "2.1"))
+SYNTH_PREVIEW_DARK_MIN_GAMMA = float(os.getenv("GAUSET_SYNTH_PREVIEW_DARK_MIN_GAMMA", "0.76"))
+SYNTH_PREVIEW_DARK_SATURATION_BOOST = float(os.getenv("GAUSET_SYNTH_PREVIEW_DARK_SATURATION_BOOST", "1.1"))
+SYNTH_PREVIEW_DARK_DENSITY_BONUS = max(0, int(os.getenv("GAUSET_SYNTH_PREVIEW_DARK_DENSITY_BONUS", "1")))
+SYNTH_PREVIEW_DARK_ALPHA_FLOOR = float(os.getenv("GAUSET_SYNTH_PREVIEW_DARK_ALPHA_FLOOR", "0.15"))
 
 
 def _write_json(path: str, payload: Any) -> None:
@@ -216,37 +226,68 @@ def _compute_preview_color_stats(colors: np.ndarray) -> Dict[str, Any]:
     }
 
 
+def _resolve_preview_lift_profile(mean_luma: float, p75_luma: float) -> Dict[str, Any]:
+    dark_scene = mean_luma <= SYNTH_PREVIEW_DARK_SCENE_MEAN_THRESHOLD or p75_luma <= SYNTH_PREVIEW_DARK_SCENE_P75_THRESHOLD
+    if dark_scene:
+        return {
+            "name": "dark_scene_lift",
+            "dark_scene": True,
+            "target_p75": SYNTH_PREVIEW_DARK_TARGET_P75,
+            "target_mean": SYNTH_PREVIEW_DARK_TARGET_MEAN,
+            "max_gain": SYNTH_PREVIEW_DARK_MAX_GAIN,
+            "min_gamma": SYNTH_PREVIEW_DARK_MIN_GAMMA,
+            "saturation_boost": SYNTH_PREVIEW_DARK_SATURATION_BOOST,
+        }
+
+    return {
+        "name": "standard",
+        "dark_scene": False,
+        "target_p75": SYNTH_PREVIEW_TARGET_P75,
+        "target_mean": SYNTH_PREVIEW_TARGET_MEAN,
+        "max_gain": SYNTH_PREVIEW_MAX_GAIN,
+        "min_gamma": SYNTH_PREVIEW_MIN_GAMMA,
+        "saturation_boost": SYNTH_PREVIEW_SATURATION_BOOST,
+    }
+
+
 def _apply_preview_exposure_correction(colors: np.ndarray) -> tuple[np.ndarray, Dict[str, Any]]:
     luma = _preview_luma(colors)
     mean_luma = float(luma.mean())
     p75_luma = float(np.quantile(luma, 0.75))
+    profile = _resolve_preview_lift_profile(mean_luma, p75_luma)
 
-    gain = max(1.0, min(SYNTH_PREVIEW_MAX_GAIN, SYNTH_PREVIEW_TARGET_P75 / max(p75_luma, 1e-3)))
+    gain = max(1.0, min(profile["max_gain"], profile["target_p75"] / max(p75_luma, 1e-3)))
     lifted = np.clip(colors * gain, 0.0, 1.0)
 
     post_gain_luma = _preview_luma(lifted)
     post_gain_mean = float(post_gain_luma.mean())
     gamma = 1.0
-    if post_gain_mean < SYNTH_PREVIEW_TARGET_MEAN:
+    if post_gain_mean < profile["target_mean"]:
         gamma = float(
             max(
-                SYNTH_PREVIEW_MIN_GAMMA,
+                profile["min_gamma"],
                 min(
                     SYNTH_PREVIEW_MAX_GAMMA,
-                    math.log(SYNTH_PREVIEW_TARGET_MEAN) / math.log(max(post_gain_mean, 1e-3)),
+                    math.log(profile["target_mean"]) / math.log(max(post_gain_mean, 1e-3)),
                 ),
             )
         )
 
     gamma_corrected = np.clip(lifted, 0.0, 1.0) ** gamma
     neutral = _preview_luma(gamma_corrected)[..., None]
-    corrected = np.clip(neutral + (gamma_corrected - neutral) * SYNTH_PREVIEW_SATURATION_BOOST, 0.0, 1.0)
+    corrected = np.clip(neutral + (gamma_corrected - neutral) * profile["saturation_boost"], 0.0, 1.0)
     final_luma = _preview_luma(corrected)
 
     return corrected.astype(np.float32), {
+        "profile": profile["name"],
+        "dark_scene": profile["dark_scene"],
         "gain": round(gain, 4),
         "gamma": round(gamma, 4),
-        "saturation_boost": round(SYNTH_PREVIEW_SATURATION_BOOST, 4),
+        "saturation_boost": round(profile["saturation_boost"], 4),
+        "target_mean": round(profile["target_mean"], 4),
+        "target_p75": round(profile["target_p75"], 4),
+        "max_gain": round(profile["max_gain"], 4),
+        "min_gamma": round(profile["min_gamma"], 4),
         "mean_luma_before": round(mean_luma, 4),
         "mean_luma_after": round(float(final_luma.mean()), 4),
         "p75_luma_before": round(p75_luma, 4),
@@ -266,9 +307,11 @@ def _densify_synth_preview(
     scale_0: np.ndarray,
     scale_1: np.ndarray,
     scale_2: np.ndarray,
+    density_multiplier: int,
+    per_copy_alpha_floor: float,
 ) -> tuple[Dict[str, np.ndarray], Dict[str, Any]]:
     height, width = z.shape
-    density_multiplier = max(1, SYNTH_PREVIEW_DENSITY_MULTIPLIER)
+    density_multiplier = max(1, density_multiplier)
     source_count = int(width * height)
 
     if density_multiplier == 1:
@@ -314,7 +357,7 @@ def _densify_synth_preview(
     pixel_span_y = np.full_like(depth, 1.08 / max(height, 1), dtype=np.float32)
     jitter_strength = SYNTH_PREVIEW_JITTER_RADIUS * (0.55 + (0.45 * np.clip(edges + (0.35 * depth), 0.0, 1.0)))
     per_copy_alpha = 1.0 - np.power(1.0 - np.clip(base_alpha, 0.0, 0.995), 1.0 / density_multiplier)
-    per_copy_alpha = np.clip(per_copy_alpha, 0.12, 0.995)
+    per_copy_alpha = np.clip(per_copy_alpha, per_copy_alpha_floor, 0.995)
 
     copy_shrink = np.ones(density_multiplier, dtype=np.float32)
     if density_multiplier > 1:
@@ -396,6 +439,8 @@ def _binary_splat_payload(image_bytes: bytes, filename: str) -> Dict[str, bytes]
     color_stats_before = _compute_preview_color_stats(raw_colors)
     colors, exposure = _apply_preview_exposure_correction(raw_colors)
     color_stats_after = _compute_preview_color_stats(colors)
+    density_multiplier = SYNTH_PREVIEW_DENSITY_MULTIPLIER + (SYNTH_PREVIEW_DARK_DENSITY_BONUS if exposure["dark_scene"] else 0)
+    per_copy_alpha_floor = SYNTH_PREVIEW_DARK_ALPHA_FLOOR if exposure["dark_scene"] else SYNTH_PREVIEW_ALPHA_FLOOR
     sh_c0 = 0.28209479177387814
     base_alpha = np.clip(0.76 + (0.16 * saturation) - (0.06 * edges) + (0.04 * (1.0 - luma)), 0.44, 0.992)
     scale_0 = -5.25 + (0.85 * depth) - (0.22 * edges)
@@ -412,6 +457,8 @@ def _binary_splat_payload(image_bytes: bytes, filename: str) -> Dict[str, bytes]
         scale_0=scale_0,
         scale_1=scale_1,
         scale_2=scale_2,
+        density_multiplier=density_multiplier,
+        per_copy_alpha_floor=per_copy_alpha_floor,
     )
 
     count = densified_payload["x"].shape[0]

@@ -507,6 +507,18 @@ function isSingleImagePreviewMetadata(metadata?: GeneratedEnvironmentMetadata | 
     );
 }
 
+function isDenseFallbackPreviewMetadata(metadata?: GeneratedEnvironmentMetadata | null) {
+    const qualityTier = String(metadata?.quality_tier ?? "").trim().toLowerCase();
+    const sourceFormat = String(metadata?.rendering?.source_format ?? "").trim().toLowerCase();
+    const sourceRenderer = String(metadata?.preview_enhancement?.source_renderer ?? "").trim().toLowerCase();
+
+    return (
+        qualityTier === "single_image_preview_dense_fallback" ||
+        sourceFormat.includes("dense_preview_fallback") ||
+        sourceRenderer === "gauset-depth-synth-fallback"
+    );
+}
+
 function shouldApplyPreviewOrientation(metadata?: GeneratedEnvironmentMetadata | null) {
     if (typeof metadata?.rendering?.apply_preview_orientation === "boolean") {
         return metadata.rendering.apply_preview_orientation;
@@ -597,6 +609,7 @@ function resolveSharpPointBudget(
     const lowMemoryDevice = deviceMemory !== null && deviceMemory <= 4;
     const coarsePointerDevice = typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)").matches;
     const hasDenseShPreview = String(metadata?.rendering?.color_encoding ?? "").trim().toLowerCase() === "sh_dc_rgb";
+    const hasDenseFallbackPreview = isDenseFallbackPreviewMetadata(metadata);
     const metadataBudget = Number(
         metadata?.delivery?.render_targets?.preferred_point_budget ?? metadata?.point_count ?? Number.POSITIVE_INFINITY,
     );
@@ -620,6 +633,10 @@ function resolveSharpPointBudget(
             ? STANDARD_PREVIEW_POINT_BUDGET_HIGH_CAPABILITY
             : STANDARD_PREVIEW_POINT_BUDGET_DESKTOP;
 
+    if (hasDenseFallbackPreview && Number.isFinite(metadataBudget) && metadataBudget > 0) {
+        return Math.min(metadataBudget, budgetCap);
+    }
+
     if (sourcePointCount !== null) {
         const sourceScaledTarget =
             hasDenseShPreview && highCapabilityDevice
@@ -641,6 +658,24 @@ function resolveSharpPointBudget(
     }
 
     return budgetCap;
+}
+
+function resolvePreviewOpacityBoost(metadata?: GeneratedEnvironmentMetadata | null) {
+    if (!isDenseFallbackPreviewMetadata(metadata)) {
+        return 1.0;
+    }
+
+    const liftedMeanLuma = Number(metadata?.preview_enhancement?.exposure?.mean_luma_after ?? NaN);
+    if (!Number.isFinite(liftedMeanLuma)) {
+        return 1.16;
+    }
+    if (liftedMeanLuma < 0.38) {
+        return 1.3;
+    }
+    if (liftedMeanLuma < 0.48) {
+        return 1.2;
+    }
+    return 1.12;
 }
 
 function createSharpGaussianTexture(data: Uint16Array, width: number, height: number) {
@@ -1575,6 +1610,7 @@ function SharpGaussianEnvironmentSplat({
         [gl.capabilities.maxTextureSize, metadata],
     );
     const isSingleImagePreview = useMemo(() => isSingleImagePreviewMetadata(metadata), [metadata]);
+    const opacityBoost = useMemo(() => resolvePreviewOpacityBoost(metadata), [metadata]);
     const payloadRef = useRef<SharpGaussianPayload | null>(null);
     const [payload, setPayload] = useState<SharpGaussianPayload | null>(null);
     const [loadState, setLoadState] = useState<{ phase: "loading" | "ready" | "error"; message: string }>({
@@ -1784,6 +1820,14 @@ function SharpGaussianEnvironmentSplat({
 
         material.uniforms.uViewport.value.set(size.width * gl.getPixelRatio(), size.height * gl.getPixelRatio());
     }, [gl, material, size.height, size.width]);
+
+    useEffect(() => {
+        if (!material) {
+            return;
+        }
+
+        material.uniforms.uOpacityBoost.value = opacityBoost;
+    }, [material, opacityBoost]);
 
     useEffect(() => {
         if (!material || !payload) {

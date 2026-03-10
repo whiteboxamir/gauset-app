@@ -358,6 +358,34 @@ export interface EnvironmentReleaseGates {
     failed?: string[];
 }
 
+export interface EnvironmentPreviewEnhancement {
+    source_renderer?: string;
+    point_count_before?: number;
+    point_count_after?: number;
+    density?: {
+        multiplier?: number;
+        source_count?: number;
+        output_count?: number;
+        jitter_radius?: number;
+        scale_shrink?: number;
+    };
+    exposure?: {
+        profile?: string;
+        dark_scene?: boolean;
+        gain?: number;
+        gamma?: number;
+        saturation_boost?: number;
+        target_mean?: number;
+        target_p75?: number;
+        max_gain?: number;
+        min_gamma?: number;
+        mean_luma_before?: number;
+        mean_luma_after?: number;
+        p75_luma_before?: number;
+        p75_luma_after?: number;
+    };
+}
+
 export interface GeneratedEnvironmentMetadata {
     lane?: "preview" | "reconstruction";
     truth_label?: string;
@@ -385,6 +413,7 @@ export interface GeneratedEnvironmentMetadata {
     release_gates?: EnvironmentReleaseGates;
     quality?: EnvironmentQualityMetrics;
     delivery?: EnvironmentDeliveryProfile;
+    preview_enhancement?: EnvironmentPreviewEnhancement;
 }
 
 function normalizeEnvironmentString(value: unknown) {

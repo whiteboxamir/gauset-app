@@ -50,23 +50,41 @@ class VercelSingleImagePreviewFallbackTests(unittest.TestCase):
         metadata = json.loads(payloads["metadata.json"].decode("utf-8"))
         point_count = _ply_vertex_count(payloads["splats.ply"])
         expected_source_count = self.app.SYNTH_PREVIEW_BASE_SIZE * self.app.SYNTH_PREVIEW_BASE_SIZE
-        expected_point_count = expected_source_count * self.app.SYNTH_PREVIEW_DENSITY_MULTIPLIER
+        expected_density_multiplier = metadata["preview_enhancement"]["density"]["multiplier"]
+        expected_point_count = expected_source_count * expected_density_multiplier
 
         self.assertEqual(point_count, expected_point_count)
         self.assertEqual(metadata["point_count"], expected_point_count)
         self.assertEqual(metadata["quality_tier"], "single_image_preview_dense_fallback")
         self.assertEqual(metadata["preview_enhancement"]["density"]["source_count"], expected_source_count)
         self.assertEqual(metadata["preview_enhancement"]["density"]["output_count"], expected_point_count)
+        self.assertGreaterEqual(expected_density_multiplier, self.app.SYNTH_PREVIEW_DENSITY_MULTIPLIER)
         self.assertEqual(
             metadata["delivery"]["render_targets"]["preferred_point_budget"],
             expected_point_count,
         )
-        self.assertEqual(metadata["rendering"]["preview_density_multiplier"], self.app.SYNTH_PREVIEW_DENSITY_MULTIPLIER)
+        self.assertEqual(metadata["rendering"]["preview_density_multiplier"], expected_density_multiplier)
         self.assertFalse(metadata["rendering"]["apply_preview_orientation"])
         self.assertGreaterEqual(
             metadata["preview_enhancement"]["exposure"]["mean_luma_after"],
             metadata["preview_enhancement"]["exposure"]["mean_luma_before"],
         )
+
+    def test_dark_scene_preview_gets_extra_lift_and_density(self) -> None:
+        fixture_path = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "public-scenes" / "03-neon-streets.png"
+        payloads = self.app._binary_splat_payload(fixture_path.read_bytes(), fixture_path.name)
+        metadata = json.loads(payloads["metadata.json"].decode("utf-8"))
+        exposure = metadata["preview_enhancement"]["exposure"]
+        density = metadata["preview_enhancement"]["density"]
+
+        self.assertTrue(exposure["dark_scene"])
+        self.assertEqual(exposure["profile"], "dark_scene_lift")
+        self.assertGreaterEqual(exposure["mean_luma_after"], 0.42)
+        self.assertGreaterEqual(
+            density["multiplier"],
+            self.app.SYNTH_PREVIEW_DENSITY_MULTIPLIER + self.app.SYNTH_PREVIEW_DARK_DENSITY_BONUS,
+        )
+        self.assertEqual(metadata["point_count"], density["source_count"] * density["multiplier"])
 
 
 if __name__ == "__main__":
