@@ -9,12 +9,6 @@
       "src": "api/_mvp_backend/*.py",
       "use": "@vercel/python",
       "config": {
-        "includeFiles": [
-          "../../vercel-backend/**",
-          "../../requirements.txt",
-          "../../pyproject.toml",
-          "../../.python-version"
-        ],
         "maxLambdaSize": "50mb"
       }
     }
