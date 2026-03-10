@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from models.ml_sharp_wrapper import generate_environment
 from models.triposr_wrapper import generate_asset
+from providers import get_provider_registry
 
 router = APIRouter()
 
@@ -27,6 +28,10 @@ for directory in [UPLOADS_DIR, SCENES_DIR, ASSETS_DIR]:
 
 # In-memory job queue state.
 jobs: Dict[str, Dict[str, Any]] = {}
+
+CAPTURE_MIN_IMAGES = 8
+CAPTURE_RECOMMENDED_IMAGES = 12
+CAPTURE_MAX_IMAGES = 32
 
 
 def _utc_now() -> str:
@@ -227,6 +232,15 @@ def _torch_status() -> Dict[str, Any]:
         }
 
 
+def _capture_guidance() -> List[str]:
+    return [
+        "Walk an arc around the subject or environment instead of shooting from one locked view.",
+        "Keep 60-80% overlap between neighboring frames.",
+        "Avoid motion blur, mirrors, and fast-moving people crossing the scene.",
+        "Collect a full orbit or forward path with some height variation before reconstructing.",
+    ]
+
+
 class SceneSaveRequest(BaseModel):
     scene_id: str
     scene_graph: Dict[str, Any]
@@ -252,9 +266,100 @@ class SceneReviewRequest(BaseModel):
 
 @router.get("/setup/status")
 async def setup_status():
+    torch_status = _torch_status()
+    ml_sharp_available = bool((PROJECT_ROOT / "backend" / "ml-sharp").exists() and torch_status.get("installed"))
+    triposr_available = bool((PROJECT_ROOT / "backend" / "TripoSR").exists())
+    provider_summary = get_provider_registry().image_provider_summary()
+    worker_mode = "native_local_ml_sharp" if ml_sharp_available else "gpu_worker_missing"
+    backend_truth = (
+        "This local backend can run ML-Sharp single-image preview and asset generation directly. "
+        "Benchmark-grade multi-view reconstruction is still not wired into this server."
+        if ml_sharp_available
+        else "This local backend is missing the ML-Sharp preview worker. Preview generation will fall back or remain unavailable."
+    )
+    preview_summary = (
+        "Generate a dense single-image Gaussian preview through the native ML-Sharp worker."
+        if ml_sharp_available
+        else "Generate a single-photo Gaussian preview when the ML-Sharp worker is restored."
+    )
+    preview_truth = (
+        "This output is produced by a single-image Gaussian model running locally. Hidden geometry can still be hallucinated."
+        if ml_sharp_available
+        else "This output path depends on the ML-Sharp worker and is not currently connected."
+    )
+
     return {
         "status": "ok",
         "python_version": platform.python_version(),
+        "backend": {
+            "label": "Local Generation Backend",
+            "kind": "native-ml-sharp-and-asset" if ml_sharp_available else "local-asset-only",
+            "deployment": "local",
+            "truth": backend_truth,
+            "lane_truth": "local_single_image_lrm_and_asset_only" if ml_sharp_available else "local_asset_only",
+        },
+        "lane_truth": {
+            "preview": "single_image_lrm_preview" if ml_sharp_available else "preview_worker_missing",
+            "reconstruction": "gpu_worker_not_connected",
+            "asset": "single_image_asset" if triposr_available else "asset_worker_missing",
+        },
+        "reconstruction_backend": {
+            "name": worker_mode,
+            "kind": "native_single_image_gaussian_worker" if ml_sharp_available else "unavailable",
+            "gpu_worker_connected": ml_sharp_available,
+            "native_gaussian_training": ml_sharp_available,
+            "world_class_ready": False,
+        },
+        "benchmark_status": {
+            "status": "not_benchmarked",
+            "locked_suite": "real_space_world_class_v1",
+            "summary": "The local backend is not benchmarked as a real-space reconstruction system.",
+        },
+        "release_gates": {
+            "truthful_preview_lane": ml_sharp_available,
+            "gpu_reconstruction_connected": ml_sharp_available,
+            "native_gaussian_training": ml_sharp_available,
+            "holdout_metrics": False,
+            "market_benchmarking": False,
+        },
+        "capabilities": {
+            "preview": {
+                "available": ml_sharp_available,
+                "label": "Image-to-Splat Preview" if ml_sharp_available else "Preview Worker Missing",
+                "summary": preview_summary,
+                "truth": preview_truth,
+                "lane_truth": "single_image_lrm_preview" if ml_sharp_available else "preview_worker_missing",
+                "input_strategy": "1 photo",
+                "min_images": 1,
+                "recommended_images": 1,
+            },
+            "reconstruction": {
+                "available": False,
+                "label": "Production Reconstruction",
+                "summary": "Collect a multi-view capture set for real 3D Gaussian reconstruction.",
+                "truth": "This local server can run the single-image ML-Sharp preview worker, but it does not expose a benchmarked multi-view reconstruction lane yet.",
+                "lane_truth": "gpu_worker_not_connected",
+                "input_strategy": "8-32 overlapping photos or short orbit video",
+                "min_images": CAPTURE_MIN_IMAGES,
+                "recommended_images": CAPTURE_RECOMMENDED_IMAGES,
+            },
+            "asset": {
+                "available": triposr_available,
+                "label": "Single-Image Asset",
+                "summary": "Generate a hero prop mesh from one reference image.",
+                "truth": "This lane is object-focused generation, not environment reconstruction.",
+                "lane_truth": "single_image_asset" if triposr_available else "asset_worker_missing",
+                "input_strategy": "1 photo",
+                "min_images": 1,
+                "recommended_images": 1,
+            },
+        },
+        "capture": {
+            "minimum_images": CAPTURE_MIN_IMAGES,
+            "recommended_images": CAPTURE_RECOMMENDED_IMAGES,
+            "max_images": CAPTURE_MAX_IMAGES,
+            "guidance": _capture_guidance(),
+        },
         "project_root": str(PROJECT_ROOT),
         "directories": {
             "uploads": UPLOADS_DIR.exists(),
@@ -262,10 +367,27 @@ async def setup_status():
             "scenes": SCENES_DIR.exists(),
         },
         "models": {
-            "ml_sharp": (PROJECT_ROOT / "backend" / "ml-sharp").exists(),
-            "triposr": (PROJECT_ROOT / "backend" / "TripoSR").exists(),
+            "preview_generator": "ml_sharp_local_worker" if ml_sharp_available else None,
+            "asset_generator": "triposr_local_worker" if triposr_available else None,
+            "ml_sharp": ml_sharp_available,
+            "triposr": triposr_available,
         },
-        "torch": _torch_status(),
+        "generator": {
+            "environment": "ml_sharp_local_worker" if ml_sharp_available else None,
+            "asset": "triposr_local_worker" if triposr_available else None,
+        },
+        "torch": torch_status,
+        "image_to_splat_bridge": {
+            "id": "ml_sharp_local_worker",
+            "label": "ML-Sharp Local Worker",
+            "available": ml_sharp_available,
+            "connection_status": "configured" if ml_sharp_available else "unavailable",
+            "summary": "Runs single-image Gaussian preview generation directly inside the local backend.",
+            "availability_reason": None if ml_sharp_available else "ML-Sharp is not installed or torch is unavailable in the local backend.",
+            "required_env": [],
+            "optional_env": ["GAUSET_IMAGE_TO_SPLAT_BACKEND_URL", "GAUSET_IMAGE_TO_SPLAT_BACKEND_TOKEN"],
+        },
+        "provider_generation": provider_summary,
     }
 
 
