@@ -1,3 +1,11 @@
+from .environment_generation import (
+    EnvironmentArtifact,
+    EnvironmentGenerationRequest,
+    EnvironmentJob,
+    EnvironmentBridgeStatus,
+    get_environment_bridge_registry,
+    materialize_environment_artifact,
+)
 from .image_generation import (
     ImageGenerationRequest,
     ProviderArtifact,
@@ -10,12 +18,18 @@ from .image_generation import (
 )
 
 __all__ = [
+    "EnvironmentArtifact",
+    "EnvironmentBridgeStatus",
+    "EnvironmentGenerationRequest",
+    "EnvironmentJob",
     "ImageGenerationRequest",
     "ProviderArtifact",
     "ProviderCatalogEntry",
     "ProviderError",
     "ProviderJob",
+    "get_environment_bridge_registry",
     "get_provider_registry",
+    "materialize_environment_artifact",
     "materialize_artifact",
     "normalize_reference_image",
 ]

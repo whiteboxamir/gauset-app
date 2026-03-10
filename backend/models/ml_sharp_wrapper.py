@@ -1,4 +1,5 @@
 import json
+import math
 import os
 import shlex
 import shutil
@@ -6,20 +7,44 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, Dict, List, Optional, Tuple
+
+import torch
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 ML_SHARP_REPO = PROJECT_ROOT / "backend" / "ml-sharp"
+ML_SHARP_SRC = ML_SHARP_REPO / "src"
+
+DEFAULT_PREVIEW_DENSITY_MULTIPLIER = max(1, int(os.getenv("GAUSET_ML_SHARP_DENSITY_MULTIPLIER", "5")))
+DEFAULT_PREVIEW_JITTER_RADIUS = float(os.getenv("GAUSET_ML_SHARP_DENSITY_JITTER", "0.38"))
+DEFAULT_PREVIEW_SCALE_SHRINK = float(os.getenv("GAUSET_ML_SHARP_SCALE_SHRINK", "0.9"))
+DEFAULT_PREVIEW_SATURATION_BOOST = float(os.getenv("GAUSET_ML_SHARP_SATURATION_BOOST", "1.06"))
+DEFAULT_PREVIEW_TARGET_P75 = float(os.getenv("GAUSET_ML_SHARP_TARGET_P75", "0.72"))
+DEFAULT_PREVIEW_MAX_GAIN = float(os.getenv("GAUSET_ML_SHARP_MAX_GAIN", "1.75"))
+DEFAULT_PREVIEW_TARGET_MEAN = float(os.getenv("GAUSET_ML_SHARP_TARGET_MEAN", "0.42"))
+DEFAULT_PREVIEW_MIN_GAMMA = float(os.getenv("GAUSET_ML_SHARP_MIN_GAMMA", "0.84"))
+DEFAULT_PREVIEW_MAX_GAMMA = float(os.getenv("GAUSET_ML_SHARP_MAX_GAMMA", "1.0"))
+
+
+def _ensure_ml_sharp_imports():
+    if str(ML_SHARP_SRC) not in sys.path:
+        sys.path.insert(0, str(ML_SHARP_SRC))
+
+    from sharp.utils import linalg  # pylint: disable=import-error
+    from sharp.utils.gaussians import Gaussians3D, load_ply, save_ply  # pylint: disable=import-error
+
+    return Gaussians3D, load_ply, save_ply, linalg
 
 
 def _env_flag(name: str, default: str = "0") -> bool:
     return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _run_command(command: List[str], cwd: Optional[Path] = None) -> None:
+def _run_command(command: List[str], cwd: Optional[Path] = None, env: Optional[Dict[str, str]] = None) -> None:
     result = subprocess.run(
         command,
         cwd=str(cwd) if cwd else None,
+        env=env,
         text=True,
         capture_output=True,
         check=False,
@@ -29,6 +54,241 @@ def _run_command(command: List[str], cwd: Optional[Path] = None) -> None:
         stdout = (result.stdout or "").strip()
         message = stderr or stdout or f"Command failed: {' '.join(command)}"
         raise RuntimeError(message)
+
+
+def _compute_preview_color_stats(colors: torch.Tensor) -> Dict[str, Any]:
+    luma = (colors[:, 0] * 0.299) + (colors[:, 1] * 0.587) + (colors[:, 2] * 0.114)
+    return {
+        "mean_rgb": [round(float(value), 4) for value in colors.mean(dim=0)],
+        "mean_luma": round(float(luma.mean()), 4),
+        "p75_luma": round(float(torch.quantile(luma, 0.75)), 4),
+        "p90_luma": round(float(torch.quantile(luma, 0.90)), 4),
+        "mean_opacity": None,
+    }
+
+
+def _apply_preview_exposure_correction(colors: torch.Tensor) -> Tuple[torch.Tensor, Dict[str, Any]]:
+    luma = (colors[:, 0] * 0.299) + (colors[:, 1] * 0.587) + (colors[:, 2] * 0.114)
+    mean_luma = float(luma.mean())
+    p75_luma = float(torch.quantile(luma, 0.75))
+
+    gain = max(1.0, min(DEFAULT_PREVIEW_MAX_GAIN, DEFAULT_PREVIEW_TARGET_P75 / max(p75_luma, 1e-3)))
+    lifted = (colors * gain).clamp(0.0, 1.0)
+
+    post_gain_luma = (lifted[:, 0] * 0.299) + (lifted[:, 1] * 0.587) + (lifted[:, 2] * 0.114)
+    post_gain_mean = float(post_gain_luma.mean())
+    gamma = 1.0
+    if post_gain_mean < DEFAULT_PREVIEW_TARGET_MEAN:
+        gamma = float(
+            max(
+                DEFAULT_PREVIEW_MIN_GAMMA,
+                min(
+                    DEFAULT_PREVIEW_MAX_GAMMA,
+                    math.log(DEFAULT_PREVIEW_TARGET_MEAN) / math.log(max(post_gain_mean, 1e-3)),
+                ),
+            )
+        )
+
+    gamma_corrected = lifted.clamp(0.0, 1.0).pow(gamma)
+    corrected_luma = (gamma_corrected[:, 0] * 0.299) + (gamma_corrected[:, 1] * 0.587) + (gamma_corrected[:, 2] * 0.114)
+    neutral = corrected_luma.unsqueeze(-1)
+    corrected = (neutral + (gamma_corrected - neutral) * DEFAULT_PREVIEW_SATURATION_BOOST).clamp(0.0, 1.0)
+
+    final_luma = (corrected[:, 0] * 0.299) + (corrected[:, 1] * 0.587) + (corrected[:, 2] * 0.114)
+    return corrected, {
+        "gain": round(gain, 4),
+        "gamma": round(gamma, 4),
+        "saturation_boost": round(DEFAULT_PREVIEW_SATURATION_BOOST, 4),
+        "mean_luma_before": round(mean_luma, 4),
+        "mean_luma_after": round(float(final_luma.mean()), 4),
+        "p75_luma_before": round(p75_luma, 4),
+        "p75_luma_after": round(float(torch.quantile(final_luma, 0.75)), 4),
+    }
+
+
+def _build_density_offsets(rotations: torch.Tensor, singular_values: torch.Tensor, num_copies: int) -> torch.Tensor:
+    if num_copies <= 1:
+        batch, count = singular_values.shape[:2]
+        return torch.zeros((batch, count, 1, 3), dtype=singular_values.dtype, device=singular_values.device)
+
+    tangent_a = rotations[..., 0] * singular_values[..., 0:1]
+    tangent_b = rotations[..., 1] * singular_values[..., 1:2]
+    patterns = torch.tensor(
+        [
+            [0.0, 0.0],
+            [1.0, 0.0],
+            [-1.0, 0.0],
+            [0.0, 1.0],
+            [0.0, -1.0],
+            [0.70710678, 0.70710678],
+            [-0.70710678, 0.70710678],
+            [0.70710678, -0.70710678],
+            [-0.70710678, -0.70710678],
+        ],
+        dtype=singular_values.dtype,
+        device=singular_values.device,
+    )
+    if num_copies > patterns.shape[0]:
+        repeats = math.ceil(num_copies / patterns.shape[0])
+        patterns = patterns.repeat((repeats, 1))
+    patterns = patterns[:num_copies]
+    offsets = DEFAULT_PREVIEW_JITTER_RADIUS * (
+        tangent_a[:, :, None, :] * patterns[:, 0].view(1, 1, num_copies, 1)
+        + tangent_b[:, :, None, :] * patterns[:, 1].view(1, 1, num_copies, 1)
+    )
+    offsets[:, :, 0, :] = 0.0
+    return offsets
+
+
+def _densify_preview_gaussians(gaussians) -> Tuple[Any, Dict[str, Any]]:
+    batch, source_count, _ = gaussians.mean_vectors.shape
+    density_multiplier = max(1, DEFAULT_PREVIEW_DENSITY_MULTIPLIER)
+
+    if density_multiplier == 1:
+        return gaussians, {
+            "multiplier": 1,
+            "source_count": source_count,
+            "output_count": source_count,
+            "scale_shrink": 1.0,
+            "jitter_radius": DEFAULT_PREVIEW_JITTER_RADIUS,
+        }
+
+    _, _, _, linalg = _ensure_ml_sharp_imports()
+    rotations = linalg.rotation_matrices_from_quaternions(gaussians.quaternions)
+    offsets = _build_density_offsets(rotations, gaussians.singular_values, density_multiplier)
+
+    means = gaussians.mean_vectors[:, :, None, :] + offsets
+    means = means.reshape(batch, source_count * density_multiplier, 3)
+
+    scales = (gaussians.singular_values[:, :, None, :].expand(-1, -1, density_multiplier, -1) * DEFAULT_PREVIEW_SCALE_SHRINK).reshape(
+        batch, source_count * density_multiplier, 3
+    )
+    quaternions = gaussians.quaternions[:, :, None, :].expand(-1, -1, density_multiplier, -1).reshape(
+        batch, source_count * density_multiplier, 4
+    )
+    colors = gaussians.colors[:, :, None, :].expand(-1, -1, density_multiplier, -1).reshape(
+        batch, source_count * density_multiplier, 3
+    )
+
+    per_copy_opacity = 1.0 - torch.pow(1.0 - gaussians.opacities.clamp(0.0, 0.995), 1.0 / density_multiplier)
+    per_copy_opacity = per_copy_opacity.clamp(0.08, 0.995)
+    opacities = per_copy_opacity[:, :, None].expand(-1, -1, density_multiplier).reshape(
+        batch, source_count * density_multiplier
+    )
+
+    Gaussians3D, _, _, _ = _ensure_ml_sharp_imports()
+    densified = Gaussians3D(
+        mean_vectors=means,
+        singular_values=scales,
+        quaternions=quaternions,
+        colors=colors,
+        opacities=opacities,
+    )
+    return densified, {
+        "multiplier": density_multiplier,
+        "source_count": source_count,
+        "output_count": source_count * density_multiplier,
+        "scale_shrink": round(DEFAULT_PREVIEW_SCALE_SHRINK, 4),
+        "jitter_radius": round(DEFAULT_PREVIEW_JITTER_RADIUS, 4),
+        "mean_opacity_before": round(float(gaussians.opacities.mean()), 4),
+        "mean_opacity_after": round(float(opacities.mean()), 4),
+    }
+
+
+def _enhance_preview_outputs(output_dir: Path) -> Dict[str, Any]:
+    _, load_ply, save_ply, _ = _ensure_ml_sharp_imports()
+
+    splat_path = output_dir / "splats.ply"
+    gaussians, metadata = load_ply(splat_path)
+    colors = gaussians.colors.flatten(0, 1)
+    before_stats = _compute_preview_color_stats(colors)
+    before_stats["mean_opacity"] = round(float(gaussians.opacities.mean()), 4)
+
+    corrected_colors, exposure = _apply_preview_exposure_correction(colors)
+    corrected_gaussians = gaussians._replace(colors=corrected_colors.view_as(gaussians.colors))
+    densified_gaussians, density = _densify_preview_gaussians(corrected_gaussians)
+
+    save_ply(
+        densified_gaussians,
+        metadata.focal_length_px,
+        (metadata.resolution_px[1], metadata.resolution_px[0]),
+        splat_path,
+    )
+
+    after_colors = densified_gaussians.colors.flatten(0, 1)
+    after_stats = _compute_preview_color_stats(after_colors)
+    after_stats["mean_opacity"] = round(float(densified_gaussians.opacities.mean()), 4)
+    return {
+        "source_renderer": "ml_sharp_single_image",
+        "point_count_before": density["source_count"],
+        "point_count_after": density["output_count"],
+        "density": density,
+        "exposure": exposure,
+        "color_stats_before": before_stats,
+        "color_stats_after": after_stats,
+    }
+
+
+def _merge_preview_metadata(metadata_path: Path, enhancement: Dict[str, Any], input_image: Path) -> None:
+    if metadata_path.exists():
+        try:
+            payload = json.loads(metadata_path.read_text())
+        except Exception:
+            payload = {}
+    else:
+        payload = {}
+
+    delivery = payload.get("delivery") if isinstance(payload.get("delivery"), dict) else {}
+    axes = delivery.get("axes") if isinstance(delivery.get("axes"), dict) else {}
+    density_axis = axes.get("density") if isinstance(axes.get("density"), dict) else {}
+    rendering = payload.get("rendering") if isinstance(payload.get("rendering"), dict) else {}
+
+    point_count_after = int(enhancement["point_count_after"])
+    density_score = round(min(96.0, 55.0 + (math.log(max(point_count_after, 1)) - math.log(1179648.0)) * 18.0), 1)
+    delivery["axes"] = {
+        **axes,
+        "density": {
+            **density_axis,
+            "score": density_score,
+            "status": "strong" if density_score >= 85.0 else "watch" if density_score >= 70.0 else "critical",
+            "note": "Preview density was expanded with backend-side Gaussian supersampling before export.",
+        },
+    }
+    render_targets = delivery.get("render_targets") if isinstance(delivery.get("render_targets"), dict) else {}
+    delivery["render_targets"] = {
+        **render_targets,
+        "preferred_point_budget": point_count_after,
+    }
+
+    rendering.update(
+        {
+            "color_encoding": "sh_dc_rgb",
+            "viewer_decode": rendering.get("viewer_decode")
+            or "srgb = clamp(f_dc * 0.28209479177388 + 0.5, 0, 1)",
+            "has_explicit_vertex_colors": False,
+            "viewer_renderer": "sharp_gaussian_direct",
+            "source_format": "sharp_ply_dense_preview",
+            "preview_density_multiplier": enhancement["density"]["multiplier"],
+        }
+    )
+
+    payload.update(
+        {
+            "input_image": str(input_image),
+            "generated_at": time.time(),
+            "execution_mode": "real",
+            "generator": "gauset-local-backend",
+            "lane": payload.get("lane") or "preview",
+            "truth_label": payload.get("truth_label") or "Instant Preview",
+            "quality_tier": "single_image_preview_ultra_dense",
+            "faithfulness": payload.get("faithfulness") or "approximate",
+            "preview_enhancement": enhancement,
+            "rendering": rendering,
+            "delivery": delivery,
+            "point_count": point_count_after,
+        }
+    )
+    metadata_path.write_text(json.dumps(payload, indent=2))
 
 
 def _write_mock_environment(output_dir: Path) -> None:
@@ -64,15 +324,29 @@ def _run_ml_sharp_predict(image_path: Path, staging_dir: Path) -> Path:
     staged_image = input_dir / image_path.name
     shutil.copyfile(image_path, staged_image)
 
+    command_env = os.environ.copy()
+    python_path = command_env.get("PYTHONPATH", "").strip()
+    command_env["PYTHONPATH"] = (
+        f"{ML_SHARP_SRC}{os.pathsep}{python_path}" if python_path else str(ML_SHARP_SRC)
+    )
+
     commands = [
         ["sharp", "predict", "-i", str(input_dir), "-o", str(raw_dir)],
-        [sys.executable, "-m", "sharp", "predict", "-i", str(input_dir), "-o", str(raw_dir)],
+        [
+            sys.executable,
+            "-c",
+            "from sharp.cli.predict import predict_cli; predict_cli()",
+            "-i",
+            str(input_dir),
+            "-o",
+            str(raw_dir),
+        ],
     ]
 
     errors: List[str] = []
     for command in commands:
         try:
-            _run_command(command, cwd=ML_SHARP_REPO)
+            _run_command(command, cwd=ML_SHARP_REPO, env=command_env)
             return raw_dir
         except Exception as exc:
             errors.append(f"{' '.join(command)} -> {exc}")
@@ -149,17 +423,9 @@ def generate_environment(image_path: str, output_dir: str) -> str:
         staging_dir.mkdir(parents=True, exist_ok=True)
         raw_output_dir = _run_ml_sharp_predict(input_image, staging_dir)
         _normalize_environment_outputs(raw_output_dir, final_output_dir)
-
         metadata_path = final_output_dir / "metadata.json"
-        if metadata_path.exists():
-            try:
-                payload = json.loads(metadata_path.read_text())
-            except Exception:
-                payload = {}
-            payload["input_image"] = str(input_image)
-            payload["generated_at"] = time.time()
-            payload["execution_mode"] = "real"
-            metadata_path.write_text(json.dumps(payload, indent=2))
+        enhancement = _enhance_preview_outputs(final_output_dir)
+        _merge_preview_metadata(metadata_path, enhancement, input_image)
 
         print(f"[ML-Sharp] Output saved to {final_output_dir}")
     except Exception as exc:

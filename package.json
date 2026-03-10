@@ -4,6 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:backend": "backend_venv/bin/python backend/server.py",
+    "dev:all": "node scripts/dev-all.mjs",
     "build": "node guard-deploy-target.mjs && next build",
     "start": "next start",
     "lint": "next lint"

@@ -1,5 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  distDir: process.env.NODE_ENV === "development" ? ".next-dev" : ".next",
   reactStrictMode: true,
   eslint: {
     ignoreDuringBuilds: true,
@@ -8,7 +9,6 @@ const nextConfig = {
   typescript: {
     ignoreBuildErrors: true,
   },
-  distDir: process.env.NODE_ENV === 'development' ? '.next-local' : '.next',
 };
 
 export default nextConfig;

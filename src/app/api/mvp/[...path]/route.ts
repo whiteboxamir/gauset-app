@@ -4,7 +4,9 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const HOP_BY_HOP_HEADERS = new Set([
+    "accept-encoding",
     "connection",
+    "content-encoding",
     "keep-alive",
     "proxy-authenticate",
     "proxy-authorization",
@@ -21,7 +23,16 @@ function resolveBackendBaseUrl() {
         process.env.GAUSET_BACKEND_URL ??
         process.env.NEXT_PUBLIC_GAUSET_API_BASE_URL ??
         (process.env.NODE_ENV !== "production" ? "http://127.0.0.1:8000" : "");
-    return explicit.replace(/\/$/, "");
+    return explicit.trim().replace(/\/$/, "");
+}
+
+function resolveBackendWorkerToken() {
+    const explicit =
+        process.env.GAUSET_BACKEND_WORKER_TOKEN ??
+        process.env.GAUSET_IMAGE_TO_SPLAT_BACKEND_TOKEN ??
+        process.env.GAUSET_WORKER_TOKEN ??
+        "";
+    return explicit.trim();
 }
 
 function buildUnavailableResponse(pathname: string) {
@@ -64,6 +75,12 @@ async function proxy(request: NextRequest, context: { params: Promise<{ path: st
             headers.set(key, value);
         }
     });
+    headers.set("accept-encoding", "identity");
+    const workerToken = resolveBackendWorkerToken();
+    if (workerToken) {
+        headers.set("authorization", `Bearer ${workerToken}`);
+        headers.set("x-gauset-worker-token", workerToken);
+    }
 
     let body: BodyInit | undefined;
     if (request.method !== "GET" && request.method !== "HEAD") {
@@ -76,6 +93,7 @@ async function proxy(request: NextRequest, context: { params: Promise<{ path: st
             headers,
             body,
             cache: "no-store",
+            signal: request.signal,
         });
 
         const responseHeaders = new Headers();
@@ -85,8 +103,7 @@ async function proxy(request: NextRequest, context: { params: Promise<{ path: st
             }
         });
 
-        const responseBody = request.method === "HEAD" ? null : await upstream.arrayBuffer();
-        return new Response(responseBody, {
+        return new Response(request.method === "HEAD" ? null : upstream.body, {
             status: upstream.status,
             statusText: upstream.statusText,
             headers: responseHeaders,

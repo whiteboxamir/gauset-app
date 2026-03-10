@@ -556,6 +556,12 @@ export function describeEnvironment(environment: any) {
         typeof environment?.metadata?.delivery?.label === "string" ? environment.metadata.delivery.label : null;
     const colorEncoding =
         typeof environment?.metadata?.rendering?.color_encoding === "string" ? environment.metadata.rendering.color_encoding : null;
+    const previewIsLrm =
+        lane === "preview" &&
+        (typeof environment?.metadata?.training_backend === "string"
+            ? environment.metadata.training_backend === "ml_sharp_gpu_worker"
+            : typeof environment?.metadata?.rendering?.source_format === "string" &&
+              environment.metadata.rendering.source_format === "sharp_ply_dense_preview");
     const legacyStatusLabel = normalizeEnvironmentString(environment?.statusLabel);
     const legacyLabel = normalizeEnvironmentString(environment?.label);
     const label =
@@ -568,7 +574,9 @@ export function describeEnvironment(environment: any) {
                 ? "Benchmarked Reconstruction Loaded"
                 : "Hybrid Reconstruction Loaded"
             : lane === "preview"
-              ? "Preview Loaded"
+              ? previewIsLrm
+                  ? "Image-to-Splat Preview Loaded"
+                  : "Preview Loaded"
               : environment
                 ? "Environment Loaded"
                 : "Awaiting Environment";
@@ -592,7 +600,9 @@ export function describeEnvironment(environment: any) {
                 ? "Benchmarked multi-view reconstruction"
                 : "Hybrid local reconstruction"
             : lane === "preview"
-              ? "Single-photo synthesized preview"
+              ? previewIsLrm
+                  ? "Single-photo AI splat preview"
+                  : "Single-photo synthesized preview"
               : "No environment yet";
     const detailParts: string[] = [];
     if (laneTruth) {

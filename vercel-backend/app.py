@@ -29,6 +29,7 @@ if str(BACKEND_SHARED_ROOT) not in sys.path:
     sys.path.append(str(BACKEND_SHARED_ROOT))
 
 from config_env import load_local_env_files
+from providers import EnvironmentGenerationRequest, get_environment_bridge_registry, materialize_environment_artifact
 from providers import ImageGenerationRequest as ProviderImageRequest
 from providers import ProviderError, get_provider_registry, materialize_artifact, normalize_reference_image
 
@@ -974,6 +975,168 @@ def _refresh_generated_image_job(job_payload: Dict[str, Any]) -> Dict[str, Any]:
     return _finalize_generated_image_job(job_payload, provider_job)
 
 
+def _environment_storage_paths(scene_id: str) -> Dict[str, str]:
+    root = f"scenes/{scene_id}/environment"
+    return {
+        "root": root,
+        "splats": f"{root}/splats.ply",
+        "cameras": f"{root}/cameras.json",
+        "metadata": f"{root}/metadata.json",
+        "holdout_report": f"{root}/holdout-report.json",
+        "capture_scorecard": f"{root}/capture-scorecard.json",
+        "benchmark_report": f"{root}/benchmark-report.json",
+    }
+
+
+def _write_environment_support_files(scene_id: str, metadata: Dict[str, Any]) -> None:
+    paths = _environment_storage_paths(scene_id)
+    support_payloads = {
+        paths["capture_scorecard"]: metadata.get("capture", {}),
+        paths["holdout_report"]: metadata.get("holdout", {}),
+        paths["benchmark_report"]: metadata.get("comparison", metadata.get("benchmark_status", {})),
+    }
+    for path, payload in support_payloads.items():
+        if STORAGE.exists(path):
+            continue
+        _write_json(path, payload)
+
+
+def _default_environment_metadata(scene_id: str) -> Dict[str, Any]:
+    return {
+        "generator": "gauset-mvp-backend",
+        "lane": "preview",
+        "truth_label": "Image-to-Splat Preview",
+        "quality_tier": "single_image_lrm_preview",
+        "faithfulness": "approximate",
+        "execution_mode": "real",
+        "reconstruction_backend": "ml_sharp_gpu_worker",
+        "training_backend": "ml_sharp_gpu_worker",
+        "rendering": {
+            "viewer_renderer": "sharp_gaussian_direct",
+            "source_format": "sharp_ply_dense_preview",
+            "viewer_source": f"/storage/scenes/{scene_id}/environment",
+        },
+    }
+
+
+def _normalize_environment_metadata(scene_id: str) -> Dict[str, Any]:
+    paths = _environment_storage_paths(scene_id)
+    if STORAGE.exists(paths["metadata"]):
+        raw_metadata = _read_json(paths["metadata"])
+        metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
+    else:
+        metadata = {}
+
+    defaults = _default_environment_metadata(scene_id)
+    rendering = metadata.get("rendering") if isinstance(metadata.get("rendering"), dict) else {}
+    metadata = {
+        **defaults,
+        **metadata,
+        "rendering": {
+            **defaults["rendering"],
+            **rendering,
+            "viewer_source": f"/storage/scenes/{scene_id}/environment",
+        },
+    }
+    _write_json(paths["metadata"], metadata)
+    _write_environment_support_files(scene_id, metadata)
+    return metadata
+
+
+def _finalize_environment_job(job_payload: Dict[str, Any], provider_job: Any) -> Dict[str, Any]:
+    warnings = [str(warning) for warning in job_payload.get("warnings", []) if str(warning).strip()]
+    warnings.extend(str(warning) for warning in getattr(provider_job, "warnings", []) if str(warning).strip())
+
+    scene_id = str(job_payload.get("id") or "").strip()
+    paths = _environment_storage_paths(scene_id)
+    stored_keys: set[str] = set()
+
+    for key, artifact in (getattr(provider_job, "outputs", {}) or {}).items():
+        if key not in paths:
+            continue
+        try:
+            content_bytes, _, _ = materialize_environment_artifact(artifact)
+            STORAGE.write_bytes(paths[key], content_bytes)
+            stored_keys.add(key)
+        except Exception as exc:  # pragma: no cover - defensive
+            warnings.append(f"{key}: {exc}")
+
+    if "splats" not in stored_keys and not STORAGE.exists(paths["splats"]):
+        job_payload["status"] = "failed"
+        job_payload["error"] = provider_job.error or "Image-to-splat worker finished without a splat artifact."
+        job_payload["warnings"] = warnings[:6]
+        job_payload["updated_at"] = _utc_now()
+        _save_job(scene_id, job_payload)
+        return job_payload
+
+    if "cameras" not in stored_keys and not STORAGE.exists(paths["cameras"]):
+        STORAGE.write_bytes(paths["cameras"], b"[]\n")
+
+    metadata = _normalize_environment_metadata(scene_id)
+    result = {
+        "scene_id": scene_id,
+        "remote_scene_id": getattr(provider_job, "scene_id", None),
+        "environment_dir": paths["root"],
+        "files": {
+            "splats": paths["splats"],
+            "cameras": paths["cameras"],
+            "metadata": paths["metadata"],
+            "holdout_report": paths["holdout_report"],
+            "capture_scorecard": paths["capture_scorecard"],
+            "benchmark_report": paths["benchmark_report"],
+        },
+        "urls": _scene_urls(scene_id),
+        "source_format": metadata.get("rendering", {}).get("source_format", "sharp_ply_dense_preview"),
+        "viewer_renderer": metadata.get("rendering", {}).get("viewer_renderer", "sharp_gaussian_direct"),
+        "training_backend": metadata.get("training_backend", "ml_sharp_gpu_worker"),
+        "provider": job_payload.get("environment_provider"),
+    }
+    job_payload["status"] = "completed"
+    job_payload["error"] = None
+    job_payload["result"] = result
+    job_payload["warnings"] = warnings[:6]
+    job_payload["updated_at"] = _utc_now()
+    _save_job(scene_id, job_payload)
+    return job_payload
+
+
+def _refresh_environment_job(job_payload: Dict[str, Any]) -> Dict[str, Any]:
+    if job_payload.get("type") != "environment" or job_payload.get("status") != "processing":
+        return job_payload
+
+    provider_job_id = str(job_payload.get("provider_job_id") or "").strip()
+    if not provider_job_id:
+        return job_payload
+
+    try:
+        bridge = get_environment_bridge_registry().get_bridge()
+        provider_job = bridge.poll_job(provider_job_id)
+    except Exception as exc:
+        job_payload["status"] = "failed"
+        job_payload["error"] = str(exc)
+        job_payload["updated_at"] = _utc_now()
+        _save_job(job_payload["id"], job_payload)
+        return job_payload
+
+    job_payload["provider_job_id"] = provider_job.provider_job_id or provider_job_id
+    job_payload["remote_scene_id"] = provider_job.scene_id or job_payload.get("remote_scene_id")
+    if provider_job.status == "processing":
+        job_payload["warnings"] = [str(warning) for warning in provider_job.warnings][:6]
+        job_payload["updated_at"] = _utc_now()
+        _save_job(job_payload["id"], job_payload)
+        return job_payload
+
+    if provider_job.status == "failed":
+        job_payload["status"] = "failed"
+        job_payload["warnings"] = [str(warning) for warning in provider_job.warnings][:6]
+        job_payload["error"] = provider_job.error or "Image-to-splat worker failed."
+        job_payload["updated_at"] = _utc_now()
+        _save_job(job_payload["id"], job_payload)
+        return job_payload
+
+    return _finalize_environment_job(job_payload, provider_job)
+
+
 class GenerateRequest(BaseModel):
     image_id: str
 
@@ -1099,26 +1262,43 @@ async def health() -> Dict[str, str]:
 @app.get("/setup/status")
 async def setup_status() -> Dict[str, Any]:
     provider_summary = get_provider_registry().image_provider_summary()
+    environment_bridge = get_environment_bridge_registry().status_payload()
+    bridge_available = bool(environment_bridge.get("available"))
+    preview_summary = (
+        "Generate a dense single-image Gaussian preview through the ML-Sharp GPU worker."
+        if bridge_available
+        else "Generate a single-photo Gaussian preview for nearby camera moves."
+    )
+    preview_truth = (
+        "This output is produced by a single-image Gaussian model through a dedicated GPU worker. Hidden geometry can still be hallucinated."
+        if bridge_available
+        else "This output is a synthesized preview, not a faithful multi-view reconstruction."
+    )
+    backend_truth = (
+        "This deployment dispatches single-image preview jobs to a dedicated ML-Sharp GPU worker and stores the resulting Gaussian splats locally."
+        if bridge_available
+        else "This deployment provides single-photo preview and asset generation. Production-grade multi-view Gaussian reconstruction requires a separate GPU worker."
+    )
     return {
         "status": "ok",
         "python_version": os.sys.version.split()[0],
         "backend": {
             "label": "Production Preview Backend",
-            "kind": "single-image-preview-and-asset",
+            "kind": "image-to-splat-bridge-and-asset" if bridge_available else "single-image-preview-and-asset",
             "deployment": "vercel",
-            "truth": "This deployment provides single-photo preview and asset generation. Production-grade multi-view Gaussian reconstruction requires a separate GPU worker.",
-            "lane_truth": "public_preview_and_asset_only",
+            "truth": backend_truth,
+            "lane_truth": "public_single_image_lrm_and_asset_only" if bridge_available else "public_preview_and_asset_only",
         },
         "lane_truth": {
-            "preview": "preview_only_single_image",
+            "preview": "single_image_lrm_preview" if bridge_available else "preview_only_single_image",
             "reconstruction": "gpu_worker_not_connected",
             "asset": "single_image_asset",
         },
         "reconstruction_backend": {
-            "name": "gpu_worker_missing",
-            "kind": "unavailable_in_public_preview_backend",
-            "gpu_worker_connected": False,
-            "native_gaussian_training": False,
+            "name": "ml_sharp_gpu_worker" if bridge_available else "gpu_worker_missing",
+            "kind": "remote_single_image_gaussian_worker" if bridge_available else "unavailable_in_public_preview_backend",
+            "gpu_worker_connected": bridge_available,
+            "native_gaussian_training": bridge_available,
             "world_class_ready": False,
         },
         "benchmark_status": {
@@ -1128,18 +1308,18 @@ async def setup_status() -> Dict[str, Any]:
         },
         "release_gates": {
             "truthful_preview_lane": True,
-            "gpu_reconstruction_connected": False,
-            "native_gaussian_training": False,
+            "gpu_reconstruction_connected": bridge_available,
+            "native_gaussian_training": bridge_available,
             "holdout_metrics": False,
             "market_benchmarking": False,
         },
         "capabilities": {
             "preview": {
                 "available": True,
-                "label": "Instant Preview",
-                "summary": "Generate a single-photo Gaussian preview for nearby camera moves.",
-                "truth": "This output is a synthesized preview, not a faithful multi-view reconstruction.",
-                "lane_truth": "preview_only_single_image",
+                "label": "Image-to-Splat Preview" if bridge_available else "Instant Preview",
+                "summary": preview_summary,
+                "truth": preview_truth,
+                "lane_truth": "single_image_lrm_preview" if bridge_available else "preview_only_single_image",
                 "input_strategy": "1 photo",
                 "min_images": 1,
                 "recommended_images": 1,
@@ -1173,7 +1353,7 @@ async def setup_status() -> Dict[str, Any]:
         },
         "storage_mode": STORAGE.mode(),
         "generator": {
-            "environment": "gauset-depth-synth-v1",
+            "environment": "ml_sharp_gpu_worker" if bridge_available else "gauset-depth-synth-v1",
             "asset": "gauset-relief-mesh-v1",
         },
         "directories": {
@@ -1182,9 +1362,9 @@ async def setup_status() -> Dict[str, Any]:
             "scenes": True,
         },
         "models": {
-            "preview_generator": "gauset-depth-synth-v1",
+            "preview_generator": "ml_sharp_gpu_worker" if bridge_available else "gauset-depth-synth-v1",
             "asset_generator": "gauset-relief-mesh-v1",
-            "ml_sharp": False,
+            "ml_sharp": bridge_available,
             "triposr": False,
         },
         "torch": {
@@ -1192,6 +1372,7 @@ async def setup_status() -> Dict[str, Any]:
             "version": "service",
             "mps_available": False,
         },
+        "image_to_splat_bridge": environment_bridge,
         "provider_generation": provider_summary,
     }
 
@@ -1352,6 +1533,10 @@ async def generate_environment(request: GenerateRequest) -> Dict[str, Any]:
         "updated_at": _utc_now(),
         "error": None,
         "result": None,
+        "environment_provider": None,
+        "provider_job_id": None,
+        "remote_scene_id": None,
+        "warnings": [],
     }
     _save_job(scene_id, job_payload)
 
@@ -1359,38 +1544,57 @@ async def generate_environment(request: GenerateRequest) -> Dict[str, Any]:
         upload_record = _load_upload_record(request.image_id)
         image_path = upload_record["storage_path"]
         image_bytes = STORAGE.read_bytes(image_path)
-        payloads = _environment_payload(image_bytes, upload_record["filename"])
-        for name, blob in payloads.items():
-            STORAGE.write_bytes(f"scenes/{scene_id}/environment/{name}", blob)
-        metadata_path = f"scenes/{scene_id}/environment/metadata.json"
-        metadata = _read_json(metadata_path)
-        rendering = metadata.get("rendering") if isinstance(metadata.get("rendering"), dict) else {}
-        metadata["rendering"] = {
-            **rendering,
-            "viewer_source": f"/storage/scenes/{scene_id}/environment",
-        }
-        _write_json(metadata_path, metadata)
+        bridge_status = get_environment_bridge_registry().status_payload()
+        if bridge_status.get("available"):
+            bridge = get_environment_bridge_registry().get_bridge()
+            provider_job = bridge.submit_environment_job(
+                EnvironmentGenerationRequest(
+                    filename=upload_record.get("stored_filename") or upload_record["filename"],
+                    image_bytes=image_bytes,
+                    image_id=request.image_id,
+                )
+            )
+            job_payload["environment_provider"] = bridge.bridge_id
+            job_payload["provider_job_id"] = provider_job.provider_job_id
+            job_payload["remote_scene_id"] = provider_job.scene_id
+            job_payload["warnings"] = [str(warning) for warning in provider_job.warnings][:6]
 
-        result = {
-            "scene_id": scene_id,
-            "environment_dir": f"scenes/{scene_id}/environment",
-            "files": {
-                "splats": f"scenes/{scene_id}/environment/splats.ply",
-                "cameras": f"scenes/{scene_id}/environment/cameras.json",
-                "metadata": f"scenes/{scene_id}/environment/metadata.json",
-                "holdout_report": f"scenes/{scene_id}/environment/holdout-report.json",
-                "capture_scorecard": f"scenes/{scene_id}/environment/capture-scorecard.json",
-                "benchmark_report": f"scenes/{scene_id}/environment/benchmark-report.json",
-            },
-            "urls": _scene_urls(scene_id),
-            "source_format": metadata.get("rendering", {}).get("source_format", "sharp_ply"),
-            "viewer_renderer": metadata.get("rendering", {}).get("viewer_renderer", "sharp_gaussian_direct"),
-            "training_backend": metadata.get("training_backend", "single_image_depth_preview"),
-        }
-        job_payload["status"] = "completed"
-        job_payload["updated_at"] = _utc_now()
-        job_payload["result"] = result
-        _save_job(scene_id, job_payload)
+            if provider_job.status == "completed":
+                _finalize_environment_job(job_payload, bridge.poll_job(provider_job.provider_job_id))
+            elif provider_job.status == "failed":
+                job_payload["status"] = "failed"
+                job_payload["error"] = provider_job.error or "Image-to-splat worker failed."
+                job_payload["updated_at"] = _utc_now()
+                _save_job(scene_id, job_payload)
+            else:
+                job_payload["updated_at"] = _utc_now()
+                _save_job(scene_id, job_payload)
+        else:
+            payloads = _environment_payload(image_bytes, upload_record["filename"])
+            for name, blob in payloads.items():
+                STORAGE.write_bytes(f"scenes/{scene_id}/environment/{name}", blob)
+            metadata = _normalize_environment_metadata(scene_id)
+
+            result = {
+                "scene_id": scene_id,
+                "environment_dir": f"scenes/{scene_id}/environment",
+                "files": {
+                    "splats": f"scenes/{scene_id}/environment/splats.ply",
+                    "cameras": f"scenes/{scene_id}/environment/cameras.json",
+                    "metadata": f"scenes/{scene_id}/environment/metadata.json",
+                    "holdout_report": f"scenes/{scene_id}/environment/holdout-report.json",
+                    "capture_scorecard": f"scenes/{scene_id}/environment/capture-scorecard.json",
+                    "benchmark_report": f"scenes/{scene_id}/environment/benchmark-report.json",
+                },
+                "urls": _scene_urls(scene_id),
+                "source_format": metadata.get("rendering", {}).get("source_format", "sharp_ply"),
+                "viewer_renderer": metadata.get("rendering", {}).get("viewer_renderer", "sharp_gaussian_direct"),
+                "training_backend": metadata.get("training_backend", "single_image_depth_preview"),
+            }
+            job_payload["status"] = "completed"
+            job_payload["updated_at"] = _utc_now()
+            job_payload["result"] = result
+            _save_job(scene_id, job_payload)
     except Exception as exc:  # pragma: no cover - defensive
         print(f"[environment] generation failed for {request.image_id}: {exc}")
         job_payload["status"] = "failed"
@@ -1525,8 +1729,11 @@ async def job_status(job_id: str) -> Dict[str, Any]:
     if not STORAGE.exists(path):
         raise HTTPException(status_code=404, detail="Job not found")
     payload = _read_json(path)
-    if isinstance(payload, dict) and payload.get("type") == "generated_image" and payload.get("status") == "processing":
-        payload = _refresh_generated_image_job(payload)
+    if isinstance(payload, dict) and payload.get("status") == "processing":
+        if payload.get("type") == "generated_image":
+            payload = _refresh_generated_image_job(payload)
+        elif payload.get("type") == "environment" and payload.get("provider_job_id"):
+            payload = _refresh_environment_job(payload)
     return payload
 
 

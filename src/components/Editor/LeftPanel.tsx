@@ -460,6 +460,17 @@ export default function LeftPanel({
     const recommendedCaptureImages =
         captureSession?.recommended_images ?? setupStatus?.capture?.recommended_images ?? minimumCaptureImages;
     const reconstructionAvailable = Boolean(reconstructionCapability?.available);
+    const reconstructionButtonLabel = isStartingReconstruction
+        ? "Starting Reconstruction..."
+        : captureSetBlocked
+          ? "Resolve Capture Blockers"
+          : reconstructionAvailable
+            ? "Start Reconstruction"
+            : "Awaiting Multi-View Capture";
+    const reconstructionButtonClassName =
+        captureSetBlocked || (reconstructionAvailable && !isStartingReconstruction)
+            ? "mt-4 w-full rounded-2xl border border-amber-500/20 bg-amber-400/10 px-4 py-3 font-medium text-amber-100 transition-all disabled:opacity-50"
+            : "mt-4 w-full rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 font-medium text-neutral-400 transition-all disabled:opacity-60";
 
     const triggerFilePicker = () => {
         if (backendMode === "offline") return;
@@ -2027,7 +2038,7 @@ export default function LeftPanel({
                                 ? captureSession.ready_for_reconstruction
                                     ? reconstructionAvailable
                                         ? "Capture minimum reached. Start reconstruction to build the fused scene."
-                                        : "Capture minimum reached. A GPU reconstruction worker is still required for true 3DGS."
+                                        : "Capture minimum reached. Multi-view reconstruction stays on standby until the 8-32 photo lane is enabled."
                                     : captureSetBlocked
                                       ? captureBlockers[0] ??
                                         `Capture minimum reached, but only ${captureUniqueFrameCount} unique views are available.`
@@ -2139,15 +2150,9 @@ export default function LeftPanel({
                                 !reconstructionAvailable ||
                                 isStartingReconstruction
                             }
-                            className="mt-4 w-full py-3 px-4 rounded-2xl border border-amber-500/20 bg-amber-400/10 text-amber-100 font-medium transition-all disabled:opacity-50"
+                            className={reconstructionButtonClassName}
                         >
-                            {isStartingReconstruction
-                                ? "Starting Reconstruction..."
-                                : captureSetBlocked
-                                  ? "Resolve Capture Blockers"
-                                  : reconstructionAvailable
-                                    ? "Start Reconstruction"
-                                    : "GPU Reconstruction Worker Not Connected"}
+                            {reconstructionButtonLabel}
                         </button>
                     </div>
                 </div>

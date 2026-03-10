@@ -1,11 +1,14 @@
 import json
+import mimetypes
+import os
 import platform
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
 
-from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from models.ml_sharp_wrapper import generate_environment
@@ -34,6 +37,79 @@ def _version_id() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
 
 
+def _guess_media_type(path: str) -> str:
+    guessed, _ = mimetypes.guess_type(path)
+    if guessed:
+        return guessed
+    if path.endswith(".glb"):
+        return "model/gltf-binary"
+    if path.endswith(".ply"):
+        return "application/octet-stream"
+    return "application/octet-stream"
+
+
+def _worker_token() -> str:
+    return os.getenv("GAUSET_WORKER_TOKEN", "").strip()
+
+
+def _require_worker_auth(request: Request) -> None:
+    expected = _worker_token()
+    if not expected:
+        return
+
+    authorization = request.headers.get("authorization", "").strip()
+    explicit = request.headers.get("x-gauset-worker-token", "").strip()
+    bearer = authorization[7:].strip() if authorization.lower().startswith("bearer ") else ""
+    provided = explicit or bearer
+    if provided != expected:
+        raise HTTPException(status_code=401, detail="Unauthorized worker request")
+
+
+def _resolve_storage_path(storage_path: str) -> Path:
+    relative = Path(storage_path)
+    if relative.is_absolute() or not relative.parts:
+        raise HTTPException(status_code=404, detail="Stored file not found")
+
+    root_name = relative.parts[0]
+    safe_roots = {
+        "uploads": (PROJECT_ROOT / "uploads").resolve(),
+        "scenes": SCENES_DIR.resolve(),
+        "assets": ASSETS_DIR.resolve(),
+    }
+    root = safe_roots.get(root_name)
+    if root is None:
+        raise HTTPException(status_code=404, detail="Stored file not found")
+
+    resolved = (PROJECT_ROOT / relative).resolve()
+    if root != resolved and root not in resolved.parents:
+        raise HTTPException(status_code=404, detail="Stored file not found")
+    if not resolved.exists() or not resolved.is_file():
+        raise HTTPException(status_code=404, detail="Stored file not found")
+    return resolved
+
+
+def _ensure_environment_support_files(output_dir: Path) -> None:
+    metadata_path = output_dir / "metadata.json"
+    if not metadata_path.exists():
+        return
+
+    try:
+        metadata = json.loads(metadata_path.read_text())
+    except Exception:
+        return
+
+    support_payloads = {
+        "capture-scorecard.json": metadata.get("capture", {}),
+        "holdout-report.json": metadata.get("holdout", {}),
+        "benchmark-report.json": metadata.get("comparison", metadata.get("benchmark_status", {})),
+    }
+    for filename, payload in support_payloads.items():
+        path = output_dir / filename
+        if path.exists():
+            continue
+        path.write_text(json.dumps(payload, indent=2))
+
+
 def _resolve_uploaded_image_path(image_id: str) -> Path:
     matches = sorted(UPLOADS_DIR.glob(f"{image_id}.*"))
     if not matches:
@@ -44,9 +120,13 @@ def _resolve_uploaded_image_path(image_id: str) -> Path:
 def _scene_urls(scene_id: str) -> Dict[str, str]:
     base = f"/storage/scenes/{scene_id}/environment"
     return {
+        "viewer": base,
         "splats": f"{base}/splats.ply",
         "cameras": f"{base}/cameras.json",
         "metadata": f"{base}/metadata.json",
+        "holdout_report": f"{base}/holdout-report.json",
+        "capture_scorecard": f"{base}/capture-scorecard.json",
+        "benchmark_report": f"{base}/benchmark-report.json",
     }
 
 
@@ -189,8 +269,14 @@ async def setup_status():
     }
 
 
+@router.get("/health")
+async def health():
+    return {"status": "ok"}
+
+
 @router.post("/upload")
-async def upload_image(file: UploadFile = File(...)):
+async def upload_image(http_request: Request, file: UploadFile = File(...)):
+    _require_worker_auth(http_request)
     if not file.filename:
         raise HTTPException(status_code=400, detail="Missing filename in upload")
 
@@ -213,8 +299,9 @@ async def upload_image(file: UploadFile = File(...)):
 
 
 @router.post("/generate/environment")
-async def generate_environment_api(request: GenerateRequest, background_tasks: BackgroundTasks):
-    image_path = _resolve_uploaded_image_path(request.image_id)
+async def generate_environment_api(payload: GenerateRequest, background_tasks: BackgroundTasks, http_request: Request):
+    _require_worker_auth(http_request)
+    image_path = _resolve_uploaded_image_path(payload.image_id)
 
     scene_id = f"scene_{str(uuid.uuid4())[:8]}"
     output_dir = SCENES_DIR / scene_id / "environment"
@@ -224,7 +311,7 @@ async def generate_environment_api(request: GenerateRequest, background_tasks: B
         "id": scene_id,
         "type": "environment",
         "status": "processing",
-        "image_id": request.image_id,
+        "image_id": payload.image_id,
         "created_at": _utc_now(),
         "updated_at": _utc_now(),
         "error": None,
@@ -234,6 +321,7 @@ async def generate_environment_api(request: GenerateRequest, background_tasks: B
     def task() -> None:
         try:
             generated_dir = Path(generate_environment(str(image_path), str(output_dir)))
+            _ensure_environment_support_files(generated_dir)
             jobs[scene_id]["status"] = "completed"
             jobs[scene_id]["result"] = {
                 "scene_id": scene_id,
@@ -242,6 +330,9 @@ async def generate_environment_api(request: GenerateRequest, background_tasks: B
                     "splats": str(generated_dir / "splats.ply"),
                     "cameras": str(generated_dir / "cameras.json"),
                     "metadata": str(generated_dir / "metadata.json"),
+                    "holdout_report": str(generated_dir / "holdout-report.json"),
+                    "capture_scorecard": str(generated_dir / "capture-scorecard.json"),
+                    "benchmark_report": str(generated_dir / "benchmark-report.json"),
                 },
                 "urls": _scene_urls(scene_id),
             }
@@ -261,8 +352,9 @@ async def generate_environment_api(request: GenerateRequest, background_tasks: B
 
 
 @router.post("/generate/asset")
-async def generate_asset_api(request: GenerateRequest, background_tasks: BackgroundTasks):
-    image_path = _resolve_uploaded_image_path(request.image_id)
+async def generate_asset_api(payload: GenerateRequest, background_tasks: BackgroundTasks, http_request: Request):
+    _require_worker_auth(http_request)
+    image_path = _resolve_uploaded_image_path(payload.image_id)
 
     asset_id = f"asset_{str(uuid.uuid4())[:8]}"
     output_dir = ASSETS_DIR / asset_id
@@ -272,7 +364,7 @@ async def generate_asset_api(request: GenerateRequest, background_tasks: Backgro
         "id": asset_id,
         "type": "asset",
         "status": "processing",
-        "image_id": request.image_id,
+        "image_id": payload.image_id,
         "created_at": _utc_now(),
         "updated_at": _utc_now(),
         "error": None,
@@ -482,7 +574,15 @@ async def create_scene_comment(scene_id: str, version_id: str, request: VersionC
 
 
 @router.get("/jobs/{job_id}")
-async def get_job_status(job_id: str):
+async def get_job_status(job_id: str, http_request: Request):
+    _require_worker_auth(http_request)
     if job_id not in jobs:
         raise HTTPException(status_code=404, detail="Job not found")
     return jobs[job_id]
+
+
+@router.api_route("/storage/{storage_path:path}", methods=["GET", "HEAD"])
+async def storage_proxy(storage_path: str, http_request: Request):
+    _require_worker_auth(http_request)
+    file_path = _resolve_storage_path(storage_path)
+    return FileResponse(file_path, media_type=_guess_media_type(storage_path), filename=file_path.name)
