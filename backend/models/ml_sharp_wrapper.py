@@ -9,11 +9,14 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+import numpy as np
 import torch
+from PIL import Image, ImageFilter
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 ML_SHARP_REPO = PROJECT_ROOT / "backend" / "ml-sharp"
 ML_SHARP_SRC = ML_SHARP_REPO / "src"
+SH_C0 = 0.28209479177387814
 
 DEFAULT_PREVIEW_DENSITY_MULTIPLIER = max(1, int(os.getenv("GAUSET_ML_SHARP_DENSITY_MULTIPLIER", "5")))
 DEFAULT_PREVIEW_JITTER_RADIUS = float(os.getenv("GAUSET_ML_SHARP_DENSITY_JITTER", "0.38"))
@@ -24,6 +27,9 @@ DEFAULT_PREVIEW_MAX_GAIN = float(os.getenv("GAUSET_ML_SHARP_MAX_GAIN", "1.75"))
 DEFAULT_PREVIEW_TARGET_MEAN = float(os.getenv("GAUSET_ML_SHARP_TARGET_MEAN", "0.42"))
 DEFAULT_PREVIEW_MIN_GAMMA = float(os.getenv("GAUSET_ML_SHARP_MIN_GAMMA", "0.84"))
 DEFAULT_PREVIEW_MAX_GAMMA = float(os.getenv("GAUSET_ML_SHARP_MAX_GAMMA", "1.0"))
+DEFAULT_PREVIEW_PROJECTION_POINT_LIMIT = max(200_000, int(os.getenv("GAUSET_ML_SHARP_PROJECTION_POINT_LIMIT", "1200000")))
+DEFAULT_PREVIEW_PROJECTION_INPUT_BLEND = float(os.getenv("GAUSET_ML_SHARP_PROJECTION_INPUT_BLEND", "0.78"))
+DEFAULT_PREVIEW_PROJECTION_POINT_BLEND = float(os.getenv("GAUSET_ML_SHARP_PROJECTION_POINT_BLEND", "0.55"))
 
 
 def _ensure_ml_sharp_imports():
@@ -64,6 +70,106 @@ def _compute_preview_color_stats(colors: torch.Tensor) -> Dict[str, Any]:
         "p75_luma": round(float(torch.quantile(luma, 0.75)), 4),
         "p90_luma": round(float(torch.quantile(luma, 0.90)), 4),
         "mean_opacity": None,
+    }
+
+
+def _render_preview_projection_image(
+    *,
+    gaussians,
+    metadata,
+    input_image: Path,
+    output_path: Path,
+) -> Dict[str, Any]:
+    width, height = metadata.resolution_px
+    focal_length_px = float(metadata.focal_length_px)
+    positions = gaussians.mean_vectors[0].detach().cpu().numpy()
+    colors = gaussians.colors[0].detach().cpu().numpy()
+    opacities = gaussians.opacities[0].detach().cpu().numpy()
+
+    if positions.shape[0] > DEFAULT_PREVIEW_PROJECTION_POINT_LIMIT:
+        step = max(1, positions.shape[0] // DEFAULT_PREVIEW_PROJECTION_POINT_LIMIT)
+        positions = positions[::step]
+        colors = colors[::step]
+        opacities = opacities[::step]
+
+    positive_depth = positions[:, 2] > 1e-3
+    positions = positions[positive_depth]
+    colors = colors[positive_depth]
+    opacities = opacities[positive_depth]
+
+    rgb = np.clip((colors * SH_C0) + 0.5, 0.0, 1.0).astype(np.float32)
+    alpha = np.clip(opacities.astype(np.float32), 0.0, 1.0) * 0.72
+    cx = (width - 1) * 0.5
+    cy = (height - 1) * 0.5
+    z = positions[:, 2]
+
+    input_rgb = np.asarray(
+        Image.open(input_image).convert("RGB").resize((width, height), Image.Resampling.LANCZOS),
+        dtype=np.float32,
+    ) / 255.0
+
+    best_score = float("inf")
+    best_render = None
+    best_orientation = {"x_sign": 1, "y_sign": -1}
+
+    for x_sign in (1.0, -1.0):
+        for y_sign in (-1.0, 1.0):
+            projected_x = np.round(cx + (x_sign * focal_length_px * (positions[:, 0] / z))).astype(np.int32)
+            projected_y = np.round(cy + (y_sign * focal_length_px * (positions[:, 1] / z))).astype(np.int32)
+            inside = (
+                (projected_x >= 0)
+                & (projected_x < width)
+                & (projected_y >= 0)
+                & (projected_y < height)
+            )
+            if not np.any(inside):
+                continue
+
+            projected_x = projected_x[inside]
+            projected_y = projected_y[inside]
+            projected_rgb = rgb[inside]
+            projected_alpha = alpha[inside]
+
+            accum_rgb = np.zeros((height, width, 3), dtype=np.float32)
+            accum_weight = np.zeros((height, width), dtype=np.float32)
+
+            np.add.at(accum_weight, (projected_y, projected_x), projected_alpha)
+            for channel_index in range(3):
+                np.add.at(accum_rgb[..., channel_index], (projected_y, projected_x), projected_rgb[:, channel_index] * projected_alpha)
+
+            normalized = accum_rgb / np.maximum(accum_weight[..., None], 1e-4)
+            density = np.clip(
+                accum_weight / max(float(np.quantile(accum_weight[accum_weight > 0], 0.9)) if np.any(accum_weight > 0) else 1.0, 1e-4),
+                0.0,
+                1.0,
+            )
+            density_image = Image.fromarray((density * 255.0).astype(np.uint8)).filter(ImageFilter.GaussianBlur(radius=1.1))
+            density_blur = np.asarray(density_image, dtype=np.float32) / 255.0
+            render = np.clip(
+                (input_rgb * density_blur[..., None] * DEFAULT_PREVIEW_PROJECTION_INPUT_BLEND)
+                + (normalized * DEFAULT_PREVIEW_PROJECTION_POINT_BLEND)
+                + (input_rgb * 0.18),
+                0.0,
+                1.0,
+            )
+
+            score = float(np.mean((render - input_rgb) ** 2) - (0.035 * density_blur.mean()))
+            if score < best_score:
+                best_score = score
+                best_render = render
+                best_orientation = {"x_sign": int(x_sign), "y_sign": int(y_sign)}
+
+    if best_render is None:
+        best_render = input_rgb
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    Image.fromarray((best_render * 255.0).astype(np.uint8)).save(output_path)
+    return {
+        "filename": output_path.name,
+        "orientation": best_orientation,
+        "score": round(best_score if math.isfinite(best_score) else 0.0, 6),
+        "input_blend": round(DEFAULT_PREVIEW_PROJECTION_INPUT_BLEND, 4),
+        "point_blend": round(DEFAULT_PREVIEW_PROJECTION_POINT_BLEND, 4),
     }
 
 
@@ -195,7 +301,7 @@ def _densify_preview_gaussians(gaussians) -> Tuple[Any, Dict[str, Any]]:
     }
 
 
-def _enhance_preview_outputs(output_dir: Path) -> Dict[str, Any]:
+def _enhance_preview_outputs(output_dir: Path, input_image: Path) -> Dict[str, Any]:
     _, load_ply, save_ply, _ = _ensure_ml_sharp_imports()
 
     splat_path = output_dir / "splats.ply"
@@ -218,6 +324,17 @@ def _enhance_preview_outputs(output_dir: Path) -> Dict[str, Any]:
     after_colors = densified_gaussians.colors.flatten(0, 1)
     after_stats = _compute_preview_color_stats(after_colors)
     after_stats["mean_opacity"] = round(float(densified_gaussians.opacities.mean()), 4)
+    projection = _render_preview_projection_image(
+        gaussians=densified_gaussians,
+        metadata=metadata,
+        input_image=input_image,
+        output_path=output_dir / "preview-projection.png",
+    )
+    source_resolution = [int(metadata.resolution_px[0]), int(metadata.resolution_px[1])]
+    source_focal_length_px = float(metadata.focal_length_px)
+    source_vertical_fov = (
+        2 * math.degrees(math.atan(source_resolution[1] / (2 * max(source_focal_length_px, 1e-3))))
+    )
     return {
         "source_renderer": "ml_sharp_single_image",
         "point_count_before": density["source_count"],
@@ -226,6 +343,15 @@ def _enhance_preview_outputs(output_dir: Path) -> Dict[str, Any]:
         "exposure": exposure,
         "color_stats_before": before_stats,
         "color_stats_after": after_stats,
+        "projection": projection,
+        "source_camera": {
+            "position": [0.0, 0.0, 0.0],
+            "target": [0.0, 0.0, 1.0],
+            "up": [0.0, -1.0, 0.0],
+            "focal_length_px": round(source_focal_length_px, 4),
+            "resolution_px": source_resolution,
+            "fov_degrees": round(source_vertical_fov, 4),
+        },
     }
 
 
@@ -283,6 +409,8 @@ def _merge_preview_metadata(metadata_path: Path, enhancement: Dict[str, Any], in
             "quality_tier": "single_image_preview_ultra_dense",
             "faithfulness": payload.get("faithfulness") or "approximate",
             "preview_enhancement": enhancement,
+            "source_camera": enhancement.get("source_camera"),
+            "preview_projection": enhancement.get("projection", {}).get("filename"),
             "rendering": rendering,
             "delivery": delivery,
             "point_count": point_count_after,
@@ -424,7 +552,7 @@ def generate_environment(image_path: str, output_dir: str) -> str:
         raw_output_dir = _run_ml_sharp_predict(input_image, staging_dir)
         _normalize_environment_outputs(raw_output_dir, final_output_dir)
         metadata_path = final_output_dir / "metadata.json"
-        enhancement = _enhance_preview_outputs(final_output_dir)
+        enhancement = _enhance_preview_outputs(final_output_dir, image_path)
         _merge_preview_metadata(metadata_path, enhancement, input_image)
 
         print(f"[ML-Sharp] Output saved to {final_output_dir}")

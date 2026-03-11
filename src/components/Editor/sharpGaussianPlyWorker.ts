@@ -10,6 +10,11 @@ const MAX_CHUNK_OCTREE_LEVEL = 6;
 const PROGRESS_INTERVAL = 262144;
 const HALF_FLOAT_MAX = 65504;
 const DEFAULT_SPLAT_SCALE = 0.02;
+const PREVIEW_FOCUS_SAMPLE_TARGET = 16384;
+const PREVIEW_FOCUS_MIN_QUANTILE = 0.12;
+const PREVIEW_FOCUS_MAX_QUANTILE = 0.88;
+const PREVIEW_FOCUS_RADIUS_QUANTILE = 0.9;
+const PREVIEW_FOCUS_RADIUS_MARGIN = 1.08;
 
 type ColorPayloadMode = "albedo_linear" | "albedo_srgb" | "sh_dc";
 
@@ -87,6 +92,9 @@ type SerializedSharpGaussianPayload = {
     boundingBoxMax: [number, number, number];
     boundingSphereCenter: [number, number, number];
     boundingSphereRadius: number;
+    previewFocusCenter: [number, number, number];
+    previewFocusRadius: number;
+    previewFocusForward: [number, number, number];
     debugSamples: SerializedSharpGaussianDebugSample[];
 };
 
@@ -217,6 +225,136 @@ function sanitizeHalfFloatValue(value: number, fallback = 0) {
 
 function sanitizeNonNegativeHalfFloatValue(value: number, fallback = 0) {
     return Math.min(HALF_FLOAT_MAX, Math.max(0, sanitizeHalfFloatValue(value, fallback)));
+}
+
+function quantileFromSorted(values: number[], quantile: number) {
+    if (values.length === 0) {
+        return 0;
+    }
+
+    if (values.length === 1) {
+        return values[0];
+    }
+
+    const normalizedQuantile = Math.min(1, Math.max(0, quantile));
+    const position = normalizedQuantile * (values.length - 1);
+    const lowerIndex = Math.floor(position);
+    const upperIndex = Math.min(values.length - 1, Math.ceil(position));
+    if (lowerIndex === upperIndex) {
+        return values[lowerIndex];
+    }
+
+    const weight = position - lowerIndex;
+    return (values[lowerIndex] * (1 - weight)) + (values[upperIndex] * weight);
+}
+
+function normalizeVector3(
+    x: number,
+    y: number,
+    z: number,
+    fallback: readonly [number, number, number] = [0, 0, 1],
+): [number, number, number] {
+    const length = Math.hypot(x, y, z);
+    if (!Number.isFinite(length) || length <= 1e-6) {
+        return [fallback[0], fallback[1], fallback[2]];
+    }
+    return [x / length, y / length, z / length];
+}
+
+function resolvePreviewFocusSphere(
+    positions: Float32Array,
+    sampledCount: number,
+    fallbackSphere: { center: readonly [number, number, number]; radius: number },
+) {
+    const sampleTarget = Math.min(sampledCount, PREVIEW_FOCUS_SAMPLE_TARGET);
+    if (sampleTarget < 8) {
+        return {
+            center: [fallbackSphere.center[0], fallbackSphere.center[1], fallbackSphere.center[2]] as [number, number, number],
+            radius: sanitizeRadius(fallbackSphere.radius),
+            forward: [0, 0, 1] as [number, number, number],
+        };
+    }
+
+    const stride = Math.max(1, Math.floor(sampledCount / sampleTarget));
+    const xs: number[] = [];
+    const ys: number[] = [];
+    const zs: number[] = [];
+    for (let sampleIndex = 0; sampleIndex < sampledCount && xs.length < sampleTarget; sampleIndex += stride) {
+        const positionOffset = sampleIndex * 3;
+        xs.push(positions[positionOffset + 0]);
+        ys.push(positions[positionOffset + 1]);
+        zs.push(positions[positionOffset + 2]);
+    }
+
+    const lastPositionOffset = Math.max(0, (sampledCount - 1) * 3);
+    if (
+        xs.length > 0 &&
+        (xs[xs.length - 1] !== positions[lastPositionOffset + 0] ||
+            ys[ys.length - 1] !== positions[lastPositionOffset + 1] ||
+            zs[zs.length - 1] !== positions[lastPositionOffset + 2])
+    ) {
+        xs.push(positions[lastPositionOffset + 0]);
+        ys.push(positions[lastPositionOffset + 1]);
+        zs.push(positions[lastPositionOffset + 2]);
+    }
+
+    const sortedX = [...xs].sort((left, right) => left - right);
+    const sortedY = [...ys].sort((left, right) => left - right);
+    const sortedZ = [...zs].sort((left, right) => left - right);
+
+    const center: [number, number, number] = [
+        sanitizeFinite(
+            (quantileFromSorted(sortedX, PREVIEW_FOCUS_MIN_QUANTILE) + quantileFromSorted(sortedX, PREVIEW_FOCUS_MAX_QUANTILE)) * 0.5,
+            fallbackSphere.center[0],
+        ),
+        sanitizeFinite(
+            (quantileFromSorted(sortedY, PREVIEW_FOCUS_MIN_QUANTILE) + quantileFromSorted(sortedY, PREVIEW_FOCUS_MAX_QUANTILE)) * 0.5,
+            fallbackSphere.center[1],
+        ),
+        sanitizeFinite(
+            (quantileFromSorted(sortedZ, PREVIEW_FOCUS_MIN_QUANTILE) + quantileFromSorted(sortedZ, PREVIEW_FOCUS_MAX_QUANTILE)) * 0.5,
+            fallbackSphere.center[2],
+        ),
+    ];
+
+    const spans = [
+        Math.max(1e-6, quantileFromSorted(sortedX, PREVIEW_FOCUS_MAX_QUANTILE) - quantileFromSorted(sortedX, PREVIEW_FOCUS_MIN_QUANTILE)),
+        Math.max(1e-6, quantileFromSorted(sortedY, PREVIEW_FOCUS_MAX_QUANTILE) - quantileFromSorted(sortedY, PREVIEW_FOCUS_MIN_QUANTILE)),
+        Math.max(1e-6, quantileFromSorted(sortedZ, PREVIEW_FOCUS_MAX_QUANTILE) - quantileFromSorted(sortedZ, PREVIEW_FOCUS_MIN_QUANTILE)),
+    ] as const;
+    const primaryAxis = spans[0] <= spans[1] && spans[0] <= spans[2] ? 0 : spans[1] <= spans[2] ? 1 : 2;
+    const secondaryAxis = spans[0] >= spans[1] && spans[0] >= spans[2] ? 0 : spans[1] >= spans[2] ? 1 : 2;
+    const rawForward: [number, number, number] = [0, 0, 0];
+    rawForward[primaryAxis] = 1;
+    if (secondaryAxis !== primaryAxis) {
+        rawForward[secondaryAxis] = 0.28;
+    } else {
+        rawForward[2] = 0.28;
+    }
+
+    const distances: number[] = [];
+    const distanceStride = Math.max(1, Math.floor(sampledCount / Math.max(1, xs.length)));
+    for (let sampleIndex = 0; sampleIndex < sampledCount; sampleIndex += distanceStride) {
+        const positionOffset = sampleIndex * 3;
+        const dx = positions[positionOffset + 0] - center[0];
+        const dy = positions[positionOffset + 1] - center[1];
+        const dz = positions[positionOffset + 2] - center[2];
+        distances.push(Math.sqrt((dx * dx) + (dy * dy) + (dz * dz)));
+    }
+
+    distances.sort((left, right) => left - right);
+    const quantileRadius = sanitizeFinite(quantileFromSorted(distances, PREVIEW_FOCUS_RADIUS_QUANTILE), fallbackSphere.radius);
+    const minimumRadius = Math.max(1e-3, fallbackSphere.radius * 0.08);
+    const radius = Math.min(
+        sanitizeRadius(fallbackSphere.radius),
+        Math.max(minimumRadius, quantileRadius * PREVIEW_FOCUS_RADIUS_MARGIN),
+    );
+
+    return {
+        center,
+        radius: sanitizeRadius(radius),
+        forward: normalizeVector3(rawForward[0], rawForward[1], rawForward[2]),
+    };
 }
 
 function toSafeHalfFloat(value: number, fallback = 0) {
@@ -816,6 +954,7 @@ export function parsePackedSharpGaussianPayload({
 
     const rootBounds = sanitizeBounds({ minX, minY, minZ, maxX, maxY, maxZ });
     const rootSphere = boundsSphere(rootBounds);
+    const previewFocusSphere = resolvePreviewFocusSphere(positions, sampledCount, rootSphere);
     const colorPayloadMode = inferColorPayloadMode({
         hasBaseColor,
         hasShColor,
@@ -995,6 +1134,9 @@ export function parsePackedSharpGaussianPayload({
         boundingBoxMax: [rootBounds.maxX, rootBounds.maxY, rootBounds.maxZ],
         boundingSphereCenter: [rootSphere.center[0], rootSphere.center[1], rootSphere.center[2]],
         boundingSphereRadius: sanitizeRadius(rootSphere.radius),
+        previewFocusCenter: previewFocusSphere.center,
+        previewFocusRadius: previewFocusSphere.radius,
+        previewFocusForward: previewFocusSphere.forward,
         debugSamples,
     };
 }

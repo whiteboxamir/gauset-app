@@ -119,6 +119,7 @@ const defaultEnvironmentUrls = (sceneId: string) => ({
     splats: `/storage/scenes/${sceneId}/environment/splats.ply`,
     cameras: `/storage/scenes/${sceneId}/environment/cameras.json`,
     metadata: `/storage/scenes/${sceneId}/environment/metadata.json`,
+    preview_projection: `/storage/scenes/${sceneId}/environment/preview-projection.png`,
 });
 
 const defaultAssetUrls = (assetId: string) => ({
@@ -425,6 +426,7 @@ export default function LeftPanel({
             splats: toProxyUrl(urlCandidates?.splats ?? fallbackUrls.splats),
             cameras: toProxyUrl(urlCandidates?.cameras ?? fallbackUrls.cameras),
             metadata: toProxyUrl(urlCandidates?.metadata ?? fallbackUrls.metadata),
+            preview_projection: toProxyUrl(urlCandidates?.preview_projection ?? fallbackUrls.preview_projection),
         };
         const metadata = await fetchEnvironmentMetadata(urls.metadata);
         let nextSceneGraph: any = null;

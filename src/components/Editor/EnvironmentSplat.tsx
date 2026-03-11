@@ -198,6 +198,7 @@ precision highp int;
 precision highp sampler2DArray;
 
 uniform float uOpacityBoost;
+uniform float uColorGain;
 uniform float uColorPayloadIsLinear;
 uniform float uColorPayloadIsSHDC;
 uniform float uHasSphericalHarmonics;
@@ -308,7 +309,7 @@ void main() {
         discard;
     }
 
-    outColor = vec4(evaluateViewDependentColor(), alpha);
+    outColor = vec4(clamp(evaluateViewDependentColor() * uColorGain, 0.0, 1.0), alpha);
 }
 `;
 const REAL_SPLAT_RENDERERS = new Set(["luma", "luma_web", "luma_capture", "luma_splats"]);
@@ -318,7 +319,7 @@ type EnvironmentSplatProps = {
     plyUrl?: string | null;
     viewerUrl?: string | null;
     metadata?: GeneratedEnvironmentMetadata | null;
-    onPreviewBounds?: (bounds: { center: [number, number, number]; radius: number }) => void;
+    onPreviewBounds?: (bounds: { center: [number, number, number]; radius: number; forward?: [number, number, number] }) => void;
 };
 
 type SharpGaussianChunk = {
@@ -354,6 +355,11 @@ type SharpGaussianPayload = {
     count: number;
     chunks: SharpGaussianChunk[];
     sceneRadius: number;
+    previewFocus: {
+        center: [number, number, number];
+        radius: number;
+        forward: [number, number, number];
+    } | null;
     debugSamples: SharpGaussianDebugSample[];
 };
 
@@ -396,6 +402,9 @@ type SerializedSharpGaussianPayload = {
     boundingBoxMax: [number, number, number];
     boundingSphereCenter: [number, number, number];
     boundingSphereRadius: number;
+    previewFocusCenter: [number, number, number];
+    previewFocusRadius: number;
+    previewFocusForward: [number, number, number];
     debugSamples: SharpGaussianDebugSample[];
 };
 
@@ -661,21 +670,62 @@ function resolveSharpPointBudget(
 }
 
 function resolvePreviewOpacityBoost(metadata?: GeneratedEnvironmentMetadata | null) {
-    if (!isDenseFallbackPreviewMetadata(metadata)) {
-        return 1.0;
+    if (!isSingleImagePreviewMetadata(metadata)) {
+        return 1;
+    }
+
+    const liftedMeanLuma = Number(metadata?.preview_enhancement?.exposure?.mean_luma_after ?? NaN);
+
+    if (isDenseFallbackPreviewMetadata(metadata)) {
+        if (!Number.isFinite(liftedMeanLuma)) {
+            return 1.16;
+        }
+        if (liftedMeanLuma < 0.38) {
+            return 1.3;
+        }
+        if (liftedMeanLuma < 0.48) {
+            return 1.2;
+        }
+        return 1.12;
+    }
+
+    if (!Number.isFinite(liftedMeanLuma)) {
+        return 1.12;
+    }
+    if (liftedMeanLuma < 0.14) {
+        return 1.7;
+    }
+    if (liftedMeanLuma < 0.22) {
+        return 1.48;
+    }
+    if (liftedMeanLuma < 0.3) {
+        return 1.28;
+    }
+    return 1.08;
+}
+
+function resolvePreviewColorGain(metadata?: GeneratedEnvironmentMetadata | null) {
+    if (!isSingleImagePreviewMetadata(metadata)) {
+        return 1;
     }
 
     const liftedMeanLuma = Number(metadata?.preview_enhancement?.exposure?.mean_luma_after ?? NaN);
     if (!Number.isFinite(liftedMeanLuma)) {
-        return 1.16;
+        return 1.05;
+    }
+    if (liftedMeanLuma < 0.12) {
+        return 1.95;
+    }
+    if (liftedMeanLuma < 0.18) {
+        return 1.65;
+    }
+    if (liftedMeanLuma < 0.28) {
+        return 1.35;
     }
     if (liftedMeanLuma < 0.38) {
-        return 1.3;
+        return 1.15;
     }
-    if (liftedMeanLuma < 0.48) {
-        return 1.2;
-    }
-    return 1.12;
+    return 1;
 }
 
 function createSharpGaussianTexture(data: Uint16Array, width: number, height: number) {
@@ -1297,6 +1347,18 @@ function buildSharpGaussianPayload(
         count: sampledCount,
         chunks,
         sceneRadius: Math.max(1e-3, sourceGeometry.boundingSphere?.radius ?? 1),
+        previewFocus: sourceGeometry.boundingSphere
+              ? {
+                  center: [
+                      sourceGeometry.boundingSphere.center.x,
+                      sourceGeometry.boundingSphere.center.y,
+                      sourceGeometry.boundingSphere.center.z,
+                  ],
+                  radius: Math.max(1e-3, sourceGeometry.boundingSphere.radius),
+                  forward: [0, 0, 1],
+              }
+            : null,
+        debugSamples: [],
     };
 }
 
@@ -1334,6 +1396,11 @@ function buildSharpGaussianPayloadFromSerialized(data: SerializedSharpGaussianPa
             boundingSphere: new THREE.Sphere(new THREE.Vector3(...chunk.boundingSphereCenter), chunk.boundingSphereRadius),
         })),
         sceneRadius: data.sceneRadius,
+        previewFocus: {
+            center: data.previewFocusCenter,
+            radius: Math.max(1e-3, data.previewFocusRadius),
+            forward: data.previewFocusForward,
+        },
         debugSamples: data.debugSamples,
     };
 }
@@ -1601,7 +1668,7 @@ function SharpGaussianEnvironmentSplat({
 }: {
     source: string;
     metadata?: GeneratedEnvironmentMetadata | null;
-    onPreviewBounds?: (bounds: { center: [number, number, number]; radius: number }) => void;
+    onPreviewBounds?: (bounds: { center: [number, number, number]; radius: number; forward?: [number, number, number] }) => void;
 }) {
     const { gl, size } = useThree();
     const meshRef = useRef<THREE.Mesh<THREE.InstancedBufferGeometry, THREE.ShaderMaterial> | null>(null);
@@ -1611,6 +1678,7 @@ function SharpGaussianEnvironmentSplat({
     );
     const isSingleImagePreview = useMemo(() => isSingleImagePreviewMetadata(metadata), [metadata]);
     const opacityBoost = useMemo(() => resolvePreviewOpacityBoost(metadata), [metadata]);
+    const colorGain = useMemo(() => resolvePreviewColorGain(metadata), [metadata]);
     const payloadRef = useRef<SharpGaussianPayload | null>(null);
     const [payload, setPayload] = useState<SharpGaussianPayload | null>(null);
     const [loadState, setLoadState] = useState<{ phase: "loading" | "ready" | "error"; message: string }>({
@@ -1635,10 +1703,11 @@ function SharpGaussianEnvironmentSplat({
                           uMinAxisPx: { value: 0.08 },
                           uMaxAxisPx: { value: 96.0 },
                           uOpacityBoost: { value: 1.0 },
+                          uColorGain: { value: 1.0 },
                           uShTexture: { value: payload.shTexture },
                           uColorPayloadIsLinear: { value: payload.colorPayloadMode === "albedo_linear" ? 1 : 0 },
                           uColorPayloadIsSHDC: { value: payload.colorPayloadMode === "sh_dc" ? 1 : 0 },
-                          uHasSphericalHarmonics: { value: payload.shBasisCount > 0 ? 1 : 0 },
+                          uHasSphericalHarmonics: { value: payload.shBasisCount > 0 && !isSingleImagePreview ? 1 : 0 },
                           uShBasisCount: { value: payload.shBasisCount },
                           uOrderTextureReady: { value: 0 },
                           uCullSentinel: { value: 65504 },
@@ -1652,7 +1721,7 @@ function SharpGaussianEnvironmentSplat({
                       toneMapped: false,
                   })
                 : null,
-        [payload],
+        [isSingleImagePreview, payload],
     );
     const gpuSorterRef = useRef<SharpGaussianGpuSorter | null>(null);
     const cpuOrderTextureRef = useRef<SharpGaussianOrderTexture | null>(null);
@@ -1828,6 +1897,14 @@ function SharpGaussianEnvironmentSplat({
 
         material.uniforms.uOpacityBoost.value = opacityBoost;
     }, [material, opacityBoost]);
+
+    useEffect(() => {
+        if (!material) {
+            return;
+        }
+
+        material.uniforms.uColorGain.value = colorGain;
+    }, [colorGain, material]);
 
     useEffect(() => {
         if (!material || !payload) {
@@ -2086,14 +2163,24 @@ function SharpGaussianEnvironmentSplat({
             return;
         }
 
-        const sphere = payload.geometry.boundingSphere;
+        const sphere = payload.previewFocus ?? (payload.geometry.boundingSphere
+            ? {
+                  center: [
+                      payload.geometry.boundingSphere.center.x,
+                      payload.geometry.boundingSphere.center.y,
+                      payload.geometry.boundingSphere.center.z,
+                  ] as [number, number, number],
+                  radius: payload.geometry.boundingSphere.radius,
+              }
+            : null);
         if (!sphere) {
             return;
         }
 
         onPreviewBounds({
-            center: [sphere.center.x, sphere.center.y, sphere.center.z],
+            center: sphere.center,
             radius: Math.max(1e-3, sphere.radius),
+            forward: sphere.forward,
         });
     }, [isSingleImagePreview, onPreviewBounds, payload]);
 

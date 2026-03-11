@@ -23,6 +23,7 @@ export interface CameraPose {
     target: Vector3Tuple;
     fov: number;
     lens_mm: number;
+    up?: Vector3Tuple;
 }
 
 export interface SpatialPin {
@@ -263,6 +264,10 @@ export function normalizeWorkspaceSceneGraph(sceneGraph: unknown): WorkspaceScen
                             cameras: typeof environmentUrls.cameras === "string" ? toProxyUrl(String(environmentUrls.cameras)) : environmentUrls.cameras,
                             metadata:
                                 typeof environmentUrls.metadata === "string" ? toProxyUrl(String(environmentUrls.metadata)) : environmentUrls.metadata,
+                            preview_projection:
+                                typeof environmentUrls.preview_projection === "string"
+                                    ? toProxyUrl(String(environmentUrls.preview_projection))
+                                    : environmentUrls.preview_projection,
                         }
                       : environmentRecord.urls,
               }

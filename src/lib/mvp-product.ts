@@ -390,6 +390,8 @@ export interface GeneratedEnvironmentMetadata {
     lane?: "preview" | "reconstruction";
     truth_label?: string;
     reference_image?: string;
+    input_image?: string;
+    preview_projection?: string;
     quality_tier?: string;
     faithfulness?: string;
     lane_truth?: string;
@@ -414,10 +416,41 @@ export interface GeneratedEnvironmentMetadata {
     quality?: EnvironmentQualityMetrics;
     delivery?: EnvironmentDeliveryProfile;
     preview_enhancement?: EnvironmentPreviewEnhancement;
+    source_camera?: {
+        position?: [number, number, number];
+        target?: [number, number, number];
+        up?: [number, number, number];
+        focal_length_px?: number;
+        resolution_px?: [number, number];
+        fov_degrees?: number;
+    };
 }
 
 function normalizeEnvironmentString(value: unknown) {
     return typeof value === "string" ? value.trim() : "";
+}
+
+function deriveStorageUrlFromAbsolutePath(value: unknown) {
+    const normalized = normalizeEnvironmentString(value);
+    if (!normalized) {
+        return "";
+    }
+
+    if (normalized.startsWith("/storage/")) {
+        return normalized;
+    }
+
+    const uploadsIndex = normalized.lastIndexOf("/uploads/");
+    if (uploadsIndex >= 0) {
+        return `/storage${normalized.slice(uploadsIndex)}`;
+    }
+
+    const scenesIndex = normalized.lastIndexOf("/scenes/");
+    if (scenesIndex >= 0) {
+        return `/storage${normalized.slice(scenesIndex)}`;
+    }
+
+    return "";
 }
 
 function containsReferenceOnlyFlag(value: unknown) {
@@ -434,9 +467,23 @@ export function resolveEnvironmentRenderState(environment: any) {
 
     const viewerUrl = normalizeEnvironmentString(urls?.viewer) || normalizeEnvironmentString(rendering?.viewer_source);
     const splatUrl = normalizeEnvironmentString(urls?.splats);
+    const truthLabel = normalizeEnvironmentString(metadata?.truth_label).toLowerCase();
+    const qualityTier = normalizeEnvironmentString(metadata?.quality_tier).toLowerCase();
+    const sourceFormat = normalizeEnvironmentString(rendering?.source_format).toLowerCase();
+    const isSingleImagePreview =
+        normalizeEnvironmentString(metadata?.lane).toLowerCase() === "preview" &&
+        (qualityTier.includes("single_image_preview") || sourceFormat.includes("dense_preview") || truthLabel === "instant preview");
+    const sourceInputImage =
+        deriveStorageUrlFromAbsolutePath(metadata?.input_image) || normalizeEnvironmentString(metadata?.input_image);
+    const previewProjectionImage =
+        normalizeEnvironmentString(urls?.preview_projection) ||
+        normalizeEnvironmentString(metadata?.preview_projection) ||
+        (isSingleImagePreview ? sourceInputImage : "");
     const referenceImage =
         normalizeEnvironmentString(environment?.demo_reference_image) ||
+        previewProjectionImage ||
         normalizeEnvironmentString(metadata?.reference_image) ||
+        sourceInputImage ||
         normalizeEnvironmentString(environment?.previewImage) ||
         "";
     const hasRenderableOutput = Boolean(splatUrl || viewerUrl);
@@ -458,6 +505,7 @@ export function resolveEnvironmentRenderState(environment: any) {
     return {
         viewerUrl,
         splatUrl,
+        previewProjectionImage: previewProjectionImage || null,
         referenceImage: referenceImage || null,
         hasRenderableOutput,
         isReferenceOnlyDemo,

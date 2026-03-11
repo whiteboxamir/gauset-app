@@ -2,7 +2,6 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Camera, Focus, MapPin, Maximize2, Minimize2, ScanLine, Video } from "lucide-react";
-import { usePathname } from "next/navigation";
 import ThreeOverlay from "./ThreeOverlay";
 import { describeEnvironment, resolveEnvironmentRenderState } from "@/lib/mvp-product";
 import {
@@ -60,6 +59,13 @@ function EmptyViewerState({ clarityMode }: { clarityMode: boolean }) {
 
 export default function ViewerPanel({
     clarityMode = false,
+    routeVariant = "workspace",
+    leftHudCollapsed = false,
+    rightHudCollapsed = false,
+    directorHudCompact = false,
+    onToggleLeftHud,
+    onToggleRightHud,
+    onToggleDirectorHud,
     processingStatus,
     sceneGraph,
     setSceneGraph,
@@ -71,6 +77,13 @@ export default function ViewerPanel({
     focusRequest,
 }: {
     clarityMode?: boolean;
+    routeVariant?: "workspace" | "preview";
+    leftHudCollapsed?: boolean;
+    rightHudCollapsed?: boolean;
+    directorHudCompact?: boolean;
+    onToggleLeftHud?: () => void;
+    onToggleRightHud?: () => void;
+    onToggleDirectorHud?: () => void;
     processingStatus?: {
         busy: boolean;
         label: string;
@@ -85,8 +98,7 @@ export default function ViewerPanel({
     onSelectView?: (viewId: string | null) => void;
     focusRequest?: FocusRequest;
 }) {
-    const pathname = usePathname();
-    const isPreviewRoute = pathname === "/mvp/preview";
+    const isPreviewRoute = routeVariant === "preview";
     const normalizedSceneGraph = useMemo(() => normalizeWorkspaceSceneGraph(sceneGraph), [sceneGraph]);
     const [captureRequestKey, setCaptureRequestKey] = useState(0);
     const [isPinPlacementEnabled, setIsPinPlacementEnabled] = useState(false);
@@ -94,7 +106,6 @@ export default function ViewerPanel({
     const [isRecordingPath, setIsRecordingPath] = useState(false);
     const [localFocusRequest, setLocalFocusRequest] = useState<FocusRequest>(null);
     const [isFullscreen, setIsFullscreen] = useState(false);
-    const [isPreviewHudMinimized, setIsPreviewHudMinimized] = useState(false);
     const [viewerReady, setViewerReady] = useState(false);
     const containerRef = useRef<HTMLDivElement | null>(null);
     const captureFallbackTimerRef = useRef<number | null>(null);
@@ -128,14 +139,6 @@ export default function ViewerPanel({
             captureFallbackTimerRef.current = null;
         }
     }, [viewerReady]);
-
-    useEffect(() => {
-        if (!isPreviewRoute) {
-            setIsPreviewHudMinimized(false);
-            return;
-        }
-        setIsPreviewHudMinimized(true);
-    }, [isPreviewRoute]);
 
     useEffect(() => {
         const handleEscape = (event: KeyboardEvent) => {
@@ -397,8 +400,10 @@ export default function ViewerPanel({
 
     const viewerActionDisabled = readOnly || !viewerReady;
     const viewerActionClassName = viewerActionDisabled ? "cursor-not-allowed opacity-50" : "";
-    const showPreviewHudMinimized = isPreviewRoute && isPreviewHudMinimized;
-    const previewHudToggleLabel = showPreviewHudMinimized ? "Expand HUD" : "Minimize HUD";
+    const showDirectorHudCompact = directorHudCompact;
+    const directorHudToggleLabel = showDirectorHudCompact ? "Expand HUD" : "Minimize HUD";
+    const leftHudToggleLabel = leftHudCollapsed ? "Show left HUD" : "Hide left HUD";
+    const rightHudToggleLabel = rightHudCollapsed ? "Show right HUD" : "Hide right HUD";
 
     const lensPresetControls = (
         <div className="flex items-center gap-2 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
@@ -433,12 +438,12 @@ export default function ViewerPanel({
         >
             <div
                 className={
-                    showPreviewHudMinimized
+                    showDirectorHudCompact
                         ? "pointer-events-none absolute left-1/2 top-5 z-30 w-[min(92vw,56rem)] -translate-x-1/2"
                         : "absolute top-0 left-0 right-0 p-5 shrink-0 z-30"
                 }
             >
-                {showPreviewHudMinimized ? (
+                {showDirectorHudCompact ? (
                     <div className="pointer-events-auto relative overflow-hidden rounded-full border border-white/12 bg-[linear-gradient(180deg,rgba(9,12,18,0.76),rgba(7,9,13,0.7))] px-3 py-3 shadow-[0_20px_50px_rgba(0,0,0,0.3)] backdrop-blur-xl">
                         <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-cyan-200/40 via-white/10 to-transparent" />
                         <div className="flex flex-wrap items-center justify-center gap-3">
@@ -458,12 +463,12 @@ export default function ViewerPanel({
                             <div className="min-w-0 flex-1 overflow-hidden">{lensPresetControls}</div>
                             <button
                                 type="button"
-                                onClick={() => setIsPreviewHudMinimized(false)}
+                                onClick={onToggleDirectorHud}
                                 className="shrink-0 rounded-full border border-neutral-800 bg-neutral-900 px-3 py-2 text-[11px] text-white transition-colors hover:border-neutral-700 hover:text-neutral-100"
-                                aria-label={previewHudToggleLabel}
+                                aria-label={directorHudToggleLabel}
                             >
                                 <Maximize2 className="mr-1 inline h-3.5 w-3.5" />
-                                {previewHudToggleLabel}
+                                {directorHudToggleLabel}
                             </button>
                         </div>
                     </div>
@@ -562,15 +567,35 @@ export default function ViewerPanel({
                                         </button>
                                     </>
                                 ) : null}
-                                {isPreviewRoute ? (
+                                {onToggleLeftHud ? (
                                     <button
                                         type="button"
-                                        onClick={() => setIsPreviewHudMinimized(true)}
+                                        onClick={onToggleLeftHud}
                                         className="rounded-full border border-neutral-800 bg-neutral-900 px-3 py-2 text-[11px] text-white transition-colors hover:border-neutral-700 hover:text-neutral-100"
-                                        aria-label={previewHudToggleLabel}
+                                        aria-label={leftHudToggleLabel}
+                                    >
+                                        {leftHudToggleLabel}
+                                    </button>
+                                ) : null}
+                                {onToggleRightHud ? (
+                                    <button
+                                        type="button"
+                                        onClick={onToggleRightHud}
+                                        className="rounded-full border border-neutral-800 bg-neutral-900 px-3 py-2 text-[11px] text-white transition-colors hover:border-neutral-700 hover:text-neutral-100"
+                                        aria-label={rightHudToggleLabel}
+                                    >
+                                        {rightHudToggleLabel}
+                                    </button>
+                                ) : null}
+                                {onToggleDirectorHud ? (
+                                    <button
+                                        type="button"
+                                        onClick={onToggleDirectorHud}
+                                        className="rounded-full border border-neutral-800 bg-neutral-900 px-3 py-2 text-[11px] text-white transition-colors hover:border-neutral-700 hover:text-neutral-100"
+                                        aria-label={directorHudToggleLabel}
                                     >
                                         <Minimize2 className="mr-1 inline h-3.5 w-3.5" />
-                                        {previewHudToggleLabel}
+                                        {directorHudToggleLabel}
                                     </button>
                                 ) : null}
                                 <button

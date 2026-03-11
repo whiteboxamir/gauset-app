@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --port 3001",
     "dev:backend": "backend_venv/bin/python backend/server.py",
     "dev:all": "node scripts/dev-all.mjs",
     "build": "node guard-deploy-target.mjs && next build",

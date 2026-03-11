@@ -11,11 +11,22 @@ import { MvpActivityEntry, buildChangeSummary, createActivityEntry, createDemoWo
 import { trackMvpEvent } from "./_lib/analytics";
 
 const LOCAL_DRAFT_KEY = "gauset:mvp:draft:v1";
+const MVP_WORKSPACE_SHELL_LOCK_VERSION = "2026-03-11";
+const HUD_LAYOUT_STORAGE_KEY_PREFIX = `gauset:mvp:hud:${MVP_WORKSPACE_SHELL_LOCK_VERSION}`;
 const AUTOSAVE_DEBOUNCE_MS = 1500;
 const PROGRAMMATIC_CHANGE_RESET_MS = 80;
+const HUD_RAIL_EXPANDED_WIDTH_CLASS = "w-80";
+const HUD_RAIL_COLLAPSED_WIDTH_CLASS = "w-14";
 
 type SaveState = "idle" | "saving" | "saved" | "recovered" | "error";
 type WorkspaceEntryMode = "launchpad" | "workspace";
+type MvpRouteVariant = "workspace" | "preview";
+
+interface WorkspaceHudState {
+    leftRailCollapsed: boolean;
+    rightRailCollapsed: boolean;
+    directorHudCompact: boolean;
+}
 
 interface SceneVersion {
     version_id: string;
@@ -88,6 +99,8 @@ const normalizeEnvironmentResourceUrls = (environment: any) => {
                       splats: typeof urls.splats === "string" ? toProxyUrl(urls.splats) : urls.splats,
                       cameras: typeof urls.cameras === "string" ? toProxyUrl(urls.cameras) : urls.cameras,
                       metadata: typeof urls.metadata === "string" ? toProxyUrl(urls.metadata) : urls.metadata,
+                      preview_projection:
+                          typeof urls.preview_projection === "string" ? toProxyUrl(urls.preview_projection) : urls.preview_projection,
                       holdout_report: typeof urls.holdout_report === "string" ? toProxyUrl(urls.holdout_report) : urls.holdout_report,
                       capture_scorecard:
                           typeof urls.capture_scorecard === "string" ? toProxyUrl(urls.capture_scorecard) : urls.capture_scorecard,
@@ -139,7 +152,42 @@ const formatTimestamp = (value?: string | null) => {
     });
 };
 
-export default function MVPRouteClient({ clarityMode = false }: { clarityMode?: boolean }) {
+const createDefaultHudState = (routeVariant: MvpRouteVariant): WorkspaceHudState =>
+    routeVariant === "preview"
+        ? {
+              leftRailCollapsed: true,
+              rightRailCollapsed: true,
+              directorHudCompact: true,
+          }
+        : {
+              leftRailCollapsed: false,
+              rightRailCollapsed: false,
+              directorHudCompact: false,
+          };
+
+const normalizeHudState = (routeVariant: MvpRouteVariant, value: unknown): WorkspaceHudState => {
+    const fallback = createDefaultHudState(routeVariant);
+    if (!value || typeof value !== "object") {
+        return fallback;
+    }
+
+    const input = value as Partial<WorkspaceHudState>;
+    return {
+        leftRailCollapsed: typeof input.leftRailCollapsed === "boolean" ? input.leftRailCollapsed : fallback.leftRailCollapsed,
+        rightRailCollapsed: typeof input.rightRailCollapsed === "boolean" ? input.rightRailCollapsed : fallback.rightRailCollapsed,
+        directorHudCompact: typeof input.directorHudCompact === "boolean" ? input.directorHudCompact : fallback.directorHudCompact,
+    };
+};
+
+const hudStorageKey = (routeVariant: MvpRouteVariant) => `${HUD_LAYOUT_STORAGE_KEY_PREFIX}:${routeVariant}`;
+
+export default function MVPRouteClient({
+    clarityMode = false,
+    routeVariant = "workspace",
+}: {
+    clarityMode?: boolean;
+    routeVariant?: MvpRouteVariant;
+}) {
     const demoPreset = useMemo(() => createDemoWorldPreset(), []);
     const flowName = clarityMode ? "clarity_preview" : "classic";
 
@@ -161,8 +209,10 @@ export default function MVPRouteClient({ clarityMode = false }: { clarityMode?: 
     const [lastOutputInputLabel, setLastOutputInputLabel] = useState<string | null>(null);
     const [lastOutputSceneGraph, setLastOutputSceneGraph] = useState<any | null>(null);
     const [lastOutputLabel, setLastOutputLabel] = useState("No world output yet");
+    const [hudState, setHudState] = useState<WorkspaceHudState>(() => createDefaultHudState(routeVariant));
 
     const hasHydratedRef = useRef(false);
+    const hudHydratedRef = useRef(false);
     const lastSavedFingerprintRef = useRef("");
     const versionsRequestRef = useRef(0);
     const saveInFlightRef = useRef<Promise<any> | null>(null);
@@ -498,6 +548,32 @@ export default function MVPRouteClient({ clarityMode = false }: { clarityMode?: 
     }, [clarityMode, loadVersions]);
 
     useEffect(() => {
+        try {
+            const rawHudState = window.localStorage.getItem(hudStorageKey(routeVariant));
+            if (!rawHudState) {
+                setHudState(createDefaultHudState(routeVariant));
+                return;
+            }
+            setHudState(normalizeHudState(routeVariant, JSON.parse(rawHudState)));
+        } catch {
+            setHudState(createDefaultHudState(routeVariant));
+        } finally {
+            hudHydratedRef.current = true;
+        }
+    }, [routeVariant]);
+
+    useEffect(() => {
+        if (!hudHydratedRef.current) {
+            return;
+        }
+        try {
+            window.localStorage.setItem(hudStorageKey(routeVariant), JSON.stringify(hudState));
+        } catch {
+            // Ignore local storage failures so the workspace stays usable.
+        }
+    }, [hudState, routeVariant]);
+
+    useEffect(() => {
         if (!activeScene) {
             setVersions([]);
             return;
@@ -660,6 +736,27 @@ export default function MVPRouteClient({ clarityMode = false }: { clarityMode?: 
         appendActivity("Scene package exported", "Exported the current world and scene direction package.", "success");
     }, [activeScene, appendActivity, flowName, lastOutputLabel]);
 
+    const toggleLeftRail = useCallback(() => {
+        setHudState((previous) => ({
+            ...previous,
+            leftRailCollapsed: !previous.leftRailCollapsed,
+        }));
+    }, []);
+
+    const toggleRightRail = useCallback(() => {
+        setHudState((previous) => ({
+            ...previous,
+            rightRailCollapsed: !previous.rightRailCollapsed,
+        }));
+    }, []);
+
+    const toggleDirectorHud = useCallback(() => {
+        setHudState((previous) => ({
+            ...previous,
+            directorHudCompact: !previous.directorHudCompact,
+        }));
+    }, []);
+
     if (clarityMode && entryMode === "launchpad") {
         return (
             <MVPClarityLaunchpad
@@ -719,48 +816,121 @@ export default function MVPRouteClient({ clarityMode = false }: { clarityMode?: 
             ) : null}
 
             <div className="flex min-h-0 flex-1 overflow-hidden">
-                <div className="z-10 flex h-full w-80 flex-col border-r border-neutral-800 bg-neutral-950 shadow-2xl">
-                    <LeftPanel
-                        clarityMode={clarityMode}
-                        setActiveScene={setActiveScene}
-                        setSceneGraph={setSceneGraph}
-                        setAssetsList={setAssetsList}
-                        onProgrammaticSceneChange={markProgrammaticSceneChange}
-                        onInputReady={handleInputReady}
-                        onGenerationStart={handleGenerationStart}
-                        onGenerationSuccess={handleGenerationSuccess}
-                        onGenerationError={handleGenerationError}
-                    />
+                <div
+                    className={`z-10 flex h-full flex-col border-r border-neutral-800 bg-neutral-950 shadow-2xl transition-[width] duration-200 ${
+                        hudState.leftRailCollapsed ? HUD_RAIL_COLLAPSED_WIDTH_CLASS : HUD_RAIL_EXPANDED_WIDTH_CLASS
+                    }`}
+                >
+                    {hudState.leftRailCollapsed ? (
+                        <button
+                            type="button"
+                            onClick={toggleLeftRail}
+                            className="flex h-full w-full flex-col items-center justify-center gap-4 px-2 text-center text-white transition-colors hover:bg-neutral-900"
+                            aria-label="Show left HUD"
+                        >
+                            <span className="text-[10px] uppercase tracking-[0.3em] text-cyan-200/65 [writing-mode:vertical-rl] rotate-180">Capture HUD</span>
+                            <span className="rounded-full border border-neutral-800 bg-neutral-900 px-2 py-1 text-[10px] uppercase tracking-[0.18em] text-neutral-200">Expand</span>
+                        </button>
+                    ) : (
+                        <>
+                            <div className="flex items-center justify-between border-b border-neutral-800 px-3 py-3">
+                                <div>
+                                    <p className="text-[10px] uppercase tracking-[0.24em] text-cyan-200/65">Workspace HUD</p>
+                                    <p className="mt-1 text-sm text-white">Capture and build</p>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={toggleLeftRail}
+                                    className="rounded-full border border-neutral-800 bg-neutral-900 px-3 py-1.5 text-[11px] text-white transition-colors hover:border-neutral-700 hover:text-neutral-100"
+                                >
+                                    Hide
+                                </button>
+                            </div>
+                            <div className="min-h-0 flex-1 overflow-hidden">
+                                <LeftPanel
+                                    clarityMode={clarityMode}
+                                    setActiveScene={setActiveScene}
+                                    setSceneGraph={setSceneGraph}
+                                    setAssetsList={setAssetsList}
+                                    onProgrammaticSceneChange={markProgrammaticSceneChange}
+                                    onInputReady={handleInputReady}
+                                    onGenerationStart={handleGenerationStart}
+                                    onGenerationSuccess={handleGenerationSuccess}
+                                    onGenerationError={handleGenerationError}
+                                />
+                            </div>
+                        </>
+                    )}
                 </div>
 
                 <div className="relative z-0 flex-1">
                     <ViewerPanel
                         clarityMode={clarityMode}
+                        routeVariant={routeVariant}
+                        leftHudCollapsed={hudState.leftRailCollapsed}
+                        rightHudCollapsed={hudState.rightRailCollapsed}
+                        directorHudCompact={hudState.directorHudCompact}
+                        onToggleLeftHud={toggleLeftRail}
+                        onToggleRightHud={toggleRightRail}
+                        onToggleDirectorHud={toggleDirectorHud}
                         processingStatus={stepStatus}
                         sceneGraph={sceneGraph}
                         setSceneGraph={setSceneGraph}
                     />
                 </div>
 
-                <div className="z-10 flex h-full w-80 flex-col border-l border-neutral-800 bg-neutral-950 shadow-2xl">
-                    <RightPanel
-                        clarityMode={clarityMode}
-                        activityLog={activityLog}
-                        changeSummary={changeSummary}
-                        lastOutputLabel={lastOutputLabel}
-                        sceneGraph={sceneGraph}
-                        setSceneGraph={setSceneGraph}
-                        assetsList={assetsList}
-                        activeScene={activeScene}
-                        saveState={saveState}
-                        saveMessage={saveMessage}
-                        saveError={saveError}
-                        lastSavedAt={lastSavedAt}
-                        versions={versions}
-                        onManualSave={() => saveScene("manual")}
-                        onRestoreVersion={restoreVersion}
-                        onExport={handleExport}
-                    />
+                <div
+                    className={`z-10 flex h-full flex-col border-l border-neutral-800 bg-neutral-950 shadow-2xl transition-[width] duration-200 ${
+                        hudState.rightRailCollapsed ? HUD_RAIL_COLLAPSED_WIDTH_CLASS : HUD_RAIL_EXPANDED_WIDTH_CLASS
+                    }`}
+                >
+                    {hudState.rightRailCollapsed ? (
+                        <button
+                            type="button"
+                            onClick={toggleRightRail}
+                            className="flex h-full w-full flex-col items-center justify-center gap-4 px-2 text-center text-white transition-colors hover:bg-neutral-900"
+                            aria-label="Show right HUD"
+                        >
+                            <span className="text-[10px] uppercase tracking-[0.3em] text-cyan-200/65 [writing-mode:vertical-rl]">Review HUD</span>
+                            <span className="rounded-full border border-neutral-800 bg-neutral-900 px-2 py-1 text-[10px] uppercase tracking-[0.18em] text-neutral-200">Expand</span>
+                        </button>
+                    ) : (
+                        <>
+                            <div className="flex items-center justify-between border-b border-neutral-800 px-3 py-3">
+                                <div>
+                                    <p className="text-[10px] uppercase tracking-[0.24em] text-cyan-200/65">Review HUD</p>
+                                    <p className="mt-1 text-sm text-white">Handoff and export</p>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={toggleRightRail}
+                                    className="rounded-full border border-neutral-800 bg-neutral-900 px-3 py-1.5 text-[11px] text-white transition-colors hover:border-neutral-700 hover:text-neutral-100"
+                                >
+                                    Hide
+                                </button>
+                            </div>
+                            <div className="min-h-0 flex-1 overflow-hidden">
+                                <RightPanel
+                                    clarityMode={clarityMode}
+                                    activityLog={activityLog}
+                                    changeSummary={changeSummary}
+                                    lastOutputLabel={lastOutputLabel}
+                                    sceneGraph={sceneGraph}
+                                    setSceneGraph={setSceneGraph}
+                                    assetsList={assetsList}
+                                    activeScene={activeScene}
+                                    saveState={saveState}
+                                    saveMessage={saveMessage}
+                                    saveError={saveError}
+                                    lastSavedAt={lastSavedAt}
+                                    versions={versions}
+                                    onManualSave={() => saveScene("manual")}
+                                    onRestoreVersion={restoreVersion}
+                                    onExport={handleExport}
+                                />
+                            </div>
+                        </>
+                    )}
                 </div>
             </div>
         </div>

@@ -46,6 +46,7 @@ type ParsedMeshAsset = {
 const EDITOR_CAMERA_NEAR = 0.01;
 const EDITOR_CAMERA_FAR = 500;
 const DEFAULT_EDITOR_VIEWER_BACKGROUND = "#0a0a0a";
+const PREVIEW_CAMERA_ORIENTATION_QUATERNION = new THREE.Quaternion(1, 0, 0, 0);
 const sceneBackgroundScratchColor = new THREE.Color();
 
 type FocusRequest = (CameraPose & { token: number }) | null;
@@ -118,6 +119,53 @@ function isSingleImagePreviewEnvironment(metadata: any) {
     );
 }
 
+function shouldApplyPreviewOrientation(metadata: any) {
+    if (typeof metadata?.rendering?.apply_preview_orientation === "boolean") {
+        return metadata.rendering.apply_preview_orientation;
+    }
+
+    return isSingleImagePreviewEnvironment(metadata);
+}
+
+function rotatePreviewCameraVector(tuple: Vector3Tuple) {
+    const rotated = new THREE.Vector3(...tuple).applyQuaternion(PREVIEW_CAMERA_ORIENTATION_QUATERNION);
+    return [rotated.x, rotated.y, rotated.z] as Vector3Tuple;
+}
+
+function resolveSingleImagePreviewCamera(metadata: any): (CameraPose & { up?: Vector3Tuple }) | null {
+    const sourceCamera = metadata?.source_camera;
+    if (!sourceCamera || typeof sourceCamera !== "object") {
+        return null;
+    }
+
+    const applyOrientation = shouldApplyPreviewOrientation(metadata);
+    const position = parseVector3Tuple(sourceCamera.position, [0, 0, 0]);
+    const target = parseVector3Tuple(sourceCamera.target, [0, 0, 1]);
+    const up = parseVector3Tuple(sourceCamera.up, [0, 1, 0]);
+    const orientedPosition = applyOrientation ? rotatePreviewCameraVector(position) : position;
+    const orientedTarget = applyOrientation ? rotatePreviewCameraVector(target) : target;
+    const orientedUp = applyOrientation ? rotatePreviewCameraVector(up) : up;
+    const explicitFov = Number(sourceCamera.fov_degrees ?? NaN);
+    const focalLengthPx = Number(sourceCamera.focal_length_px ?? NaN);
+    const resolutionPx = Array.isArray(sourceCamera.resolution_px) ? sourceCamera.resolution_px.map((value: unknown) => Number(value)) : [];
+    const imageHeightPx = Number.isFinite(resolutionPx[1]) ? Math.max(1, resolutionPx[1]) : NaN;
+    const derivedFov =
+        Number.isFinite(explicitFov) && explicitFov > 1
+            ? explicitFov
+            : Number.isFinite(focalLengthPx) && focalLengthPx > 1 && Number.isFinite(imageHeightPx)
+              ? (2 * Math.atan(imageHeightPx / (2 * focalLengthPx)) * 180) / Math.PI
+              : NaN;
+    const fov = Number.isFinite(derivedFov) && derivedFov > 1 ? derivedFov : 45;
+
+    return {
+        position: orientedPosition,
+        target: orientedTarget,
+        up: orientedUp,
+        fov,
+        lens_mm: Math.round(fovToLensMm(fov) * 10) / 10,
+    };
+}
+
 function applyEditorCameraClipping(camera: THREE.PerspectiveCamera) {
     camera.near = EDITOR_CAMERA_NEAR;
     camera.far = EDITOR_CAMERA_FAR;
@@ -153,6 +201,20 @@ function ThreeOverlayFallback({ message, referenceImage }: ThreeOverlayFallbackP
                     </p>
                 </div>
             </div>
+        </div>
+    );
+}
+
+function SingleImagePreviewSurface({ imageUrl }: { imageUrl: string }) {
+    return (
+        <div className="absolute inset-0 z-20 overflow-hidden rounded-[32px] bg-[linear-gradient(180deg,#040507_0%,#020304_100%)]">
+            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(56,189,248,0.08),transparent_24%)]" />
+            <img
+                src={imageUrl}
+                alt=""
+                className="h-full w-full object-contain"
+                draggable={false}
+            />
         </div>
     );
 }
@@ -523,6 +585,11 @@ function CameraRig({
         if (!focusRequest || focusRequest.token === lastFocusTokenRef.current) return;
         lastFocusTokenRef.current = focusRequest.token;
         perspectiveCamera.position.set(...focusRequest.position);
+        if (focusRequest.up) {
+            perspectiveCamera.up.set(...focusRequest.up);
+        } else {
+            perspectiveCamera.up.set(0, 1, 0);
+        }
         applyEditorCameraClipping(perspectiveCamera);
         perspectiveCamera.fov = focusRequest.fov;
         perspectiveCamera.updateProjectionMatrix();
@@ -745,10 +812,14 @@ export default function ThreeOverlay({
     );
     const environmentViewerUrl = toProxyUrl(environmentRenderState.viewerUrl);
     const environmentSplatUrl = toProxyUrl(environmentRenderState.splatUrl);
+    const previewProjectionImage = toProxyUrl(environmentRenderState.previewProjectionImage);
     const environmentMetadata =
         typeof normalizedSceneGraph.environment === "object" ? normalizedSceneGraph.environment?.metadata ?? null : null;
     const referenceImage = environmentRenderState.referenceImage;
     const isSingleImagePreview = isSingleImagePreviewEnvironment(environmentMetadata);
+    const hasRenderableEnvironment = Boolean(environmentSplatUrl || environmentViewerUrl);
+    const shouldUsePreviewProjectionFallback = !hasRenderableEnvironment && Boolean(previewProjectionImage);
+    const singleImagePreviewCamera = useMemo(() => resolveSingleImagePreviewCamera(environmentMetadata), [environmentMetadata]);
     const effectiveFocusRequest =
         previewAutofocusRequest && (!focusRequest || previewAutofocusRequest.token >= focusRequest.token)
             ? previewAutofocusRequest
@@ -804,12 +875,25 @@ export default function ThreeOverlay({
         setRenderError(error.message || "WebGL viewer failed to initialize.");
     };
 
-    const handlePreviewBounds = (bounds: { center: [number, number, number]; radius: number }) => {
+    const handlePreviewBounds = (bounds: { center: [number, number, number]; radius: number; forward?: [number, number, number] }) => {
         if (!isSingleImagePreview) {
             return;
         }
 
-        const key = `${environmentSplatUrl}|${bounds.center.join(",")}|${bounds.radius.toFixed(4)}|${normalizedSceneGraph.viewer.fov.toFixed(2)}`;
+        if (singleImagePreviewCamera) {
+            const key = `${environmentSplatUrl}|source-camera|${singleImagePreviewCamera.position.join(",")}|${singleImagePreviewCamera.target.join(",")}|${singleImagePreviewCamera.fov.toFixed(3)}`;
+            if (previewAutofocusKeyRef.current === key) {
+                return;
+            }
+            previewAutofocusKeyRef.current = key;
+            setPreviewAutofocusRequest({
+                ...singleImagePreviewCamera,
+                token: Date.now(),
+            });
+            return;
+        }
+
+        const key = `${environmentSplatUrl}|${bounds.center.join(",")}|${bounds.radius.toFixed(4)}|${(bounds.forward ?? [0, 0, 1]).join(",")}|${normalizedSceneGraph.viewer.fov.toFixed(2)}`;
         if (previewAutofocusKeyRef.current === key) {
             return;
         }
@@ -817,16 +901,26 @@ export default function ThreeOverlay({
 
         const radius = Math.max(0.1, bounds.radius);
         const verticalFovRadians = THREE.MathUtils.degToRad(normalizedSceneGraph.viewer.fov);
-        const distance = Math.max(radius * 2.2, (radius / Math.tan(verticalFovRadians * 0.5)) * 1.08);
+        const distance = Math.max(radius * 1.75, (radius / Math.tan(verticalFovRadians * 0.5)) * 0.96);
+        const forward = new THREE.Vector3(...(bounds.forward ?? [0, 0, 1]));
+        if (forward.lengthSq() <= 1e-6) {
+            forward.set(0, 0, 1);
+        }
+        forward.normalize();
+        const position = new THREE.Vector3(...bounds.center).addScaledVector(forward, distance);
 
         setPreviewAutofocusRequest({
-            position: [bounds.center[0], bounds.center[1], bounds.center[2] + distance],
+            position: [position.x, position.y, position.z],
             target: bounds.center,
             fov: normalizedSceneGraph.viewer.fov,
             lens_mm: Math.round(fovToLensMm(normalizedSceneGraph.viewer.fov) * 10) / 10,
             token: Date.now(),
         });
     };
+
+    if (shouldUsePreviewProjectionFallback && previewProjectionImage) {
+        return <SingleImagePreviewSurface imageUrl={previewProjectionImage} />;
+    }
 
     if (renderMode === "fallback") {
         return <ThreeOverlayFallback message={renderError} referenceImage={referenceImage} />;

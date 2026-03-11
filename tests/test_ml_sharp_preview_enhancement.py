@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 import torch
+from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend" / "ml-sharp" / "src"))
@@ -44,12 +45,14 @@ class MlSharpPreviewEnhancementTests(unittest.TestCase):
             save_ply(gaussians, 640.0, (64, 64), output_dir / "splats.ply")
             (output_dir / "metadata.json").write_text(json.dumps({"lane": "preview", "delivery": {"axes": {}}}, indent=2))
             (output_dir / "cameras.json").write_text("[]")
+            input_image = output_dir / "input.png"
+            Image.new("RGB", (64, 64), color=(36, 28, 22)).save(input_image)
 
             before_gaussians, _ = load_ply(output_dir / "splats.ply")
             before_colors = before_gaussians.colors.flatten(0, 1)
             before_luma = (before_colors[:, 0] * 0.299) + (before_colors[:, 1] * 0.587) + (before_colors[:, 2] * 0.114)
 
-            enhancement = _enhance_preview_outputs(output_dir)
+            enhancement = _enhance_preview_outputs(output_dir, input_image)
             _merge_preview_metadata(output_dir / "metadata.json", enhancement, Path("/tmp/input.png"))
 
             after_gaussians, _ = load_ply(output_dir / "splats.ply")
@@ -62,6 +65,11 @@ class MlSharpPreviewEnhancementTests(unittest.TestCase):
             self.assertEqual(metadata["point_count"], after_colors.shape[0])
             self.assertEqual(metadata["quality_tier"], "single_image_preview_ultra_dense")
             self.assertEqual(metadata["preview_enhancement"]["density"]["multiplier"], DEFAULT_PREVIEW_DENSITY_MULTIPLIER)
+            self.assertTrue((output_dir / "preview-projection.png").exists())
+            self.assertEqual(metadata["preview_projection"], "preview-projection.png")
+            self.assertEqual(metadata["preview_enhancement"]["projection"]["filename"], "preview-projection.png")
+            self.assertEqual(metadata["source_camera"]["position"], [0.0, 0.0, 0.0])
+            self.assertEqual(metadata["source_camera"]["target"], [0.0, 0.0, 1.0])
 
 
 if __name__ == "__main__":

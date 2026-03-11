@@ -1,6 +1,8 @@
 /** @type {import('next').NextConfig} */
+const devDistDir = process.env.NODE_ENV === "development" ? ".next-dev" : ".next";
+
 const nextConfig = {
-  distDir: process.env.NODE_ENV === "development" ? ".next-dev" : ".next",
+  distDir: devDistDir,
   reactStrictMode: true,
   eslint: {
     ignoreDuringBuilds: true,
