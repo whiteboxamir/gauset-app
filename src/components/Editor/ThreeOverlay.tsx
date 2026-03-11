@@ -48,6 +48,7 @@ const EDITOR_CAMERA_FAR = 500;
 const DEFAULT_EDITOR_VIEWER_BACKGROUND = "#0a0a0a";
 const PREVIEW_CAMERA_ORIENTATION_QUATERNION = new THREE.Quaternion(1, 0, 0, 0);
 const sceneBackgroundScratchColor = new THREE.Color();
+let cachedWebglContextSupport: boolean | null = null;
 
 type FocusRequest = (CameraPose & { token: number }) | null;
 type TAARenderPassInternal = TAARenderPass & { accumulateIndex: number };
@@ -86,8 +87,13 @@ class CanvasErrorBoundary extends React.Component<
 }
 
 function canCreateWebGLContext() {
+    if (cachedWebglContextSupport !== null) {
+        return cachedWebglContextSupport;
+    }
     if (typeof document === "undefined") return true;
     const canvas = document.createElement("canvas");
+    canvas.width = 1;
+    canvas.height = 1;
     const context =
         canvas.getContext("webgl2", { powerPreference: "high-performance" }) ??
         canvas.getContext("webgl", { powerPreference: "high-performance" }) ??
@@ -96,13 +102,8 @@ function canCreateWebGLContext() {
             | WebGL2RenderingContext
             | null);
 
-    if (!context) {
-        return false;
-    }
-
-    const loseContext = context.getExtension?.("WEBGL_lose_context");
-    loseContext?.loseContext();
-    return true;
+    cachedWebglContextSupport = Boolean(context);
+    return cachedWebglContextSupport;
 }
 
 function isSingleImagePreviewEnvironment(metadata: any) {

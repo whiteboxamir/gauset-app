@@ -57,6 +57,36 @@ function EmptyViewerState({ clarityMode }: { clarityMode: boolean }) {
     );
 }
 
+function StaticReferenceViewer({
+    referenceImage,
+    title,
+    description,
+}: {
+    referenceImage: string;
+    title: string;
+    description: string;
+}) {
+    return (
+        <div
+            className="absolute inset-0 z-20 overflow-hidden bg-[radial-gradient(circle_at_top,rgba(56,189,248,0.08),transparent_24%),linear-gradient(180deg,#06080c_0%,#040507_100%)]"
+            data-testid="mvp-static-reference-viewer"
+        >
+            <div className="absolute inset-0 bg-cover bg-center opacity-55" style={{ backgroundImage: `url(${referenceImage})` }} />
+            <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(4,7,11,0.2),rgba(4,7,11,0.42)_48%,rgba(4,7,11,0.88)_100%)]" />
+            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(56,189,248,0.12),transparent_28%)]" />
+            <div className="relative flex h-full items-end p-6">
+                <div className="w-full max-w-sm overflow-hidden rounded-[24px] border border-white/12 bg-[linear-gradient(180deg,rgba(8,11,16,0.92),rgba(7,10,14,0.96))] shadow-[0_24px_70px_rgba(0,0,0,0.38)] backdrop-blur-xl">
+                    <div className="p-5">
+                        <p className="text-[10px] uppercase tracking-[0.18em] text-cyan-100/70">Reference view</p>
+                        <p className="mt-2 text-base font-medium text-white">{title}</p>
+                        <p className="mt-2 text-xs leading-5 text-neutral-200">{description}</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
+
 export default function ViewerPanel({
     clarityMode = false,
     routeVariant = "workspace",
@@ -225,18 +255,24 @@ export default function ViewerPanel({
     const isReferenceOnlyDemo = environmentRenderState.isReferenceOnlyDemo;
     const isLegacyDemoWorld = environmentRenderState.isLegacyDemoWorld;
     const referenceImage = environmentRenderState.referenceImage;
+    const shouldUseStaticReferenceViewer = Boolean(referenceImage) && !hasEnvironmentSplat && (isReferenceOnlyDemo || isLegacyDemoWorld);
     const shouldRenderInteractiveViewer =
-        hasEnvironmentSplat || Boolean(referenceImage) || normalizedSceneGraph.assets.length > 0 || normalizedSceneGraph.pins.length > 0;
+        !shouldUseStaticReferenceViewer &&
+        (hasEnvironmentSplat || Boolean(referenceImage) || normalizedSceneGraph.assets.length > 0 || normalizedSceneGraph.pins.length > 0);
     const selectedView = normalizedSceneGraph.camera_views.find((view) => view.id === selectedViewId) ?? null;
     const selectedPin = normalizedSceneGraph.pins.find((pin) => pin.id === selectedPinId) ?? null;
     const combinedFocusRequest =
         localFocusRequest && (!focusRequest || localFocusRequest.token >= focusRequest.token) ? localFocusRequest : focusRequest ?? null;
 
     useEffect(() => {
+        if (shouldUseStaticReferenceViewer) {
+            setViewerReady(false);
+            return;
+        }
         if (!shouldRenderInteractiveViewer) {
             setViewerReady(false);
         }
-    }, [shouldRenderInteractiveViewer]);
+    }, [shouldRenderInteractiveViewer, shouldUseStaticReferenceViewer]);
 
     const requestFocus = (pose: CameraPose) => {
         setSceneGraph((prev: any) => {
@@ -692,7 +728,17 @@ export default function ViewerPanel({
                 onDrop={handleDrop}
                 onDragOver={handleDragOver}
             >
-                {shouldRenderInteractiveViewer ? (
+                {shouldUseStaticReferenceViewer && referenceImage ? (
+                    <StaticReferenceViewer
+                        referenceImage={referenceImage}
+                        title={isReferenceOnlyDemo ? "Reference-only demo" : "Demo world"}
+                        description={
+                            isReferenceOnlyDemo
+                                ? "This draft is reference-only. Build or import a real world before treating the viewer as a persistent environment."
+                                : "Demo worlds are shown as stable reference surfaces here until you load a real renderable scene."
+                        }
+                    />
+                ) : shouldRenderInteractiveViewer ? (
                     <ThreeOverlay
                         sceneGraph={normalizedSceneGraph}
                         setSceneGraph={setSceneGraph}
@@ -714,7 +760,7 @@ export default function ViewerPanel({
                     <EmptyViewerState clarityMode={clarityMode} />
                 )}
 
-                {viewerReady && !hasEnvironmentSplat && referenceImage ? (
+                {viewerReady && !shouldUseStaticReferenceViewer && !hasEnvironmentSplat && referenceImage ? (
                     <div className="pointer-events-none absolute bottom-6 left-6 right-6 z-20 md:right-auto">
                         <div
                             className="w-full max-w-sm overflow-hidden rounded-[24px] border border-white/12 bg-[linear-gradient(180deg,rgba(8,11,16,0.92),rgba(7,10,14,0.96))] shadow-[0_24px_70px_rgba(0,0,0,0.38)] backdrop-blur-xl"
