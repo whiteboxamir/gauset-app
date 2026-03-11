@@ -2,6 +2,13 @@
 
 Standalone application repository for the Gauset product app (editor + local backend), split from the `gauset.com` landing site.
 
+## Deployment boundary
+
+- This repo is only for the `gauset-app` Vercel project.
+- This repo must never be used to deploy `gauset.com`, `www.gauset.com`, `gnosika.com`, or `www.gnosika.com`.
+- The production `.com` site lives in `/Users/amirboz/gauset` and GitHub repo `whiteboxamir/gauset-com`.
+- Run `npm run verify:boundary` before any release work if there is any doubt about the active repo or Vercel link.
+
 ## What this repo contains
 
 - Next.js app (App Router) with product routes, including:
@@ -16,7 +23,7 @@ Standalone application repository for the Gauset product app (editor + local bac
 
 ```bash
 npm install --legacy-peer-deps
-npm run dev -- --hostname 127.0.0.1 --port 3000
+npm run dev
 ```
 
 ### Backend

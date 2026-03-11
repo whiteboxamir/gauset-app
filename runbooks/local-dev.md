@@ -7,7 +7,7 @@ Bring up the local Next.js frontend and the local FastAPI backend without changi
 ## Assumptions
 
 - Work from `/Users/amirboz/gauset-app`.
-- Use frontend port `3015` so the repo’s smoke scripts and local Playwright suite work without extra flags.
+- `npm run dev` is pinned to frontend port `3001` in this repo.
 - Use backend port `8000`; the frontend proxy falls back to that port in development.
 - `./setup.sh` needs network access because it installs Python packages and clones model repos.
 
@@ -52,7 +52,7 @@ Expected:
 npm install --legacy-peer-deps
 ```
 
-2. Start Next.js on the smoke-test port:
+2. Start Next.js:
 
 ```bash
 npm run dev
@@ -61,14 +61,14 @@ npm run dev
 3. Verify the frontend shell:
 
 ```bash
-curl -I http://127.0.0.1:3015/mvp
+curl -I http://127.0.0.1:3001/mvp
 ```
 
 4. Verify the frontend proxy to the backend:
 
 ```bash
-curl -sS http://127.0.0.1:3015/api/mvp/health
-curl -sS http://127.0.0.1:3015/api/mvp/setup/status
+curl -sS http://127.0.0.1:3001/api/mvp/health
+curl -sS http://127.0.0.1:3001/api/mvp/setup/status
 ```
 
 Expected:
@@ -81,7 +81,7 @@ Expected:
 
 - In development, Next writes its build output to `.next-local/`.
 - The backend writes runtime artifacts under `uploads/`, `assets/`, `scenes/`, `captures/`, and `reconstruction_cache/`.
-- If you must use a different frontend port, start it with `npm run dev:any -- --hostname 127.0.0.1 --port <port>` and override the smoke base URL later with `--web-base-url http://127.0.0.1:<port>` or `GAUSET_MVP_BASE_URL=http://127.0.0.1:<port>`.
+- If port `3001` is busy, stop the stale Next process first instead of starting a second copy of this repo on another port.
 
 ## Stop
 

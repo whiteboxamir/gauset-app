@@ -6,9 +6,14 @@
     "dev": "next dev --port 3001",
     "dev:backend": "backend_venv/bin/python backend/server.py",
     "dev:all": "node scripts/dev-all.mjs",
+    "verify:boundary": "node scripts/check-deploy-boundary.mjs",
     "build": "node guard-deploy-target.mjs && next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "lint:mvp": "eslint src/app/mvp src/components/Editor src/lib/mvp*.ts tests/mvp.local.spec.js tests/mvp.public.spec.js scripts/mvp_viewer_diag.mjs scripts/hostile_local_reconstruction_audit.mjs scripts/hostile_public_audit.mjs scripts/generate_benchmark_splat_fixture.mjs scripts/mvp_benchmark_5m.mjs",
+    "typecheck": "tsc --noEmit",
+    "test:preview": "backend_venv/bin/python -m unittest tests.test_vercel_single_image_preview_fallback tests.test_ml_sharp_preview_enhancement tests.test_mvp_persistence_contracts",
+    "closeout:static": "npm run verify:boundary && npm run typecheck && npm run lint:mvp && npm run test:preview && npm run build"
   },
   "dependencies": {
     "@lumaai/luma-web": "^0.2.2",

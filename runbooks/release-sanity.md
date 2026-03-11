@@ -1,5 +1,7 @@
 # Release Sanity
 
+This runbook is for `/Users/amirboz/gauset-app` and the `gauset-app` Vercel project only. Do not use it as the release path for `gauset.com`; that site must ship from `/Users/amirboz/gauset`.
+
 ## Scope
 
 This runbook checks the deployed `/mvp` shell, the frontend proxy under `/api/mvp/*`, and the public preview and asset generation lanes.
@@ -7,6 +9,7 @@ This runbook checks the deployed `/mvp` shell, the frontend proxy under `/api/mv
 ## Assumptions
 
 - Default public base URL is `https://gauset-app.vercel.app`.
+- Run `npm run verify:boundary` before release work if there is any doubt about the current repo/project link.
 - The frontend deployment proxies to a separate backend deployment through `GAUSET_BACKEND_URL` or `NEXT_PUBLIC_GAUSET_API_BASE_URL`.
 - The public backend is expected to expose preview and asset generation, but not real reconstruction.
 - If storage is served from a different origin, set `GAUSET_MVP_STORAGE_BASE_URL` before running the hostile public audit.
