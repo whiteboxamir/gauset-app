@@ -1,7 +1,7 @@
 "use client";
 
 import React, { Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { Canvas, useFrame, useThree } from "@react-three/fiber";
+import { Canvas, type ThreeEvent, useFrame, useThree } from "@react-three/fiber";
 import { ContactShadows, Environment, Grid, Html, OrbitControls, PivotControls } from "@react-three/drei";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
@@ -13,19 +13,34 @@ import { MapPin } from "lucide-react";
 import EnvironmentSplat from "./EnvironmentSplat";
 import { toProxyUrl } from "@/lib/mvp-api";
 import { resolveEnvironmentRenderState } from "@/lib/mvp-product";
+import { useSceneActiveTool, useSceneSelectedNodeIds, useSceneSelectedPinId } from "@/state/mvpSceneEditorSelectors.ts";
+import {
+    useEditorSessionCaptureRequestKey,
+    useEditorSessionFocusRequest,
+    useEditorSessionPinPlacementEnabled,
+    useEditorSessionPinType,
+    useEditorSessionRecordingPath,
+} from "@/state/mvpEditorSessionSelectors.ts";
+import type { FocusRequest } from "@/state/mvpEditorSessionStore.ts";
+import { useMvpEditorSessionStoreActions } from "@/state/mvpEditorSessionStoreContext.tsx";
+import { useMvpSceneStoreActions, useRenderableSceneDocumentSelector } from "@/state/mvpSceneStoreContext.tsx";
+import { useSceneAssetsSlice, useSceneEnvironmentSlice, useScenePinsSlice, useSceneViewerSlice } from "@/state/mvpSceneWorkspaceSelectors.ts";
+import { classifyViewerFailure, isSingleImagePreviewMetadata, resolveViewerCapabilities, ViewerFallbackReason } from "@/lib/mvp-viewer";
 import {
     CameraPathFrame,
     CameraPose,
     SpatialPin,
     SpatialPinType,
     Vector3Tuple,
+    ViewerState,
+    WorkspaceSceneGraph,
     createId,
     fovToLensMm,
     formatPinTypeLabel,
-    normalizeWorkspaceSceneGraph,
     nowIso,
     parseVector3Tuple,
 } from "@/lib/mvp-workspace";
+import type { SceneDocumentV2, SceneToolMode } from "@/lib/scene-graph/types.ts";
 
 type TransformTuple = [number, number, number];
 
@@ -47,16 +62,58 @@ const EDITOR_CAMERA_NEAR = 0.01;
 const EDITOR_CAMERA_FAR = 500;
 const DEFAULT_EDITOR_VIEWER_BACKGROUND = "#0a0a0a";
 const PREVIEW_CAMERA_ORIENTATION_QUATERNION = new THREE.Quaternion(1, 0, 0, 0);
+const INTERACTIVE_FALLBACK_WORLD_HALF_WIDTH = 5;
+const INTERACTIVE_FALLBACK_WORLD_HALF_HEIGHT = 3;
+const INTERACTIVE_FALLBACK_CAMERA_HEIGHT = 1.6;
+const INTERACTIVE_FALLBACK_CAMERA_DISTANCE = 6;
+const INTERACTIVE_FALLBACK_PATH_SAMPLE_MS = 80;
 const sceneBackgroundScratchColor = new THREE.Color();
-let cachedWebglContextSupport: boolean | null = null;
 
-type FocusRequest = (CameraPose & { token: number }) | null;
 type TAARenderPassInternal = TAARenderPass & { accumulateIndex: number };
+type MeshNodeIdByInstanceId = Record<string, string>;
+type AssetTransformPatch = {
+    position?: [number, number, number];
+    rotation?: [number, number, number, number];
+    scale?: [number, number, number];
+};
 
 type ThreeOverlayFallbackProps = {
     message?: string;
     referenceImage?: string | null;
 };
+
+export interface ThreeOverlayProps {
+    environment: WorkspaceSceneGraph["environment"];
+    assets: SceneAsset[];
+    pins: SpatialPin[];
+    viewer: ViewerState;
+    focusRequest: FocusRequest;
+    captureRequestKey: number;
+    isPinPlacementEnabled: boolean;
+    pinType: SpatialPinType;
+    isRecordingPath: boolean;
+    onCapturePose: (pose: CameraPose) => void;
+    onPathRecorded: (path: CameraPathFrame[]) => void;
+    onViewerReadyChange: (ready: boolean) => void;
+    readOnly?: boolean;
+    backgroundColor?: string;
+    selectedPinId?: string | null;
+    selectedAssetInstanceIds?: string[];
+    activeTool?: SceneToolMode;
+    onSelectPin?: (pinId: string | null) => void;
+    onClearSelection?: () => void;
+    onSelectAsset?: (instanceId: string) => void;
+    onUpdateAssetTransformDraft?: (instanceId: string, patch: AssetTransformPatch) => void;
+    onCommitSceneTransforms?: () => void;
+    onAppendPin?: (pin: SpatialPin) => void;
+}
+
+interface ThreeOverlayConnectedProps {
+    readOnly?: boolean;
+    backgroundColor?: string;
+    onCapturePose: (pose: CameraPose) => void;
+    onPathRecorded: (path: CameraPathFrame[]) => void;
+}
 
 class CanvasErrorBoundary extends React.Component<
     {
@@ -86,38 +143,64 @@ class CanvasErrorBoundary extends React.Component<
     }
 }
 
-function canCreateWebGLContext() {
-    if (cachedWebglContextSupport !== null) {
-        return cachedWebglContextSupport;
-    }
-    if (typeof document === "undefined") return true;
-    const canvas = document.createElement("canvas");
-    canvas.width = 1;
-    canvas.height = 1;
-    const context =
-        canvas.getContext("webgl2", { powerPreference: "high-performance" }) ??
-        canvas.getContext("webgl", { powerPreference: "high-performance" }) ??
-        (canvas.getContext("experimental-webgl", { powerPreference: "high-performance" }) as
-            | WebGLRenderingContext
-            | WebGL2RenderingContext
-            | null);
+function jsonValueEqual<T>(previous: T, next: T) {
+    return JSON.stringify(previous) === JSON.stringify(next);
+}
 
-    cachedWebglContextSupport = Boolean(context);
-    return cachedWebglContextSupport;
+function selectMeshNodeIdByInstanceId(document: SceneDocumentV2): MeshNodeIdByInstanceId {
+    return Object.fromEntries(
+        Object.entries(document.meshes).flatMap(([nodeId, mesh]) => {
+            const metadata = mesh?.metadata ?? {};
+            const instanceId =
+                typeof metadata.instanceId === "string" && metadata.instanceId
+                    ? metadata.instanceId
+                    : typeof metadata.instance_id === "string" && metadata.instance_id
+                      ? metadata.instance_id
+                      : null;
+            return instanceId ? [[instanceId, nodeId]] : [];
+        }),
+    );
+}
+
+function resolvePivotToolConfig(tool: SceneToolMode) {
+    switch (tool) {
+        case "translate":
+            return {
+                visible: true,
+                disableAxes: false,
+                disableSliders: false,
+                disableRotations: true,
+                disableScaling: true,
+            };
+        case "rotate":
+            return {
+                visible: true,
+                disableAxes: true,
+                disableSliders: true,
+                disableRotations: false,
+                disableScaling: true,
+            };
+        case "scale":
+            return {
+                visible: true,
+                disableAxes: true,
+                disableSliders: true,
+                disableRotations: true,
+                disableScaling: false,
+            };
+        default:
+            return {
+                visible: false,
+                disableAxes: true,
+                disableSliders: true,
+                disableRotations: true,
+                disableScaling: true,
+            };
+    }
 }
 
 function isSingleImagePreviewEnvironment(metadata: any) {
-    const lane = String(metadata?.lane ?? "").trim().toLowerCase();
-    const qualityTier = String(metadata?.quality_tier ?? "").trim().toLowerCase();
-    const truthLabel = String(metadata?.truth_label ?? "").trim().toLowerCase();
-    const sourceFormat = String(metadata?.rendering?.source_format ?? "").trim().toLowerCase();
-
-    return (
-        lane === "preview" &&
-        (qualityTier.includes("single_image_preview") ||
-            sourceFormat.includes("dense_preview") ||
-            truthLabel === "instant preview")
-    );
+    return isSingleImagePreviewMetadata(metadata);
 }
 
 function shouldApplyPreviewOrientation(metadata: any) {
@@ -210,6 +293,7 @@ function SingleImagePreviewSurface({ imageUrl }: { imageUrl: string }) {
     return (
         <div className="absolute inset-0 z-20 overflow-hidden rounded-[32px] bg-[linear-gradient(180deg,#040507_0%,#020304_100%)]">
             <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(56,189,248,0.08),transparent_24%)]" />
+            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
                 src={imageUrl}
                 alt=""
@@ -220,24 +304,315 @@ function SingleImagePreviewSurface({ imageUrl }: { imageUrl: string }) {
     );
 }
 
+function clamp01(value: number) {
+    return Math.max(0, Math.min(1, value));
+}
+
+function createInteractiveFallbackPoseFromNormalizedPoint(xNorm: number, yNorm: number, viewer: ViewerState): CameraPose {
+    const targetX = (clamp01(xNorm) - 0.5) * INTERACTIVE_FALLBACK_WORLD_HALF_WIDTH * 2;
+    const targetY = (0.5 - clamp01(yNorm)) * INTERACTIVE_FALLBACK_WORLD_HALF_HEIGHT * 2;
+
+    return {
+        position: [targetX, targetY + INTERACTIVE_FALLBACK_CAMERA_HEIGHT, INTERACTIVE_FALLBACK_CAMERA_DISTANCE],
+        target: [targetX, targetY, 0],
+        fov: viewer.fov,
+        lens_mm: viewer.lens_mm,
+    };
+}
+
+function projectInteractiveFallbackPin(position: Vector3Tuple) {
+    return {
+        left: clamp01((position[0] + INTERACTIVE_FALLBACK_WORLD_HALF_WIDTH) / (INTERACTIVE_FALLBACK_WORLD_HALF_WIDTH * 2)) * 100,
+        top: clamp01(0.5 - position[1] / (INTERACTIVE_FALLBACK_WORLD_HALF_HEIGHT * 2)) * 100,
+    };
+}
+
+function InteractiveSingleImageFallbackSurface({
+    imageUrl,
+    viewer,
+    pins,
+    selectedPinId,
+    isPinPlacementEnabled,
+    pinType,
+    isRecordingPath,
+    focusRequest,
+    captureRequestKey,
+    readOnly,
+    onAddPin,
+    onSelectPin,
+    onCapturePose,
+    onPathRecorded,
+    onClearSelection,
+}: {
+    imageUrl: string;
+    viewer: ViewerState;
+    pins: SpatialPin[];
+    selectedPinId: string | null;
+    isPinPlacementEnabled: boolean;
+    pinType: SpatialPinType;
+    isRecordingPath: boolean;
+    focusRequest: FocusRequest;
+    captureRequestKey: number;
+    readOnly: boolean;
+    onAddPin: (pin: SpatialPin) => void;
+    onSelectPin: (pinId: string | null) => void;
+    onCapturePose?: (pose: CameraPose) => void;
+    onPathRecorded?: (path: CameraPathFrame[]) => void;
+    onClearSelection: () => void;
+}) {
+    const canvasRef = useRef<HTMLCanvasElement | null>(null);
+    const dragActiveRef = useRef(false);
+    const dragDistanceRef = useRef(0);
+    const lastPointerRef = useRef<{ x: number; y: number } | null>(null);
+    const currentPoseRef = useRef<CameraPose>(createInteractiveFallbackPoseFromNormalizedPoint(0.5, 0.5, viewer));
+    const pathRef = useRef<CameraPathFrame[]>([]);
+    const lastCaptureRequestRef = useRef(0);
+    const lastFocusTokenRef = useRef(0);
+    const recordingStartRef = useRef(0);
+    const lastSampleTimeRef = useRef(-1);
+    const [currentPose, setCurrentPose] = useState<CameraPose>(() => createInteractiveFallbackPoseFromNormalizedPoint(0.5, 0.5, viewer));
+
+    useEffect(() => {
+        currentPoseRef.current = currentPose;
+    }, [currentPose]);
+
+    useEffect(() => {
+        setCurrentPose((previous) => ({
+            ...previous,
+            fov: viewer.fov,
+            lens_mm: viewer.lens_mm,
+        }));
+    }, [viewer.fov, viewer.lens_mm]);
+
+    useEffect(() => {
+        if (!focusRequest || focusRequest.token === lastFocusTokenRef.current) {
+            return;
+        }
+
+        lastFocusTokenRef.current = focusRequest.token;
+        setCurrentPose({
+            position: focusRequest.position,
+            target: focusRequest.target,
+            fov: focusRequest.fov,
+            lens_mm: focusRequest.lens_mm,
+            up: focusRequest.up,
+        });
+    }, [focusRequest]);
+
+    useEffect(() => {
+        if (!onCapturePose || captureRequestKey === 0 || captureRequestKey === lastCaptureRequestRef.current) {
+            return;
+        }
+
+        lastCaptureRequestRef.current = captureRequestKey;
+        onCapturePose(currentPoseRef.current);
+    }, [captureRequestKey, onCapturePose]);
+
+    useEffect(() => {
+        if (isRecordingPath) {
+            pathRef.current = [];
+            recordingStartRef.current = 0;
+            lastSampleTimeRef.current = -1;
+            return;
+        }
+
+        dragActiveRef.current = false;
+        if (pathRef.current.length > 0 && onPathRecorded) {
+            onPathRecorded([...pathRef.current]);
+        }
+        pathRef.current = [];
+    }, [isRecordingPath, onPathRecorded]);
+
+    const resolvePointerPoint = React.useCallback(
+        (clientX: number, clientY: number) => {
+            const rect = canvasRef.current?.getBoundingClientRect();
+            if (!rect || rect.width <= 0 || rect.height <= 0) {
+                return null;
+            }
+
+            const xNorm = clamp01((clientX - rect.left) / rect.width);
+            const yNorm = clamp01((clientY - rect.top) / rect.height);
+            return {
+                xNorm,
+                yNorm,
+                pose: createInteractiveFallbackPoseFromNormalizedPoint(xNorm, yNorm, viewer),
+            };
+        },
+        [viewer],
+    );
+
+    const appendPathFrame = React.useCallback((pose: CameraPose, timestampMs: number) => {
+        if (!isRecordingPath) {
+            return;
+        }
+
+        if (recordingStartRef.current === 0) {
+            recordingStartRef.current = timestampMs;
+        }
+
+        const elapsedSeconds = (timestampMs - recordingStartRef.current) / 1000;
+        if (lastSampleTimeRef.current >= 0 && timestampMs - lastSampleTimeRef.current < INTERACTIVE_FALLBACK_PATH_SAMPLE_MS) {
+            return;
+        }
+
+        lastSampleTimeRef.current = timestampMs;
+        pathRef.current.push({
+            time: Number(elapsedSeconds.toFixed(3)),
+            position: pose.position,
+            target: pose.target,
+            rotation: [0, 0, 0, 1],
+            fov: pose.fov,
+        });
+    }, [isRecordingPath]);
+
+    return (
+        <div className="absolute inset-0 z-20 overflow-hidden rounded-[32px] bg-[linear-gradient(180deg,#040507_0%,#020304_100%)]">
+            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(56,189,248,0.08),transparent_24%)]" />
+            <canvas
+                ref={canvasRef}
+                className="absolute inset-0 h-full w-full touch-none bg-cover bg-center bg-no-repeat"
+                style={{ backgroundImage: `url(${imageUrl})` }}
+                onPointerDown={(event) => {
+                    if (readOnly || !isRecordingPath) {
+                        dragActiveRef.current = false;
+                        dragDistanceRef.current = 0;
+                        lastPointerRef.current = { x: event.clientX, y: event.clientY };
+                        return;
+                    }
+
+                    const point = resolvePointerPoint(event.clientX, event.clientY);
+                    if (!point) {
+                        return;
+                    }
+
+                    dragActiveRef.current = true;
+                    dragDistanceRef.current = 0;
+                    lastPointerRef.current = { x: event.clientX, y: event.clientY };
+                    setCurrentPose(point.pose);
+                    appendPathFrame(point.pose, performance.now());
+                }}
+                onPointerMove={(event) => {
+                    const previousPointer = lastPointerRef.current;
+                    if (previousPointer) {
+                        dragDistanceRef.current += Math.hypot(event.clientX - previousPointer.x, event.clientY - previousPointer.y);
+                    }
+                    lastPointerRef.current = { x: event.clientX, y: event.clientY };
+
+                    if (readOnly || !isRecordingPath || !dragActiveRef.current) {
+                        return;
+                    }
+
+                    const point = resolvePointerPoint(event.clientX, event.clientY);
+                    if (!point) {
+                        return;
+                    }
+
+                    setCurrentPose(point.pose);
+                    appendPathFrame(point.pose, performance.now());
+                }}
+                onPointerUp={() => {
+                    dragActiveRef.current = false;
+                    lastPointerRef.current = null;
+                }}
+                onPointerLeave={() => {
+                    dragActiveRef.current = false;
+                    lastPointerRef.current = null;
+                }}
+                onClick={(event) => {
+                    if (dragDistanceRef.current > 4) {
+                        dragDistanceRef.current = 0;
+                        return;
+                    }
+
+                    if (readOnly) {
+                        return;
+                    }
+
+                    if (isPinPlacementEnabled) {
+                        const point = resolvePointerPoint(event.clientX, event.clientY);
+                        if (!point) {
+                            return;
+                        }
+
+                        setCurrentPose(point.pose);
+                        onAddPin({
+                            id: createId("pin"),
+                            label: `${formatPinTypeLabel(pinType)} Pin`,
+                            type: pinType,
+                            position: point.pose.target,
+                            created_at: nowIso(),
+                        });
+                        return;
+                    }
+
+                    onClearSelection();
+                }}
+            />
+            <div className="pointer-events-none absolute inset-0">
+                {pins.map((pin) => {
+                    const location = projectInteractiveFallbackPin(pin.position);
+                    const isSelected = pin.id === selectedPinId;
+
+                    return (
+                        <button
+                            key={pin.id}
+                            type="button"
+                            onClick={(event) => {
+                                event.stopPropagation();
+                                onSelectPin(pin.id);
+                            }}
+                            className={`pointer-events-auto absolute flex h-8 w-8 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border text-xs shadow-lg transition-transform hover:scale-110 ${pinColors(pin.type, isSelected)}`}
+                            style={{ left: `${location.left}%`, top: `${location.top}%` }}
+                            title={pin.label}
+                        >
+                            <MapPin className="h-4 w-4" />
+                        </button>
+                    );
+                })}
+            </div>
+        </div>
+    );
+}
+
 function AssetFallbackMesh({
     asset,
     updateAssetTransform,
+    onCommitTransform,
     readOnly,
+    selected,
+    activeTool,
+    onSelect,
 }: {
     asset: SceneAsset;
-    updateAssetTransform: (instanceId: string, patch: Partial<SceneAsset>) => void;
+    updateAssetTransform: (
+        instanceId: string,
+        patch: {
+            position?: [number, number, number];
+            rotation?: [number, number, number, number];
+            scale?: [number, number, number];
+        },
+    ) => void;
+    onCommitTransform?: () => void;
     readOnly: boolean;
+    selected: boolean;
+    activeTool: SceneToolMode;
+    onSelect: () => void;
 }) {
-    const [active, setActive] = useState(false);
+    const pivotTool = resolvePivotToolConfig(activeTool);
+    const controlsVisible = !readOnly && selected && pivotTool.visible;
 
     return (
         <PivotControls
-            visible={!readOnly && active}
+            visible={controlsVisible}
+            enabled={controlsVisible}
             scale={80}
             depthTest={false}
             lineWidth={3}
             anchor={[0, 0, 0]}
+            disableAxes={pivotTool.disableAxes}
+            disableSliders={pivotTool.disableSliders}
+            disableRotations={pivotTool.disableRotations}
+            disableScaling={pivotTool.disableScaling}
             onDrag={(local) => {
                 if (readOnly) return;
                 const position = new THREE.Vector3();
@@ -247,9 +622,14 @@ function AssetFallbackMesh({
                 const euler = new THREE.Euler().setFromQuaternion(quaternion);
                 updateAssetTransform(asset.instanceId, {
                     position: [position.x, position.y, position.z],
-                    rotation: [euler.x, euler.y, euler.z],
+                    rotation: [euler.x, euler.y, euler.z, 1],
                     scale: [scale.x, scale.y, scale.z],
                 });
+            }}
+            onDragEnd={() => {
+                if (!readOnly) {
+                    onCommitTransform?.();
+                }
             }}
         >
             <group
@@ -259,12 +639,12 @@ function AssetFallbackMesh({
                 onClick={(event) => {
                     if (readOnly) return;
                     event.stopPropagation();
-                    setActive((prev) => !prev);
+                    onSelect();
                 }}
             >
                 <mesh castShadow receiveShadow>
                     <boxGeometry args={[1, 1, 1]} />
-                    <meshStandardMaterial color={active ? "#60a5fa" : "#4ade80"} roughness={0.3} metalness={0.4} />
+                    <meshStandardMaterial color={selected ? "#60a5fa" : "#4ade80"} roughness={0.3} metalness={0.4} />
                 </mesh>
             </group>
         </PivotControls>
@@ -344,15 +724,31 @@ async function loadMeshAsset(meshUrl: string, signal: AbortSignal) {
 function MeshAsset({
     asset,
     updateAssetTransform,
+    onCommitTransform,
     readOnly,
+    selected,
+    activeTool,
+    onSelect,
 }: {
     asset: SceneAsset;
-    updateAssetTransform: (instanceId: string, patch: Partial<SceneAsset>) => void;
+    updateAssetTransform: (
+        instanceId: string,
+        patch: {
+            position?: [number, number, number];
+            rotation?: [number, number, number, number];
+            scale?: [number, number, number];
+        },
+    ) => void;
+    onCommitTransform?: () => void;
     readOnly: boolean;
+    selected: boolean;
+    activeTool: SceneToolMode;
+    onSelect: () => void;
 }) {
-    const [active, setActive] = useState(false);
     const [parsedAsset, setParsedAsset] = useState<ParsedMeshAsset | null>(null);
     const [loadError, setLoadError] = useState<Error | null>(null);
+    const pivotTool = resolvePivotToolConfig(activeTool);
+    const controlsVisible = !readOnly && selected && pivotTool.visible;
 
     useEffect(() => {
         if (!asset.mesh) {
@@ -391,7 +787,17 @@ function MeshAsset({
     const scene = useMemo(() => (parsedAsset ? clone(parsedAsset.scene) : null), [parsedAsset]);
 
     if (loadError) {
-        return <AssetFallbackMesh asset={asset} updateAssetTransform={updateAssetTransform} readOnly={readOnly} />;
+        return (
+            <AssetFallbackMesh
+                asset={asset}
+                updateAssetTransform={updateAssetTransform}
+                onCommitTransform={onCommitTransform}
+                readOnly={readOnly}
+                selected={selected}
+                activeTool={activeTool}
+                onSelect={onSelect}
+            />
+        );
     }
 
     if (!scene) {
@@ -400,11 +806,16 @@ function MeshAsset({
 
     return (
         <PivotControls
-            visible={!readOnly && active}
+            visible={controlsVisible}
+            enabled={controlsVisible}
             scale={80}
             depthTest={false}
             lineWidth={3}
             anchor={[0, 0, 0]}
+            disableAxes={pivotTool.disableAxes}
+            disableSliders={pivotTool.disableSliders}
+            disableRotations={pivotTool.disableRotations}
+            disableScaling={pivotTool.disableScaling}
             onDrag={(local) => {
                 if (readOnly) return;
                 const position = new THREE.Vector3();
@@ -414,9 +825,14 @@ function MeshAsset({
                 const euler = new THREE.Euler().setFromQuaternion(quaternion);
                 updateAssetTransform(asset.instanceId, {
                     position: [position.x, position.y, position.z],
-                    rotation: [euler.x, euler.y, euler.z],
+                    rotation: [euler.x, euler.y, euler.z, 1],
                     scale: [scale.x, scale.y, scale.z],
                 });
+            }}
+            onDragEnd={() => {
+                if (!readOnly) {
+                    onCommitTransform?.();
+                }
             }}
         >
             <group
@@ -426,7 +842,7 @@ function MeshAsset({
                 onClick={(event) => {
                     if (readOnly) return;
                     event.stopPropagation();
-                    setActive((prev) => !prev);
+                    onSelect();
                 }}
             >
                 <primitive object={scene} />
@@ -438,14 +854,39 @@ function MeshAsset({
 function SceneAssetNode({
     asset,
     updateAssetTransform,
+    onCommitTransform,
     readOnly,
+    selected,
+    activeTool,
+    onSelect,
 }: {
     asset: SceneAsset;
-    updateAssetTransform: (instanceId: string, patch: Partial<SceneAsset>) => void;
+    updateAssetTransform: (
+        instanceId: string,
+        patch: {
+            position?: [number, number, number];
+            rotation?: [number, number, number, number];
+            scale?: [number, number, number];
+        },
+    ) => void;
+    onCommitTransform?: () => void;
     readOnly: boolean;
+    selected: boolean;
+    activeTool: SceneToolMode;
+    onSelect: () => void;
 }) {
     if (asset.mesh) {
-        return <MeshAsset asset={asset} updateAssetTransform={updateAssetTransform} readOnly={readOnly} />;
+        return (
+            <MeshAsset
+                asset={asset}
+                updateAssetTransform={updateAssetTransform}
+                onCommitTransform={onCommitTransform}
+                readOnly={readOnly}
+                selected={selected}
+                activeTool={activeTool}
+                onSelect={onSelect}
+            />
+        );
     }
 
     return null;
@@ -498,14 +939,16 @@ function PinLayer({
         }
     });
 
-    const handlePointerDown = (event: { stopPropagation: () => void }) => {
-        if (!isPlacingPin || readOnly || !hoverPosition) return;
+    const handlePointerDown = (event: ThreeEvent<PointerEvent>) => {
+        if (!isPlacingPin || readOnly) return;
         event.stopPropagation();
+        const resolvedPosition = event.point?.clone?.() ?? hoverPosition?.clone() ?? null;
+        if (!resolvedPosition) return;
         onAddPin({
             id: createId("pin"),
             label: `${formatPinTypeLabel(pinType)} Pin`,
             type: pinType,
-            position: [hoverPosition.x, hoverPosition.y, hoverPosition.z],
+            position: [resolvedPosition.x, resolvedPosition.y, resolvedPosition.z],
             created_at: nowIso(),
         });
     };
@@ -730,22 +1173,19 @@ function TemporalAntialiasingComposer() {
 function SceneBackgroundLock({ backgroundColor }: { backgroundColor: string }) {
     const { gl, scene } = useThree();
     const background = useMemo(() => new THREE.Color(backgroundColor), [backgroundColor]);
-    const previousBackgroundRef = useRef<THREE.Color | THREE.Texture | THREE.CubeTexture | null>(null);
-    const previousClearColorRef = useRef(new THREE.Color());
-    const previousClearAlphaRef = useRef(1);
 
     useEffect(() => {
-        previousBackgroundRef.current = scene.background;
-        gl.getClearColor(previousClearColorRef.current);
-        previousClearAlphaRef.current = gl.getClearAlpha();
+        const previousBackground = scene.background;
+        const previousClearColor = gl.getClearColor(new THREE.Color()).clone();
+        const previousClearAlpha = gl.getClearAlpha();
 
         scene.background = background;
         gl.setClearColor(background, 1);
         gl.domElement.style.backgroundColor = backgroundColor;
 
         return () => {
-            scene.background = previousBackgroundRef.current;
-            gl.setClearColor(previousClearColorRef.current, previousClearAlphaRef.current);
+            scene.background = previousBackground;
+            gl.setClearColor(previousClearColor, previousClearAlpha);
         };
     }, [background, backgroundColor, gl, scene]);
 
@@ -766,115 +1206,189 @@ function SceneBackgroundLock({ backgroundColor }: { backgroundColor: string }) {
     return null;
 }
 
-export default function ThreeOverlay({
-    sceneGraph,
-    setSceneGraph,
-    readOnly = false,
-    isPreviewRoute = false,
-    backgroundColor = DEFAULT_EDITOR_VIEWER_BACKGROUND,
-    selectedPinId,
-    onSelectPin,
+const ThreeOverlay = React.memo(function ThreeOverlay({
+    environment,
+    assets,
+    pins,
+    viewer,
     focusRequest,
-    captureRequestKey = 0,
+    captureRequestKey,
+    isPinPlacementEnabled,
+    pinType,
+    isRecordingPath,
     onCapturePose,
-    isPinPlacementEnabled = false,
-    pinType = "general",
-    isRecordingPath = false,
     onPathRecorded,
     onViewerReadyChange,
-}: {
-    sceneGraph: any;
-    setSceneGraph: React.Dispatch<React.SetStateAction<any>>;
-    readOnly?: boolean;
-    isPreviewRoute?: boolean;
-    backgroundColor?: string;
-    selectedPinId?: string | null;
-    onSelectPin?: (pinId: string | null) => void;
-    focusRequest?: FocusRequest;
-    captureRequestKey?: number;
-    onCapturePose?: (pose: CameraPose) => void;
-    isPinPlacementEnabled?: boolean;
-    pinType?: SpatialPinType;
-    isRecordingPath?: boolean;
-    onPathRecorded?: (path: CameraPathFrame[]) => void;
-    onViewerReadyChange?: (ready: boolean) => void;
-}) {
-    const normalizedSceneGraph = useMemo(() => normalizeWorkspaceSceneGraph(sceneGraph), [sceneGraph]);
+    readOnly = false,
+    backgroundColor = DEFAULT_EDITOR_VIEWER_BACKGROUND,
+    selectedPinId = null,
+    selectedAssetInstanceIds = [],
+    activeTool = "select",
+    onSelectPin,
+    onClearSelection,
+    onSelectAsset,
+    onUpdateAssetTransformDraft,
+    onCommitSceneTransforms,
+    onAppendPin,
+}: ThreeOverlayProps) {
     const controlsRef = useRef<any>(null);
+    const canvasElementRef = useRef<HTMLCanvasElement | null>(null);
     const canvasEventCleanupRef = useRef<(() => void) | null>(null);
     const previewAutofocusKeyRef = useRef("");
     const [renderMode, setRenderMode] = useState<"webgl" | "fallback">("webgl");
     const [renderError, setRenderError] = useState("");
+    const [renderFallbackReason, setRenderFallbackReason] = useState<ViewerFallbackReason | null>(null);
     const [isViewerReady, setIsViewerReady] = useState(false);
     const [previewAutofocusRequest, setPreviewAutofocusRequest] = useState<FocusRequest>(null);
-    const environmentRenderState = useMemo(
-        () => resolveEnvironmentRenderState(normalizedSceneGraph.environment),
-        [normalizedSceneGraph.environment],
-    );
+    const environmentRenderState = useMemo(() => resolveEnvironmentRenderState(environment), [environment]);
     const environmentViewerUrl = toProxyUrl(environmentRenderState.viewerUrl);
     const environmentSplatUrl = toProxyUrl(environmentRenderState.splatUrl);
     const previewProjectionImage = toProxyUrl(environmentRenderState.previewProjectionImage);
-    const environmentMetadata =
-        typeof normalizedSceneGraph.environment === "object" ? normalizedSceneGraph.environment?.metadata ?? null : null;
+    const environmentMetadata = typeof environment === "object" ? environment?.metadata ?? null : null;
     const referenceImage = environmentRenderState.referenceImage;
     const isSingleImagePreview = isSingleImagePreviewEnvironment(environmentMetadata);
+    const viewerDecision = useMemo(
+        () =>
+            resolveViewerCapabilities({
+                plyUrl: environmentSplatUrl,
+                viewerUrl: environmentViewerUrl,
+                metadata: environmentMetadata,
+            }),
+        [environmentMetadata, environmentSplatUrl, environmentViewerUrl],
+    );
     const hasRenderableEnvironment = Boolean(environmentSplatUrl || environmentViewerUrl);
-    const shouldUsePreviewProjectionFallback = !hasRenderableEnvironment && Boolean(previewProjectionImage);
+    const shouldUsePreviewProjectionFallback = renderMode !== "fallback" && !hasRenderableEnvironment && Boolean(previewProjectionImage);
+    const interactiveFallbackImage =
+        renderFallbackReason === "webgl_unavailable" && isSingleImagePreview ? previewProjectionImage ?? referenceImage ?? null : null;
+    const usesInteractiveFallback = renderMode === "fallback" && Boolean(interactiveFallbackImage);
     const singleImagePreviewCamera = useMemo(() => resolveSingleImagePreviewCamera(environmentMetadata), [environmentMetadata]);
     const effectiveFocusRequest =
         previewAutofocusRequest && (!focusRequest || previewAutofocusRequest.token >= focusRequest.token)
             ? previewAutofocusRequest
             : focusRequest ?? null;
+    const selectedAssetInstanceIdSet = useMemo(() => new Set(selectedAssetInstanceIds), [selectedAssetInstanceIds]);
 
-    useEffect(() => {
-        if (canCreateWebGLContext()) return;
+    const activateViewerFallback = React.useCallback((message: string, reason: ViewerFallbackReason = "environment_render_failed") => {
         setIsViewerReady(false);
         setRenderMode("fallback");
-        setRenderError("WebGL could not be initialized in this environment.");
+        setRenderFallbackReason(reason);
+        setRenderError(message);
     }, []);
+
+    useEffect(() => {
+        if (viewerDecision.renderMode !== "fallback") {
+            setRenderMode("webgl");
+            setRenderFallbackReason(null);
+            setRenderError("");
+            return;
+        }
+
+        activateViewerFallback(viewerDecision.fallbackMessage, viewerDecision.fallbackReason ?? "environment_render_failed");
+    }, [activateViewerFallback, viewerDecision.fallbackMessage, viewerDecision.fallbackReason, viewerDecision.renderMode]);
 
     useEffect(() => {
         return () => {
             canvasEventCleanupRef.current?.();
             canvasEventCleanupRef.current = null;
+            canvasElementRef.current = null;
         };
     }, []);
 
     useEffect(() => {
-        onViewerReadyChange?.(isViewerReady && renderMode === "webgl");
-    }, [isViewerReady, onViewerReadyChange, renderMode]);
+        onViewerReadyChange((isViewerReady && renderMode === "webgl") || usesInteractiveFallback);
+    }, [isViewerReady, onViewerReadyChange, renderMode, usesInteractiveFallback]);
 
     useEffect(() => {
         previewAutofocusKeyRef.current = "";
         setPreviewAutofocusRequest(null);
     }, [environmentSplatUrl, environmentViewerUrl, isSingleImagePreview]);
 
-    const updateAssetTransform = (instanceId: string, patch: Partial<SceneAsset>) => {
-        setSceneGraph((prev: any) => {
-            const normalized = normalizeWorkspaceSceneGraph(prev);
-            return {
-                ...normalized,
-                assets: normalized.assets.map((asset: SceneAsset) => (asset.instanceId === instanceId ? { ...asset, ...patch } : asset)),
-            };
-        });
-    };
+    const selectPin = React.useCallback((pinId: string | null) => {
+        if (!onSelectPin) {
+            return;
+        }
+        onSelectPin(pinId);
+    }, [onSelectPin]);
 
-    const addPin = (pin: SpatialPin) => {
-        setSceneGraph((prev: any) => {
-            const normalized = normalizeWorkspaceSceneGraph(prev);
-            return {
-                ...normalized,
-                pins: [...normalized.pins, pin],
-            };
-        });
-        onSelectPin?.(pin.id);
-    };
+    const clearSceneSelection = React.useCallback(() => {
+        if (onClearSelection) {
+            onClearSelection();
+            return;
+        }
+        onSelectPin?.(null);
+    }, [onClearSelection, onSelectPin]);
 
-    const handleCanvasError = (error: Error) => {
-        setIsViewerReady(false);
-        setRenderMode("fallback");
-        setRenderError(error.message || "WebGL viewer failed to initialize.");
-    };
+    const updateAssetTransform = React.useCallback(
+        (instanceId: string, patch: AssetTransformPatch) => {
+            onUpdateAssetTransformDraft?.(instanceId, patch);
+        },
+        [onUpdateAssetTransformDraft],
+    );
+
+    const commitSceneTransforms = React.useCallback(() => {
+        onCommitSceneTransforms?.();
+    }, [onCommitSceneTransforms]);
+
+    const addPin = React.useCallback((pin: SpatialPin) => {
+        if (!onAppendPin) {
+            return;
+        }
+        onAppendPin(pin);
+        selectPin(pin.id);
+    }, [onAppendPin, selectPin]);
+
+    const selectSceneAsset = React.useCallback((instanceId: string) => {
+        onSelectAsset?.(instanceId);
+    }, [onSelectAsset]);
+
+    const addPinAtControlsTarget = React.useCallback(() => {
+        if (!isPinPlacementEnabled || readOnly) {
+            return false;
+        }
+
+        const target = controlsRef.current?.target ?? new THREE.Vector3(0, 0, 0);
+
+        addPin({
+            id: createId("pin"),
+            label: `${formatPinTypeLabel(pinType)} Pin`,
+            type: pinType,
+            position: [target.x, target.y, target.z],
+            created_at: nowIso(),
+        });
+        return true;
+    }, [addPin, isPinPlacementEnabled, pinType, readOnly]);
+
+    useEffect(() => {
+        const canvas = canvasElementRef.current;
+        if (!canvas || !isPinPlacementEnabled || readOnly) {
+            return;
+        }
+
+        const handleCanvasClick = () => {
+            addPinAtControlsTarget();
+        };
+
+        canvas.addEventListener("click", handleCanvasClick);
+        return () => {
+            canvas.removeEventListener("click", handleCanvasClick);
+        };
+    }, [addPinAtControlsTarget, isPinPlacementEnabled, readOnly]);
+
+    const handleCanvasError = React.useCallback(
+        (error: Error) => {
+            const message = error.message || "WebGL viewer failed to initialize.";
+            activateViewerFallback(message, classifyViewerFailure(message));
+        },
+        [activateViewerFallback],
+    );
+
+    const handleEnvironmentFatalError = React.useCallback(
+        (message: string, reason: ViewerFallbackReason) => {
+            void reason;
+            activateViewerFallback(message);
+        },
+        [activateViewerFallback],
+    );
 
     const handlePreviewBounds = (bounds: { center: [number, number, number]; radius: number; forward?: [number, number, number] }) => {
         if (!isSingleImagePreview) {
@@ -894,14 +1408,14 @@ export default function ThreeOverlay({
             return;
         }
 
-        const key = `${environmentSplatUrl}|${bounds.center.join(",")}|${bounds.radius.toFixed(4)}|${(bounds.forward ?? [0, 0, 1]).join(",")}|${normalizedSceneGraph.viewer.fov.toFixed(2)}`;
+        const key = `${environmentSplatUrl}|${bounds.center.join(",")}|${bounds.radius.toFixed(4)}|${(bounds.forward ?? [0, 0, 1]).join(",")}|${viewer.fov.toFixed(2)}`;
         if (previewAutofocusKeyRef.current === key) {
             return;
         }
         previewAutofocusKeyRef.current = key;
 
         const radius = Math.max(0.1, bounds.radius);
-        const verticalFovRadians = THREE.MathUtils.degToRad(normalizedSceneGraph.viewer.fov);
+        const verticalFovRadians = THREE.MathUtils.degToRad(viewer.fov);
         const distance = Math.max(radius * 1.75, (radius / Math.tan(verticalFovRadians * 0.5)) * 0.96);
         const forward = new THREE.Vector3(...(bounds.forward ?? [0, 0, 1]));
         if (forward.lengthSq() <= 1e-6) {
@@ -913,14 +1427,36 @@ export default function ThreeOverlay({
         setPreviewAutofocusRequest({
             position: [position.x, position.y, position.z],
             target: bounds.center,
-            fov: normalizedSceneGraph.viewer.fov,
-            lens_mm: Math.round(fovToLensMm(normalizedSceneGraph.viewer.fov) * 10) / 10,
+            fov: viewer.fov,
+            lens_mm: Math.round(fovToLensMm(viewer.fov) * 10) / 10,
             token: Date.now(),
         });
     };
 
     if (shouldUsePreviewProjectionFallback && previewProjectionImage) {
         return <SingleImagePreviewSurface imageUrl={previewProjectionImage} />;
+    }
+
+    if (usesInteractiveFallback && interactiveFallbackImage) {
+        return (
+            <InteractiveSingleImageFallbackSurface
+                imageUrl={interactiveFallbackImage}
+                viewer={viewer}
+                pins={pins}
+                selectedPinId={selectedPinId}
+                isPinPlacementEnabled={isPinPlacementEnabled}
+                pinType={pinType}
+                isRecordingPath={isRecordingPath}
+                focusRequest={effectiveFocusRequest}
+                captureRequestKey={captureRequestKey}
+                readOnly={readOnly}
+                onAddPin={addPin}
+                onSelectPin={selectPin}
+                onCapturePose={onCapturePose}
+                onPathRecorded={onPathRecorded}
+                onClearSelection={clearSceneSelection}
+            />
+        );
     }
 
     if (renderMode === "fallback") {
@@ -931,7 +1467,7 @@ export default function ThreeOverlay({
         <div className="absolute inset-0 pointer-events-auto z-20">
             <CanvasErrorBoundary onError={handleCanvasError}>
                 <Canvas
-                    camera={{ position: [5, 4, 6], fov: normalizedSceneGraph.viewer.fov, near: EDITOR_CAMERA_NEAR, far: EDITOR_CAMERA_FAR }}
+                    camera={{ position: [5, 4, 6], fov: viewer.fov, near: EDITOR_CAMERA_NEAR, far: EDITOR_CAMERA_FAR }}
                     dpr={isSingleImagePreview ? [1, 2] : [1, 3]}
                     style={{ background: backgroundColor, touchAction: "none" }}
                     gl={{
@@ -944,11 +1480,10 @@ export default function ThreeOverlay({
                     shadows={!isSingleImagePreview}
                     onCreated={({ gl }) => {
                         canvasEventCleanupRef.current?.();
+                        canvasElementRef.current = gl.domElement;
                         const handleContextLost = (event: Event) => {
                             event.preventDefault();
-                            setIsViewerReady(false);
-                            setRenderMode("fallback");
-                            setRenderError("WebGL context was lost while rendering the viewer.");
+                            activateViewerFallback("WebGL context was lost while rendering the viewer.");
                         };
                         const handleContextRestored = () => {
                             setRenderError("");
@@ -956,6 +1491,7 @@ export default function ThreeOverlay({
                         gl.domElement.addEventListener("webglcontextlost", handleContextLost, false);
                         gl.domElement.addEventListener("webglcontextrestored", handleContextRestored, false);
                         canvasEventCleanupRef.current = () => {
+                            canvasElementRef.current = null;
                             gl.domElement.removeEventListener("webglcontextlost", handleContextLost, false);
                             gl.domElement.removeEventListener("webglcontextrestored", handleContextRestored, false);
                         };
@@ -968,7 +1504,7 @@ export default function ThreeOverlay({
                         setRenderError("");
                         setIsViewerReady(true);
                     }}
-                    onPointerMissed={() => onSelectPin?.(null)}
+                    onPointerMissed={clearSceneSelection}
                 >
                     <SceneBackgroundLock backgroundColor={backgroundColor} />
                     {!isSingleImagePreview ? <TemporalAntialiasingComposer /> : null}
@@ -978,7 +1514,7 @@ export default function ThreeOverlay({
                     <OrbitControls ref={controlsRef} makeDefault enableDamping dampingFactor={0.08} />
                     {!isSingleImagePreview ? <Environment preset="city" background={false} /> : null}
                     <CameraRig
-                        viewerFov={normalizedSceneGraph.viewer.fov}
+                        viewerFov={viewer.fov}
                         controlsRef={controlsRef}
                         focusRequest={effectiveFocusRequest}
                         captureRequestKey={captureRequestKey}
@@ -1012,30 +1548,108 @@ export default function ThreeOverlay({
                                 viewerUrl={environmentViewerUrl}
                                 metadata={environmentMetadata}
                                 onPreviewBounds={handlePreviewBounds}
+                                onFatalError={handleEnvironmentFatalError}
                             />
                         </Suspense>
                     ) : null}
 
-                    {(normalizedSceneGraph.assets ?? []).map((asset: SceneAsset, index: number) => (
+                    {(assets ?? []).map((asset: SceneAsset, index: number) => (
                         <SceneAssetNode
                             key={asset.instanceId || `${asset.name}-${index}`}
                             asset={asset}
                             updateAssetTransform={updateAssetTransform}
+                            onCommitTransform={commitSceneTransforms}
                             readOnly={readOnly}
+                            selected={selectedAssetInstanceIdSet.has(asset.instanceId)}
+                            activeTool={activeTool}
+                            onSelect={() => selectSceneAsset(asset.instanceId)}
                         />
                     ))}
 
                     <PinLayer
-                        pins={normalizedSceneGraph.pins}
+                        pins={pins}
                         selectedPinId={selectedPinId}
                         isPlacingPin={isPinPlacementEnabled}
                         pinType={pinType}
                         readOnly={readOnly}
                         onAddPin={addPin}
-                        onSelectPin={onSelectPin}
+                        onSelectPin={selectPin}
                     />
                 </Canvas>
             </CanvasErrorBoundary>
         </div>
     );
-}
+});
+
+export const ThreeOverlayConnected = React.memo(function ThreeOverlayConnected({
+    readOnly = false,
+    backgroundColor,
+    onCapturePose,
+    onPathRecorded,
+}: ThreeOverlayConnectedProps) {
+    const sceneStoreActions = useMvpSceneStoreActions();
+    const editorSessionActions = useMvpEditorSessionStoreActions();
+    const environment = useSceneEnvironmentSlice();
+    const assets = useSceneAssetsSlice();
+    const pins = useScenePinsSlice();
+    const viewer = useSceneViewerSlice();
+    const selectedNodeIds = useSceneSelectedNodeIds();
+    const selectedPinId = useSceneSelectedPinId();
+    const activeTool = useSceneActiveTool();
+    const focusRequest = useEditorSessionFocusRequest();
+    const captureRequestKey = useEditorSessionCaptureRequestKey();
+    const isPinPlacementEnabled = useEditorSessionPinPlacementEnabled();
+    const pinType = useEditorSessionPinType();
+    const isRecordingPath = useEditorSessionRecordingPath();
+    const assetNodeIdByInstanceId = useRenderableSceneDocumentSelector(selectMeshNodeIdByInstanceId, jsonValueEqual);
+    const selectedNodeIdSet = useMemo(() => new Set(selectedNodeIds), [selectedNodeIds]);
+    const selectedAssetInstanceIds = useMemo(
+        () =>
+            Object.entries(assetNodeIdByInstanceId).flatMap(([instanceId, nodeId]) =>
+                selectedNodeIdSet.has(nodeId) ? [instanceId] : [],
+            ),
+        [assetNodeIdByInstanceId, selectedNodeIdSet],
+    );
+
+    const handleSelectAsset = React.useCallback((instanceId: string) => {
+        const nodeId = assetNodeIdByInstanceId[instanceId];
+        if (!nodeId) {
+            return;
+        }
+
+        sceneStoreActions.selectNodes([nodeId]);
+        if (activeTool === "select") {
+            sceneStoreActions.setActiveTool("translate");
+        }
+    }, [activeTool, assetNodeIdByInstanceId, sceneStoreActions]);
+
+    return (
+        <ThreeOverlay
+            environment={environment}
+            assets={assets}
+            pins={pins}
+            viewer={viewer}
+            focusRequest={focusRequest}
+            captureRequestKey={captureRequestKey}
+            isPinPlacementEnabled={isPinPlacementEnabled}
+            pinType={pinType}
+            isRecordingPath={isRecordingPath}
+            onCapturePose={onCapturePose}
+            onPathRecorded={onPathRecorded}
+            onViewerReadyChange={editorSessionActions.setViewerReady}
+            readOnly={readOnly}
+            backgroundColor={backgroundColor}
+            selectedPinId={selectedPinId}
+            selectedAssetInstanceIds={selectedAssetInstanceIds}
+            activeTool={activeTool}
+            onSelectPin={sceneStoreActions.selectPin}
+            onClearSelection={sceneStoreActions.clearSelection}
+            onSelectAsset={handleSelectAsset}
+            onUpdateAssetTransformDraft={sceneStoreActions.updateDraftTransformByAssetInstanceId}
+            onCommitSceneTransforms={sceneStoreActions.commitDraftTransforms}
+            onAppendPin={sceneStoreActions.appendPin}
+        />
+    );
+});
+
+export default ThreeOverlay;

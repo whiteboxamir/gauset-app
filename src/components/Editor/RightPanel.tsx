@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
     Box,
     Copy,
@@ -20,8 +20,8 @@ import {
 import { extractApiError, MVP_API_BASE_URL } from "@/lib/mvp-api";
 import { describeEnvironment, GeneratedEnvironmentMetadata } from "@/lib/mvp-product";
 import { createReviewPackage, encodeReviewPackage } from "@/lib/mvp-review";
+import { sceneDocumentToWorkspaceSceneGraph } from "@/lib/scene-graph/document.ts";
 import {
-    CameraPose,
     CameraView,
     ReviewIssue,
     ReviewIssueSeverity,
@@ -29,14 +29,15 @@ import {
     SceneReviewRecord,
     SpatialPin,
     SpatialPinType,
-    WorkspaceSceneGraph,
     createDefaultReviewRecord,
     createId,
     formatPinTypeLabel,
     normalizeReviewRecord,
-    normalizeWorkspaceSceneGraph,
     nowIso,
 } from "@/lib/mvp-workspace";
+import { useSceneSelectedPinId, useSceneSelectedViewId } from "@/state/mvpSceneEditorSelectors.ts";
+import { useMvpSceneStoreActions, useRenderableSceneDocumentSelector, useRenderableSceneDocumentSnapshotGetter } from "@/state/mvpSceneStoreContext.tsx";
+import { useMvpEditorSessionStoreActions } from "@/state/mvpEditorSessionStoreContext.tsx";
 
 type SaveState = "idle" | "saving" | "saved" | "recovered" | "error";
 
@@ -72,8 +73,6 @@ interface RightPanelProps {
         sceneDirection: string[];
     } | null;
     lastOutputLabel?: string;
-    sceneGraph: WorkspaceSceneGraph | any;
-    setSceneGraph: React.Dispatch<React.SetStateAction<any>>;
     assetsList: any[];
     activeScene: string | null;
     saveState: SaveState;
@@ -84,11 +83,11 @@ interface RightPanelProps {
     onManualSave: () => Promise<any> | void;
     onRestoreVersion: (versionId: string) => Promise<any> | void;
     onExport?: () => void;
-    selectedPinId?: string | null;
-    onSelectPin?: (pinId: string | null) => void;
-    selectedViewId?: string | null;
-    onSelectView?: (viewId: string | null) => void;
-    onFocusRequest?: (cameraPose: CameraPose) => void;
+    onDeletePin: (pinId: string) => void;
+    onDeleteView: (viewId: string) => void;
+    onDuplicateAsset: (instanceId: string) => void;
+    onDeleteAsset: (instanceId: string) => void;
+    onAddAsset: (asset: Record<string, unknown>) => void;
 }
 
 interface IssueDraft {
@@ -162,39 +161,384 @@ const assetLibraryKey = (asset: any, fallback?: string | number) => {
     return fallback !== undefined ? String(fallback) : "";
 };
 
-export default function RightPanel({
-    clarityMode = false,
-    activityLog = [],
-    changeSummary = null,
-    lastOutputLabel,
-    sceneGraph,
-    setSceneGraph,
+function jsonValueEqual<T>(previous: T, next: T) {
+    return JSON.stringify(previous) === JSON.stringify(next);
+}
+
+function useRightPanelSceneGraph() {
+    return useRenderableSceneDocumentSelector(sceneDocumentToWorkspaceSceneGraph, jsonValueEqual);
+}
+
+function buildLibraryAssetCounts(sceneAssets: any[]) {
+    const counts = new Map<string, number>();
+    sceneAssets.forEach((asset: any, index: number) => {
+        const key = assetLibraryKey(asset, index);
+        counts.set(key, (counts.get(key) ?? 0) + 1);
+    });
+    return counts;
+}
+
+function resolveNextLocalAsset(assetsList: any[], libraryAssetCounts: Map<string, number>) {
+    return assetsList.find((asset, index) => (libraryAssetCounts.get(assetLibraryKey(asset, index)) ?? 0) === 0) ?? assetsList[0] ?? null;
+}
+
+const RightPanelSceneGraphSection = React.memo(function RightPanelSceneGraphSection({
+    environment,
+    environmentState,
+    assets,
+    cameraViews,
+    pins,
+    sceneGraphItemCount,
+    nextLocalAsset,
+    onFocusWorkspace,
+    onStageNextLocalAsset,
+    onFocusView,
+    onDeleteView,
+    onFocusPin,
+    onDeletePin,
+    onDuplicateSceneAsset,
+    onDeleteSceneAsset,
+}: {
+    environment: any;
+    environmentState: ReturnType<typeof describeEnvironment>;
+    assets: any[];
+    cameraViews: CameraView[];
+    pins: SpatialPin[];
+    sceneGraphItemCount: number;
+    nextLocalAsset: any | null;
+    onFocusWorkspace: () => void;
+    onStageNextLocalAsset: () => void;
+    onFocusView: (view: CameraView) => void;
+    onDeleteView: (viewId: string) => void;
+    onFocusPin: (pin: SpatialPin) => void;
+    onDeletePin: (pinId: string) => void;
+    onDuplicateSceneAsset: (instanceId: string) => void;
+    onDeleteSceneAsset: (instanceId: string) => void;
+}) {
+    return (
+        <div className="p-4 border-b border-neutral-800 shrink-0">
+            <div className="flex items-center gap-2 mb-4 text-xs font-bold text-neutral-500 uppercase tracking-wider">
+                <Layers className="h-3 w-3" />
+                Scene Graph
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+                <div className="rounded-xl border border-neutral-800 bg-neutral-900/70 px-3 py-3">
+                    <p className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">Workspace</p>
+                    <p className="mt-1 text-sm text-white">{sceneGraphItemCount} staged elements</p>
+                    <p className="mt-1 text-[11px] text-neutral-500">{environment ? "Environment anchored" : "No environment yet"}</p>
+                </div>
+                <div className="rounded-xl border border-neutral-800 bg-neutral-900/70 px-3 py-3">
+                    <p className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">Coverage</p>
+                    <p className="mt-1 text-sm text-white">
+                        {cameraViews.length} views · {pins.length} pins
+                    </p>
+                    <p className="mt-1 text-[11px] text-neutral-500">{assets.length} placed assets in the scene</p>
+                </div>
+            </div>
+
+            <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                    onClick={onFocusWorkspace}
+                    className="rounded-full border border-neutral-800 bg-neutral-900 px-3 py-2 text-[11px] text-white transition-colors hover:border-blue-500/40 hover:text-blue-200"
+                >
+                    <Focus className="mr-1 inline h-3.5 w-3.5" />
+                    Focus Workspace
+                </button>
+                <button
+                    onClick={onStageNextLocalAsset}
+                    disabled={!nextLocalAsset}
+                    className="rounded-full border border-neutral-800 bg-neutral-900 px-3 py-2 text-[11px] text-white transition-colors hover:border-blue-500/40 hover:text-blue-200 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                    <Box className="mr-1 inline h-3.5 w-3.5" />
+                    {nextLocalAsset ? "Stage Next Asset" : "No Local Assets Yet"}
+                </button>
+            </div>
+
+            <div className="mt-4 space-y-3 max-h-[28rem] overflow-y-auto pr-1">
+                {environment ? (
+                    <div className="bg-neutral-900/80 rounded-lg px-3 py-2.5 text-emerald-400 border border-emerald-900/30 flex justify-between items-center shadow-inner">
+                        <span className="font-medium">{environmentState.lane === "preview" ? "Preview Splat" : "Environment Splat"}</span>
+                        <span className="text-[10px] bg-emerald-950/50 px-1.5 py-0.5 rounded text-emerald-500 font-mono tracking-wider">
+                            {environmentState.badge}
+                        </span>
+                    </div>
+                ) : null}
+
+                {cameraViews.length > 0 ? (
+                    <div className="rounded-xl border border-neutral-800 bg-neutral-900/70 px-3 py-3">
+                        <p className="text-[10px] uppercase tracking-[0.18em] text-neutral-500 mb-2">Saved Views</p>
+                        <div className="space-y-2">
+                            {cameraViews.map((view) => (
+                                <div key={view.id} className="rounded-lg border border-neutral-800 bg-neutral-950/70 px-3 py-2">
+                                    <div className="flex items-center justify-between gap-2">
+                                        <div>
+                                            <p className="text-xs text-white">{view.label}</p>
+                                            <p className="text-[11px] text-neutral-500">
+                                                {view.lens_mm.toFixed(0)}mm · FOV {view.fov.toFixed(1)}
+                                            </p>
+                                        </div>
+                                        <div className="flex items-center gap-1">
+                                            <button
+                                                onClick={() => onFocusView(view)}
+                                                className="p-1 rounded text-neutral-300 hover:text-white hover:bg-neutral-800"
+                                                title="Focus view"
+                                            >
+                                                <Focus className="h-3.5 w-3.5" />
+                                            </button>
+                                            <button
+                                                onClick={() => onDeleteView(view.id)}
+                                                className="p-1 rounded text-rose-300 hover:text-rose-200 hover:bg-rose-950/40"
+                                                title="Delete view"
+                                            >
+                                                <Trash2 className="h-3.5 w-3.5" />
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                ) : null}
+
+                {pins.length > 0 ? (
+                    <div className="rounded-xl border border-neutral-800 bg-neutral-900/70 px-3 py-3">
+                        <p className="text-[10px] uppercase tracking-[0.18em] text-neutral-500 mb-2">Spatial Pins</p>
+                        <div className="space-y-2">
+                            {pins.map((pin) => (
+                                <div key={pin.id} className="rounded-lg border border-neutral-800 bg-neutral-950/70 px-3 py-2">
+                                    <div className="flex items-center justify-between gap-2">
+                                        <div>
+                                            <p className="text-xs text-white">{pin.label}</p>
+                                            <p className="text-[11px] text-neutral-500">
+                                                {formatPinTypeLabel(pin.type)} · [{pin.position.map((value) => value.toFixed(2)).join(", ")}]
+                                            </p>
+                                        </div>
+                                        <div className="flex items-center gap-1">
+                                            <button
+                                                onClick={() => onFocusPin(pin)}
+                                                className="p-1 rounded text-neutral-300 hover:text-white hover:bg-neutral-800"
+                                                title="Focus pin"
+                                            >
+                                                <Focus className="h-3.5 w-3.5" />
+                                            </button>
+                                            <button
+                                                onClick={() => onDeletePin(pin.id)}
+                                                className="p-1 rounded text-rose-300 hover:text-rose-200 hover:bg-rose-950/40"
+                                                title="Delete pin"
+                                            >
+                                                <Trash2 className="h-3.5 w-3.5" />
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                ) : null}
+
+                {assets.map((asset: any, index: number) => (
+                    <div
+                        key={asset.instanceId || index}
+                        className="bg-neutral-900/50 rounded-lg px-3 py-2.5 text-blue-400 border border-blue-900/30 flex flex-col gap-2 hover:border-blue-700/50 hover:bg-neutral-900 transition-colors"
+                    >
+                        <div className="flex justify-between items-center">
+                            <span className="font-medium flex items-center gap-2 truncate">
+                                <Box className="h-3 w-3 opacity-50 shrink-0" /> {asset.name}
+                            </span>
+                            <div className="flex items-center gap-1 shrink-0">
+                                <button
+                                    onClick={() => onDuplicateSceneAsset(asset.instanceId)}
+                                    className="p-1 rounded text-neutral-300 hover:text-white hover:bg-neutral-800"
+                                    title="Duplicate"
+                                >
+                                    <Copy className="h-3.5 w-3.5" />
+                                </button>
+                                <button
+                                    onClick={() => onDeleteSceneAsset(asset.instanceId)}
+                                    className="p-1 rounded text-rose-300 hover:text-rose-200 hover:bg-rose-950/40"
+                                    title="Delete"
+                                >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                            </div>
+                        </div>
+                        <span className="text-xs text-neutral-500 font-mono">
+                            pos [{(asset.position ?? [0, 0, 0]).map((value: number) => Number(value).toFixed(2)).join(", ")}]
+                        </span>
+                    </div>
+                ))}
+
+                {assets.length === 0 && !environment ? (
+                    <div className="rounded-2xl border border-dashed border-neutral-800 bg-neutral-900/40 px-4 py-4">
+                        <p className="text-sm text-white">Nothing is staged yet.</p>
+                        <p className="mt-2 text-xs text-neutral-400">
+                            Generate a preview or reconstruction on the left, save views from the viewer, drop pins for blocking notes,
+                            and place assets here for layout.
+                        </p>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                            <button
+                                onClick={onFocusWorkspace}
+                                className="rounded-full border border-neutral-800 bg-black/20 px-3 py-2 text-[11px] text-neutral-200 hover:border-blue-500/40 hover:text-blue-200"
+                            >
+                                Scout Viewer
+                            </button>
+                            <button
+                                onClick={onStageNextLocalAsset}
+                                disabled={!nextLocalAsset}
+                                className="rounded-full border border-neutral-800 bg-black/20 px-3 py-2 text-[11px] text-neutral-200 hover:border-blue-500/40 hover:text-blue-200 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                                {nextLocalAsset ? "Place First Asset" : "Generate an Asset First"}
+                            </button>
+                        </div>
+                    </div>
+                ) : null}
+            </div>
+        </div>
+    );
+});
+
+const RightPanelLocalAssetsSection = React.memo(function RightPanelLocalAssetsSection({
     assetsList,
-    activeScene,
+    sceneAssetCount,
+    nextLocalAsset,
+    libraryAssetCounts,
+    onHandleDragStart,
+    onAddAssetToScene,
+}: {
+    assetsList: any[];
+    sceneAssetCount: number;
+    nextLocalAsset: any | null;
+    libraryAssetCounts: Map<string, number>;
+    onHandleDragStart: (event: React.DragEvent, asset: any) => void;
+    onAddAssetToScene: (asset: any) => void;
+}) {
+    return (
+        <div className="p-4 bg-neutral-900/20 shrink-0">
+            <div className="flex items-center gap-2 mb-4 text-xs font-bold text-neutral-500 uppercase tracking-wider">
+                <Box className="h-3 w-3" />
+                Local Assets
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+                <div className="rounded-xl border border-neutral-800 bg-neutral-900/70 px-3 py-3">
+                    <p className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">Library</p>
+                    <p className="mt-1 text-sm text-white">{assetsList.length} assets ready</p>
+                    <p className="mt-1 text-[11px] text-neutral-500">Click or drag assets into the viewer.</p>
+                </div>
+                <div className="rounded-xl border border-neutral-800 bg-neutral-900/70 px-3 py-3">
+                    <p className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">Scene Usage</p>
+                    <p className="mt-1 text-sm text-white">{sceneAssetCount} staged instances</p>
+                    <p className="mt-1 text-[11px] text-neutral-500">
+                        {nextLocalAsset ? `${nextLocalAsset.name} is next to place.` : "Generate or restore assets to start layout."}
+                    </p>
+                </div>
+            </div>
+
+            <p className="mt-3 text-[11px] text-neutral-500">
+                Filmmaker workflow: build the environment first, then click or drag hero props into the viewer and place notes or views around them.
+            </p>
+
+            {assetsList.length > 0 ? (
+                <div className="mt-4 grid max-h-[30rem] grid-cols-2 gap-3 overflow-y-auto pb-8 pr-1">
+                    {assetsList.map((asset: any, index: number) => (
+                        <div
+                            key={asset.id || index}
+                            draggable
+                            onDragStart={(event) => onHandleDragStart(event, asset)}
+                            onClick={() => onAddAssetToScene(asset)}
+                            className="bg-neutral-900 border border-neutral-800 rounded-xl p-3 hover:border-blue-500/50 cursor-grab active:cursor-grabbing transition-all group aspect-square flex flex-col justify-between hover:shadow-xl hover:shadow-black/50 animate-in zoom-in-95 duration-200"
+                            title="Click to place in scene or drag into the viewer"
+                        >
+                            <div className="flex items-center justify-between gap-2 mb-2">
+                                <span className="text-[10px] uppercase tracking-[0.16em] text-neutral-500">
+                                    {(libraryAssetCounts.get(assetLibraryKey(asset, index)) ?? 0) > 0
+                                        ? `${libraryAssetCounts.get(assetLibraryKey(asset, index))} in scene`
+                                        : "Ready to place"}
+                                </span>
+                                <button
+                                    onClick={(event) => {
+                                        event.stopPropagation();
+                                        onAddAssetToScene(asset);
+                                    }}
+                                    className="rounded-full border border-neutral-800 bg-black/20 px-2 py-1 text-[10px] uppercase tracking-[0.14em] text-neutral-200 hover:border-blue-500/40 hover:text-blue-200"
+                                >
+                                    Place
+                                </button>
+                            </div>
+                            <div
+                                className="w-full flex-1 bg-gradient-to-tr from-neutral-800 to-neutral-700 rounded-lg mb-2 overflow-hidden relative shadow-inner bg-cover bg-center"
+                                style={asset.preview ? { backgroundImage: `url(${asset.preview})` } : undefined}
+                            >
+                                <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 bg-neutral-900/40 transition-opacity backdrop-blur-[2px]">
+                                    <div className="bg-blue-600 text-white rounded-full p-1 shadow-lg pointer-events-none">
+                                        <Box className="h-4 w-4" />
+                                    </div>
+                                </div>
+                            </div>
+                            <div>
+                                <p className="text-xs text-center text-neutral-400 font-medium truncate group-hover:text-blue-200">{asset.name}</p>
+                                <p className="mt-1 text-[10px] text-center text-neutral-400">
+                                    Click to stage at origin or drag into the viewer.
+                                </p>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            ) : (
+                <div className="mt-4 flex min-h-[10rem] items-center justify-center rounded-xl border-2 border-dashed border-neutral-800/50 bg-neutral-900/30 px-4 py-6 text-center">
+                    <div>
+                        <p className="text-sm text-white">No local assets yet.</p>
+                        <p className="mt-2 text-xs text-neutral-500">
+                            Generate an asset from a selected frame in the left rail. When it finishes, it will appear here with one-click
+                            staging into the scene.
+                        </p>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+});
+
+const RightPanelWorkspaceOverviewSection = React.memo(function RightPanelWorkspaceOverviewSection({
+    clarityMode,
     saveState,
     saveMessage,
     saveError,
     lastSavedAt,
+    shareStatus,
+    lastOutputLabel,
+    changeSummary,
+    activityLog,
     versions,
-    onManualSave,
+    onCopyReviewLink,
+    onExportScenePackage,
     onRestoreVersion,
-    onExport,
-    selectedPinId,
-    onSelectPin,
-    selectedViewId,
-    onSelectView,
-    onFocusRequest,
-}: RightPanelProps) {
-    const normalizedSceneGraph = useMemo(() => normalizeWorkspaceSceneGraph(sceneGraph), [sceneGraph]);
-    const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
-    const [shareStatus, setShareStatus] = useState("");
-    const [reviewData, setReviewData] = useState<SceneReviewRecord>(() => createDefaultReviewRecord(activeScene));
-    const [reviewStatus, setReviewStatus] = useState("");
-    const [reviewError, setReviewError] = useState("");
-    const [isSavingReview, setIsSavingReview] = useState(false);
-    const [legacyComments, setLegacyComments] = useState<LegacyComment[]>([]);
-    const [issueDraft, setIssueDraft] = useState<IssueDraft>(DEFAULT_ISSUE_DRAFT);
-
+}: {
+    clarityMode: boolean;
+    saveState: SaveState;
+    saveMessage: string;
+    saveError: string;
+    lastSavedAt: string | null;
+    shareStatus: string;
+    lastOutputLabel?: string;
+    changeSummary?: {
+        persistent: string[];
+        sceneDirection: string[];
+    } | null;
+    activityLog: Array<{
+        id: string;
+        at: string;
+        label: string;
+        detail: string;
+        tone: "neutral" | "info" | "success" | "warning";
+    }>;
+    versions: SceneVersion[];
+    onCopyReviewLink: () => void;
+    onExportScenePackage: () => void;
+    onRestoreVersion: (versionId: string) => Promise<any> | void;
+}) {
+    const normalizedSceneGraph = useRightPanelSceneGraph();
     const environmentState = useMemo(() => describeEnvironment(normalizedSceneGraph.environment), [normalizedSceneGraph.environment]);
     const environmentMetadata = useMemo(
         () => (normalizedSceneGraph.environment?.metadata ?? null) as GeneratedEnvironmentMetadata | null,
@@ -211,45 +555,456 @@ export default function RightPanel({
     const environmentBlockingIssues = Array.isArray(environmentDelivery?.blocking_issues) ? environmentDelivery.blocking_issues : [];
     const environmentNextActions = Array.isArray(environmentDelivery?.next_actions) ? environmentDelivery.next_actions : [];
     const environmentGateFailures = Array.isArray(environmentReleaseGates?.failed) ? environmentReleaseGates.failed : [];
+    const persistentWorldSummary = normalizedSceneGraph.environment
+        ? `${normalizedSceneGraph.assets.length} placed asset${normalizedSceneGraph.assets.length === 1 ? "" : "s"} stay with the world.`
+        : "No persistent world loaded yet.";
+    const sceneDirectionSummary =
+        normalizedSceneGraph.camera_views.length || normalizedSceneGraph.pins.length || normalizedSceneGraph.director_brief
+            ? `${normalizedSceneGraph.camera_views.length} saved view${normalizedSceneGraph.camera_views.length === 1 ? "" : "s"}, ${normalizedSceneGraph.pins.length} scene note${normalizedSceneGraph.pins.length === 1 ? "" : "s"}, and a director note shape only this scene.`
+            : "No per-scene direction yet. Save a view, add a note, or update the director brief.";
 
-    const selectedVersion = useMemo(
-        () => versions.find((version) => version.version_id === selectedVersionId) ?? versions[0] ?? null,
-        [selectedVersionId, versions],
+    return (
+        <div className="p-4 border-b border-neutral-800 space-y-3 shrink-0">
+            <div className={`rounded-xl border px-3 py-3 text-xs ${statusClassName(saveState)}`}>
+                <p className="font-medium tracking-wide uppercase text-[10px] mb-1">Save State</p>
+                <p>{saveMessage || "Scene is idle."}</p>
+                {lastSavedAt && <p className="text-[11px] text-neutral-400 mt-2">Last saved {formatTimestamp(lastSavedAt)}</p>}
+                {saveError && <p className="text-[11px] text-rose-200 mt-2 whitespace-pre-wrap">{saveError}</p>}
+            </div>
+
+            <div className="rounded-xl border border-neutral-800 bg-neutral-900/70 px-3 py-3 text-xs text-neutral-300">
+                <p className="font-medium tracking-wide uppercase text-[10px] mb-1 text-neutral-500">Workspace Readiness</p>
+                <p className="text-white">{environmentState.label}</p>
+                <p className="mt-2 text-[11px] text-neutral-500">{environmentState.note}</p>
+                {environmentState.detail ? <p className="mt-1 text-[11px] text-neutral-400">{environmentState.detail}</p> : null}
+                {normalizedSceneGraph.environment?.metadata?.truth_label ? (
+                    <p className="mt-2 text-[11px] text-neutral-400">{normalizedSceneGraph.environment.metadata.truth_label}</p>
+                ) : null}
+                {environmentMetadata?.lane_truth ? (
+                    <p className="mt-1 text-[11px] text-neutral-500">Truth: {environmentMetadata.lane_truth.replaceAll("_", " ")}</p>
+                ) : null}
+                {environmentMetadata?.reconstruction_status ? (
+                    <p className="mt-1 text-[11px] text-neutral-500">
+                        Status: {environmentMetadata.reconstruction_status.replaceAll("_", " ")}
+                    </p>
+                ) : null}
+            </div>
+
+            {environmentMetadata?.rendering || environmentQuality || environmentDelivery ? (
+                <div className="rounded-xl border border-neutral-800 bg-neutral-900/70 px-3 py-3 space-y-3 text-xs text-neutral-300">
+                    <div className="flex items-center justify-between gap-3">
+                        <div>
+                            <p className="font-medium tracking-wide uppercase text-[10px] text-neutral-500">
+                                {environmentQuality ? "Reconstruction Quality" : "Splat Rendering"}
+                            </p>
+                            <p className="mt-1 text-white">
+                                {environmentQuality?.band ? formatQualityBand(environmentQuality.band) : "Colorized splat output"}
+                            </p>
+                        </div>
+                        {typeof environmentQuality?.score === "number" ? (
+                            <div className="rounded-lg border border-neutral-800 bg-neutral-950 px-2.5 py-2 text-right">
+                                <p className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">Score</p>
+                                <p className="text-sm text-white">{environmentQuality.score.toFixed(1)}</p>
+                            </div>
+                        ) : null}
+                    </div>
+
+                    {environmentQuality ? (
+                        <div className="grid grid-cols-2 gap-2 text-[11px]">
+                            <div className="rounded-lg border border-neutral-800 bg-neutral-950/70 px-3 py-2">
+                                Alignment {formatMetric(environmentQuality.alignment?.score)}
+                            </div>
+                            <div className="rounded-lg border border-neutral-800 bg-neutral-950/70 px-3 py-2">
+                                Appearance {formatMetric(environmentQuality.appearance?.score)}
+                            </div>
+                            <div className="rounded-lg border border-neutral-800 bg-neutral-950/70 px-3 py-2">
+                                Pose pairs {environmentQuality.alignment?.pose_pairs ?? 0}/{environmentQuality.alignment?.pair_count ?? 0}
+                            </div>
+                            <div className="rounded-lg border border-neutral-800 bg-neutral-950/70 px-3 py-2">
+                                Exposure span {formatMetric(environmentQuality.appearance?.exposure_span, 3)}
+                            </div>
+                        </div>
+                    ) : null}
+
+                    {environmentWarnings.length > 0 ? (
+                        <div className="space-y-1">
+                            {environmentWarnings.slice(0, 3).map((warning) => (
+                                <p key={warning} className="text-[11px] text-amber-200">
+                                    {warning}
+                                </p>
+                            ))}
+                        </div>
+                    ) : null}
+
+                    {environmentDelivery ? (
+                        <div className="rounded-lg border border-neutral-800 bg-neutral-950/70 px-3 py-3 space-y-3">
+                            <div className="flex items-start justify-between gap-3">
+                                <div>
+                                    <p className="font-medium tracking-wide uppercase text-[10px] text-neutral-500">Delivery Gate</p>
+                                    <p className="mt-1 text-white">
+                                        {environmentDelivery.label || formatQualityBand(environmentDelivery.readiness) || "Not scored"}
+                                    </p>
+                                    {environmentDelivery.summary ? (
+                                        <p className="mt-1 text-[11px] text-neutral-500">{environmentDelivery.summary}</p>
+                                    ) : null}
+                                </div>
+                                {typeof environmentDelivery.score === "number" ? (
+                                    <div className="rounded-lg border border-neutral-800 bg-black/20 px-2.5 py-2 text-right">
+                                        <p className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">Gate Score</p>
+                                        <p className="text-sm text-white">{environmentDelivery.score.toFixed(1)}</p>
+                                    </div>
+                                ) : null}
+                            </div>
+
+                            {environmentDelivery.axes ? (
+                                <div className="grid grid-cols-2 gap-2 text-[11px] text-neutral-300">
+                                    <div className="rounded-lg border border-neutral-800 bg-black/20 px-3 py-2">
+                                        Geometry {formatMetric(environmentDelivery.axes.geometry?.score)}
+                                    </div>
+                                    <div className="rounded-lg border border-neutral-800 bg-black/20 px-3 py-2">
+                                        Color {formatMetric(environmentDelivery.axes.color?.score)}
+                                    </div>
+                                    <div className="rounded-lg border border-neutral-800 bg-black/20 px-3 py-2">
+                                        Coverage {formatMetric(environmentDelivery.axes.coverage?.score)}
+                                    </div>
+                                    <div className="rounded-lg border border-neutral-800 bg-black/20 px-3 py-2">
+                                        Density {formatMetric(environmentDelivery.axes.density?.score)}
+                                    </div>
+                                </div>
+                            ) : null}
+
+                            {environmentDelivery.recommended_viewer_mode || environmentDelivery.render_targets ? (
+                                <p className="text-[11px] text-neutral-400">
+                                    Viewer profile {formatQualityBand(environmentDelivery.recommended_viewer_mode) || "standard"}
+                                    {environmentDelivery.render_targets?.desktop_fps ? ` · ${environmentDelivery.render_targets.desktop_fps}fps desktop` : ""}
+                                    {environmentDelivery.render_targets?.mobile_fps ? ` · ${environmentDelivery.render_targets.mobile_fps}fps mobile` : ""}
+                                </p>
+                            ) : null}
+
+                            {environmentBlockingIssues.length > 0 ? (
+                                <div className="space-y-1">
+                                    {environmentBlockingIssues.slice(0, 3).map((issue) => (
+                                        <p key={issue} className="text-[11px] text-amber-200">
+                                            {issue}
+                                        </p>
+                                    ))}
+                                </div>
+                            ) : null}
+
+                            {environmentNextActions.length > 0 ? (
+                                <div className="space-y-1">
+                                    {environmentNextActions.slice(0, 3).map((action) => (
+                                        <p key={action} className="text-[11px] text-sky-200">
+                                            {action}
+                                        </p>
+                                    ))}
+                                </div>
+                            ) : null}
+                        </div>
+                    ) : null}
+
+                    {environmentCapture || environmentTraining || environmentHoldout || environmentComparison || environmentReleaseGates ? (
+                        <div className="rounded-lg border border-neutral-800 bg-neutral-950/70 px-3 py-3 space-y-3">
+                            <p className="font-medium tracking-wide uppercase text-[10px] text-neutral-500">World-Class Gates</p>
+                            <div className="grid grid-cols-2 gap-2 text-[11px] text-neutral-300">
+                                <div className="rounded-lg border border-neutral-800 bg-black/20 px-3 py-2">
+                                    Capture {environmentCapture?.frame_count ?? environmentMetadata?.frame_count ?? 0} frames
+                                </div>
+                                <div className="rounded-lg border border-neutral-800 bg-black/20 px-3 py-2">
+                                    Benchmark {formatQualityBand(environmentComparison?.benchmark_status) || "not benchmarked"}
+                                </div>
+                                <div className="rounded-lg border border-neutral-800 bg-black/20 px-3 py-2">
+                                    Training {formatQualityBand(environmentTraining?.backend) || "unknown"}
+                                </div>
+                                <div className="rounded-lg border border-neutral-800 bg-black/20 px-3 py-2">
+                                    Holdout {environmentHoldout?.available ? "available" : "missing"}
+                                </div>
+                            </div>
+                            {environmentReleaseGates ? (
+                                <div className="rounded-lg border border-neutral-800 bg-black/20 px-3 py-3">
+                                    <p className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">Promotion gate</p>
+                                    <p className="mt-1 text-sm text-white">
+                                        {environmentReleaseGates.summary || "Promotion gates not reported"}
+                                    </p>
+                                    {environmentGateFailures.length > 0 ? (
+                                        <div className="mt-2 space-y-1">
+                                            {environmentGateFailures.slice(0, 4).map((failure) => (
+                                                <p key={failure} className="text-[11px] text-rose-200">
+                                                    {failure}
+                                                </p>
+                                            ))}
+                                        </div>
+                                    ) : null}
+                                </div>
+                            ) : null}
+                        </div>
+                    ) : null}
+                </div>
+            ) : null}
+
+            <div className="grid grid-cols-2 gap-2">
+                <button
+                    onClick={onCopyReviewLink}
+                    className="rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-3 text-xs text-white hover:border-blue-500/50 hover:text-blue-200 transition-colors flex items-center justify-center gap-2"
+                >
+                    <Share2 className="h-3.5 w-3.5" />
+                    Copy review link
+                </button>
+                <button
+                    onClick={onExportScenePackage}
+                    className="rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-3 text-xs text-white hover:border-blue-500/50 hover:text-blue-200 transition-colors flex items-center justify-center gap-2"
+                >
+                    <Download className="h-3.5 w-3.5" />
+                    Export scene package
+                </button>
+            </div>
+            {shareStatus && <p className="text-[11px] text-blue-300">{shareStatus}</p>}
+
+            {clarityMode ? (
+                <>
+                    <div className="grid grid-cols-2 gap-2">
+                        <div className="rounded-xl border border-neutral-800 bg-neutral-900/70 px-3 py-3">
+                            <p className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">Persistent world</p>
+                            <p className="mt-1 text-sm text-white">
+                                {normalizedSceneGraph.environment ? "World state stays persistent" : "No world loaded yet"}
+                            </p>
+                            <p className="mt-1 text-[11px] leading-5 text-neutral-500">{persistentWorldSummary}</p>
+                        </div>
+                        <div className="rounded-xl border border-neutral-800 bg-neutral-900/70 px-3 py-3">
+                            <p className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">Scene direction</p>
+                            <p className="mt-1 text-sm text-white">
+                                {normalizedSceneGraph.camera_views.length || normalizedSceneGraph.pins.length || normalizedSceneGraph.director_brief
+                                    ? "Shot-only changes"
+                                    : "No shot direction yet"}
+                            </p>
+                            <p className="mt-1 text-[11px] leading-5 text-neutral-500">{sceneDirectionSummary}</p>
+                        </div>
+                    </div>
+
+                    <div className="rounded-xl border border-neutral-800 bg-neutral-900/70 px-3 py-3">
+                        <p className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">What changed since the current output</p>
+                        <p className="mt-2 text-sm text-white">{lastOutputLabel ?? "No output loaded yet"}</p>
+                        {changeSummary ? (
+                            <div className="mt-3 space-y-3">
+                                {changeSummary.persistent.length > 0 ? (
+                                    <div>
+                                        <p className="text-[10px] uppercase tracking-[0.16em] text-neutral-500">Persistent world changes</p>
+                                        <div className="mt-2 flex flex-wrap gap-2">
+                                            {changeSummary.persistent.map((item) => (
+                                                <span key={item} className="rounded-full border border-emerald-500/20 bg-emerald-950/20 px-2.5 py-1 text-[11px] text-emerald-200">
+                                                    {item}
+                                                </span>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ) : null}
+                                {changeSummary.sceneDirection.length > 0 ? (
+                                    <div>
+                                        <p className="text-[10px] uppercase tracking-[0.16em] text-neutral-500">Scene direction changes</p>
+                                        <div className="mt-2 flex flex-wrap gap-2">
+                                            {changeSummary.sceneDirection.map((item) => (
+                                                <span key={item} className="rounded-full border border-sky-500/20 bg-sky-950/20 px-2.5 py-1 text-[11px] text-sky-200">
+                                                    {item}
+                                                </span>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ) : null}
+                            </div>
+                        ) : (
+                            <p className="mt-2 text-[11px] leading-5 text-neutral-500">No input changes since the current output was loaded.</p>
+                        )}
+                    </div>
+
+                    <div className="rounded-xl border border-neutral-800 bg-neutral-900/70 px-3 py-3">
+                        <div className="flex items-center justify-between gap-3">
+                            <div>
+                                <p className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">Recent activity</p>
+                                <p className="mt-1 text-sm text-white">Lightweight version and action trail</p>
+                            </div>
+                            <span className="rounded-full border border-neutral-800 bg-black/20 px-2.5 py-1 text-[10px] uppercase tracking-[0.18em] text-neutral-400">
+                                {versions.length} versions
+                            </span>
+                        </div>
+
+                        {activityLog.length > 0 ? (
+                            <div className="mt-3 space-y-2">
+                                {activityLog.slice(0, 4).map((entry) => (
+                                    <div key={entry.id} className={`rounded-lg border px-3 py-2 ${activityToneClass(entry.tone)}`}>
+                                        <div className="flex items-center justify-between gap-3">
+                                            <p className="text-xs text-white">{entry.label}</p>
+                                            <p className="text-[11px] text-neutral-500">{formatTimestamp(entry.at)}</p>
+                                        </div>
+                                        <p className="mt-1 text-[11px] leading-5 text-neutral-400">{entry.detail}</p>
+                                    </div>
+                                ))}
+                            </div>
+                        ) : (
+                            <p className="mt-3 text-[11px] leading-5 text-neutral-500">
+                                Open the demo, build a world, save a version, or export a package to start the activity trail.
+                            </p>
+                        )}
+
+                        {versions.length > 0 ? (
+                            <div className="mt-3 space-y-2">
+                                {versions.slice(0, 3).map((version) => (
+                                    <div key={version.version_id} className="rounded-lg border border-neutral-800 bg-black/20 px-3 py-2">
+                                        <div className="flex items-center justify-between gap-3">
+                                            <p className="text-xs text-white">{formatTimestamp(version.saved_at) || version.version_id}</p>
+                                            <button
+                                                onClick={() => void onRestoreVersion(version.version_id)}
+                                                className="rounded-full border border-neutral-800 bg-neutral-950 px-2 py-1 text-[10px] uppercase tracking-[0.16em] text-neutral-300 hover:border-blue-500/40 hover:text-blue-200"
+                                            >
+                                                Restore
+                                            </button>
+                                        </div>
+                                        <p className="mt-1 text-[11px] text-neutral-500">
+                                            {version.source ?? "manual"} · {version.summary?.asset_count ?? 0} assets
+                                            {version.summary?.has_environment ? " · world loaded" : ""}
+                                        </p>
+                                    </div>
+                                ))}
+                            </div>
+                        ) : null}
+                    </div>
+                </>
+            ) : null}
+        </div>
     );
-    const selectedPin = useMemo(
-        () => normalizedSceneGraph.pins.find((pin) => pin.id === selectedPinId) ?? null,
-        [normalizedSceneGraph.pins, selectedPinId],
-    );
-    const selectedView = useMemo(
-        () => normalizedSceneGraph.camera_views.find((view) => view.id === selectedViewId) ?? null,
-        [normalizedSceneGraph.camera_views, selectedViewId],
-    );
-    const libraryAssetCounts = useMemo(() => {
-        const counts = new Map<string, number>();
-        normalizedSceneGraph.assets.forEach((asset: any, index: number) => {
-            const key = assetLibraryKey(asset, index);
-            counts.set(key, (counts.get(key) ?? 0) + 1);
-        });
-        return counts;
-    }, [normalizedSceneGraph.assets]);
-    const nextLocalAsset = useMemo(
-        () =>
-            assetsList.find((asset, index) => (libraryAssetCounts.get(assetLibraryKey(asset, index)) ?? 0) === 0) ??
-            assetsList[0] ??
-            null,
-        [assetsList, libraryAssetCounts],
-    );
+});
+
+const RightPanelSceneGraphSectionConnected = React.memo(function RightPanelSceneGraphSectionConnected({
+    assetsList,
+    onFocusWorkspace,
+    onStageNextLocalAsset,
+    onFocusView,
+    onDeleteView,
+    onFocusPin,
+    onDeletePin,
+    onDuplicateSceneAsset,
+    onDeleteSceneAsset,
+}: {
+    assetsList: any[];
+    onFocusWorkspace: () => void;
+    onStageNextLocalAsset: () => void;
+    onFocusView: (view: CameraView) => void;
+    onDeleteView: (viewId: string) => void;
+    onFocusPin: (pin: SpatialPin) => void;
+    onDeletePin: (pinId: string) => void;
+    onDuplicateSceneAsset: (instanceId: string) => void;
+    onDeleteSceneAsset: (instanceId: string) => void;
+}) {
+    const normalizedSceneGraph = useRightPanelSceneGraph();
+    const environmentState = useMemo(() => describeEnvironment(normalizedSceneGraph.environment), [normalizedSceneGraph.environment]);
+    const libraryAssetCounts = useMemo(() => buildLibraryAssetCounts(normalizedSceneGraph.assets), [normalizedSceneGraph.assets]);
+    const nextLocalAsset = useMemo(() => resolveNextLocalAsset(assetsList, libraryAssetCounts), [assetsList, libraryAssetCounts]);
     const sceneGraphItemCount =
         normalizedSceneGraph.assets.length +
         normalizedSceneGraph.camera_views.length +
         normalizedSceneGraph.pins.length +
         (normalizedSceneGraph.environment ? 1 : 0);
-    const persistentWorldSummary = normalizedSceneGraph.environment
-        ? `${normalizedSceneGraph.assets.length} placed asset${normalizedSceneGraph.assets.length === 1 ? "" : "s"} stay with the world.`
-        : "No persistent world loaded yet.";
-    const sceneDirectionSummary = normalizedSceneGraph.camera_views.length || normalizedSceneGraph.pins.length || normalizedSceneGraph.director_brief
-        ? `${normalizedSceneGraph.camera_views.length} saved view${normalizedSceneGraph.camera_views.length === 1 ? "" : "s"}, ${normalizedSceneGraph.pins.length} scene note${normalizedSceneGraph.pins.length === 1 ? "" : "s"}, and a director note shape only this scene.`
-        : "No per-scene direction yet. Save a view, add a note, or update the director brief.";
+
+    return (
+        <RightPanelSceneGraphSection
+            environment={normalizedSceneGraph.environment}
+            environmentState={environmentState}
+            assets={normalizedSceneGraph.assets}
+            cameraViews={normalizedSceneGraph.camera_views}
+            pins={normalizedSceneGraph.pins}
+            sceneGraphItemCount={sceneGraphItemCount}
+            nextLocalAsset={nextLocalAsset}
+            onFocusWorkspace={onFocusWorkspace}
+            onStageNextLocalAsset={onStageNextLocalAsset}
+            onFocusView={onFocusView}
+            onDeleteView={onDeleteView}
+            onFocusPin={onFocusPin}
+            onDeletePin={onDeletePin}
+            onDuplicateSceneAsset={onDuplicateSceneAsset}
+            onDeleteSceneAsset={onDeleteSceneAsset}
+        />
+    );
+});
+
+const RightPanelLocalAssetsSectionConnected = React.memo(function RightPanelLocalAssetsSectionConnected({
+    assetsList,
+    onHandleDragStart,
+    onAddAssetToScene,
+}: {
+    assetsList: any[];
+    onHandleDragStart: (event: React.DragEvent, asset: any) => void;
+    onAddAssetToScene: (asset: any) => void;
+}) {
+    const normalizedSceneGraph = useRightPanelSceneGraph();
+    const libraryAssetCounts = useMemo(() => buildLibraryAssetCounts(normalizedSceneGraph.assets), [normalizedSceneGraph.assets]);
+    const nextLocalAsset = useMemo(() => resolveNextLocalAsset(assetsList, libraryAssetCounts), [assetsList, libraryAssetCounts]);
+
+    return (
+        <RightPanelLocalAssetsSection
+            assetsList={assetsList}
+            sceneAssetCount={normalizedSceneGraph.assets.length}
+            nextLocalAsset={nextLocalAsset}
+            libraryAssetCounts={libraryAssetCounts}
+            onHandleDragStart={onHandleDragStart}
+            onAddAssetToScene={onAddAssetToScene}
+        />
+    );
+});
+
+export default function RightPanel({
+    clarityMode = false,
+    activityLog = [],
+    changeSummary = null,
+    lastOutputLabel,
+    assetsList,
+    activeScene,
+    saveState,
+    saveMessage,
+    saveError,
+    lastSavedAt,
+    versions,
+    onManualSave,
+    onRestoreVersion,
+    onExport,
+    onDeletePin,
+    onDeleteView,
+    onDuplicateAsset,
+    onDeleteAsset,
+    onAddAsset,
+}: RightPanelProps) {
+    const getRenderableSceneDocumentSnapshot = useRenderableSceneDocumentSnapshotGetter();
+    const sceneStoreActions = useMvpSceneStoreActions();
+    const editorSessionActions = useMvpEditorSessionStoreActions();
+    const selectedPinId = useSceneSelectedPinId();
+    const selectedViewId = useSceneSelectedViewId();
+    const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
+    const [shareStatus, setShareStatus] = useState("");
+    const [reviewData, setReviewData] = useState<SceneReviewRecord>(() => createDefaultReviewRecord(activeScene));
+    const [reviewStatus, setReviewStatus] = useState("");
+    const [reviewError, setReviewError] = useState("");
+    const [isSavingReview, setIsSavingReview] = useState(false);
+    const [legacyComments, setLegacyComments] = useState<LegacyComment[]>([]);
+    const [issueDraft, setIssueDraft] = useState<IssueDraft>(DEFAULT_ISSUE_DRAFT);
+
+    const selectedVersion = useMemo(
+        () => versions.find((version) => version.version_id === selectedVersionId) ?? versions[0] ?? null,
+        [selectedVersionId, versions],
+    );
+    const getCurrentSceneGraph = useCallback(
+        () => sceneDocumentToWorkspaceSceneGraph(getRenderableSceneDocumentSnapshot()),
+        [getRenderableSceneDocumentSnapshot],
+    );
+    const selectedAnchorLabel = useMemo(() => {
+        const normalizedSceneGraph = getCurrentSceneGraph();
+        const selectedPin = normalizedSceneGraph.pins.find((pin) => pin.id === selectedPinId) ?? null;
+        if (selectedPin) {
+            return `pin ${selectedPin.label}`;
+        }
+        const selectedView = normalizedSceneGraph.camera_views.find((view) => view.id === selectedViewId) ?? null;
+        if (selectedView) {
+            return `view ${selectedView.label}`;
+        }
+        return "select a pin or saved view to bind the issue";
+    }, [getCurrentSceneGraph, selectedPinId, selectedViewId]);
 
     useEffect(() => {
         if (selectedVersionId && versions.some((version) => version.version_id === selectedVersionId)) return;
@@ -331,6 +1086,7 @@ export default function RightPanel({
     const buildReviewLink = () => {
         const url = new URL(`${window.location.origin}/mvp/review`);
         const hasSavedVersion = Boolean(activeScene && selectedVersion?.version_id);
+        const normalizedSceneGraph = getCurrentSceneGraph();
 
         if (hasSavedVersion) {
             url.searchParams.set("scene", activeScene as string);
@@ -360,6 +1116,7 @@ export default function RightPanel({
     };
 
     const exportScenePackage = () => {
+        const normalizedSceneGraph = getCurrentSceneGraph();
         const reviewPackage = createReviewPackage(normalizedSceneGraph, assetsList, activeScene, selectedVersion?.version_id ?? null, reviewData);
         const blob = new Blob([JSON.stringify(reviewPackage, null, 2)], { type: "application/json" });
         const url = URL.createObjectURL(blob);
@@ -440,6 +1197,9 @@ export default function RightPanel({
     const addIssue = async () => {
         if (!activeScene || !selectedVersion?.version_id) return;
         if (!issueDraft.title.trim() && !issueDraft.body.trim()) return;
+        const normalizedSceneGraph = getCurrentSceneGraph();
+        const selectedPin = normalizedSceneGraph.pins.find((pin) => pin.id === selectedPinId) ?? null;
+        const selectedView = normalizedSceneGraph.camera_views.find((view) => view.id === selectedViewId) ?? null;
         const now = nowIso();
         const nextIssue: ReviewIssue = {
             id: createId("issue"),
@@ -490,122 +1250,91 @@ export default function RightPanel({
         await persistReview(nextReview, undefined, "Issue status updated.");
     };
 
-    const deletePin = (pinId: string) => {
-        setSceneGraph((prev: any) => {
-            const normalized = normalizeWorkspaceSceneGraph(prev);
-            return {
-                ...normalized,
-                pins: normalized.pins.filter((pin) => pin.id !== pinId),
-            };
-        });
+    const deletePin = useCallback((pinId: string) => {
+        onDeletePin(pinId);
         if (selectedPinId === pinId) {
-            onSelectPin?.(null);
+            sceneStoreActions.selectPin(null);
         }
-    };
+    }, [onDeletePin, sceneStoreActions, selectedPinId]);
 
-    const deleteView = (viewId: string) => {
-        setSceneGraph((prev: any) => {
-            const normalized = normalizeWorkspaceSceneGraph(prev);
-            return {
-                ...normalized,
-                camera_views: normalized.camera_views.filter((view) => view.id !== viewId),
-            };
-        });
+    const deleteView = useCallback((viewId: string) => {
+        onDeleteView(viewId);
         if (selectedViewId === viewId) {
-            onSelectView?.(null);
+            sceneStoreActions.selectView(null);
         }
-    };
+    }, [onDeleteView, sceneStoreActions, selectedViewId]);
 
-    const duplicateSceneAsset = (instanceId: string) => {
-        setSceneGraph((prev: any) => {
-            const normalized = normalizeWorkspaceSceneGraph(prev);
-            const source = normalized.assets.find((asset: any) => asset.instanceId === instanceId);
-            if (!source) return normalized;
-            const sourcePos = source.position ?? [0, 0, 0];
-            return {
-                ...normalized,
-                assets: [
-                    ...normalized.assets,
-                    {
-                        ...source,
-                        instanceId: `inst_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-                        position: [sourcePos[0] + 0.75, sourcePos[1], sourcePos[2] + 0.75],
-                    },
-                ],
-            };
+    const duplicateSceneAsset = useCallback((instanceId: string) => {
+        onDuplicateAsset(instanceId);
+    }, [onDuplicateAsset]);
+
+    const deleteSceneAsset = useCallback((instanceId: string) => {
+        onDeleteAsset(instanceId);
+    }, [onDeleteAsset]);
+
+    const addAssetToScene = useCallback((asset: any) => {
+        onAddAsset({
+            ...asset,
+            instanceId: createId("inst"),
+            position: [0, 0, 0],
+            rotation: [0, 0, 0],
+            scale: [1, 1, 1],
         });
-    };
+    }, [onAddAsset]);
 
-    const deleteSceneAsset = (instanceId: string) => {
-        setSceneGraph((prev: any) => {
-            const normalized = normalizeWorkspaceSceneGraph(prev);
-            return {
-                ...normalized,
-                assets: normalized.assets.filter((asset: any) => asset.instanceId !== instanceId),
-            };
-        });
-    };
-
-    const addAssetToScene = (asset: any) => {
-        setSceneGraph((prev: any) => {
-            const normalized = normalizeWorkspaceSceneGraph(prev);
-            return {
-                ...normalized,
-                assets: [
-                    ...normalized.assets,
-                    {
-                        ...asset,
-                        instanceId: `inst_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-                        position: [0, 0, 0],
-                        rotation: [0, 0, 0],
-                        scale: [1, 1, 1],
-                    },
-                ],
-            };
-        });
-    };
-
-    const handleDragStart = (event: React.DragEvent, asset: any) => {
+    const handleDragStart = useCallback((event: React.DragEvent, asset: any) => {
         event.dataTransfer.effectAllowed = "copy";
         event.dataTransfer.setData("asset", JSON.stringify(asset));
-    };
+    }, []);
 
-    const focusWorkspace = () => {
+    const focusWorkspace = useCallback(() => {
+        const normalizedSceneGraph = getCurrentSceneGraph();
         const latestView = normalizedSceneGraph.camera_views[normalizedSceneGraph.camera_views.length - 1] ?? null;
         if (latestView) {
-            focusView(latestView);
+            sceneStoreActions.selectView(latestView.id);
+            editorSessionActions.requestFocus({
+                position: latestView.position,
+                target: latestView.target,
+                fov: latestView.fov,
+                lens_mm: latestView.lens_mm,
+            });
             return;
         }
 
+        const selectedPin = normalizedSceneGraph.pins.find((pin) => pin.id === selectedPinId) ?? null;
         const target = selectedPin?.position ?? ([0, 0, 0] as [number, number, number]);
-        onFocusRequest?.({
+        editorSessionActions.requestFocus({
             position: [target[0] + 6, target[1] + 4, target[2] + 6],
             target,
             fov: normalizedSceneGraph.viewer.fov,
             lens_mm: normalizedSceneGraph.viewer.lens_mm,
         });
-    };
+    }, [editorSessionActions, getCurrentSceneGraph, sceneStoreActions, selectedPinId]);
 
-    const stageNextLocalAsset = () => {
+    const stageNextLocalAsset = useCallback(() => {
+        const normalizedSceneGraph = getCurrentSceneGraph();
+        const libraryAssetCounts = buildLibraryAssetCounts(normalizedSceneGraph.assets);
+        const nextLocalAsset = resolveNextLocalAsset(assetsList, libraryAssetCounts);
         if (!nextLocalAsset) return;
         addAssetToScene(nextLocalAsset);
-    };
+    }, [addAssetToScene, assetsList, getCurrentSceneGraph]);
 
-    const focusView = (view: CameraView) => {
-        onSelectView?.(view.id);
-        onSelectPin?.(null);
-        onFocusRequest?.({
+    const focusView = useCallback((view: CameraView) => {
+        sceneStoreActions.selectView(view.id);
+        editorSessionActions.requestFocus({
             position: view.position,
             target: view.target,
             fov: view.fov,
             lens_mm: view.lens_mm,
         });
-    };
+    }, [editorSessionActions, sceneStoreActions]);
 
-    const focusPin = (pin: SpatialPin) => {
-        onSelectPin?.(pin.id);
+    const focusPin = useCallback((pin: SpatialPin) => {
+        const normalizedSceneGraph = getCurrentSceneGraph();
+        const selectedView = normalizedSceneGraph.camera_views.find((view) => view.id === selectedViewId) ?? null;
+        sceneStoreActions.selectPin(pin.id);
         const fallbackView = selectedView ?? normalizedSceneGraph.camera_views[0] ?? null;
-        onFocusRequest?.(
+        editorSessionActions.requestFocus(
             fallbackView
                 ? {
                       position: fallbackView.position,
@@ -620,9 +1349,10 @@ export default function RightPanel({
                       lens_mm: normalizedSceneGraph.viewer.lens_mm,
                   },
         );
-    };
+    }, [editorSessionActions, getCurrentSceneGraph, sceneStoreActions, selectedViewId]);
 
     const focusIssue = (issue: ReviewIssue) => {
+        const normalizedSceneGraph = getCurrentSceneGraph();
         if (issue.anchor_view_id) {
             const view = normalizedSceneGraph.camera_views.find((candidate) => candidate.id === issue.anchor_view_id);
             if (view) {
@@ -631,7 +1361,7 @@ export default function RightPanel({
             }
         }
         if (issue.anchor_position) {
-            onFocusRequest?.({
+            editorSessionActions.requestFocus({
                 position: [issue.anchor_position[0] + 4, issue.anchor_position[1] + 2, issue.anchor_position[2] + 4],
                 target: issue.anchor_position,
                 fov: normalizedSceneGraph.viewer.fov,
@@ -660,308 +1390,21 @@ export default function RightPanel({
                 </button>
             </div>
 
-            <div className="p-4 border-b border-neutral-800 space-y-3 shrink-0">
-                <div className={`rounded-xl border px-3 py-3 text-xs ${statusClassName(saveState)}`}>
-                    <p className="font-medium tracking-wide uppercase text-[10px] mb-1">Save State</p>
-                    <p>{saveMessage || "Scene is idle."}</p>
-                    {lastSavedAt && <p className="text-[11px] text-neutral-400 mt-2">Last saved {formatTimestamp(lastSavedAt)}</p>}
-                    {saveError && <p className="text-[11px] text-rose-200 mt-2 whitespace-pre-wrap">{saveError}</p>}
-                </div>
-
-                <div className="rounded-xl border border-neutral-800 bg-neutral-900/70 px-3 py-3 text-xs text-neutral-300">
-                    <p className="font-medium tracking-wide uppercase text-[10px] mb-1 text-neutral-500">Workspace Readiness</p>
-                    <p className="text-white">{environmentState.label}</p>
-                    <p className="mt-2 text-[11px] text-neutral-500">{environmentState.note}</p>
-                    {environmentState.detail ? <p className="mt-1 text-[11px] text-neutral-400">{environmentState.detail}</p> : null}
-                    {normalizedSceneGraph.environment?.metadata?.truth_label ? (
-                        <p className="mt-2 text-[11px] text-neutral-400">{normalizedSceneGraph.environment.metadata.truth_label}</p>
-                    ) : null}
-                    {environmentMetadata?.lane_truth ? (
-                        <p className="mt-1 text-[11px] text-neutral-500">Truth: {environmentMetadata.lane_truth.replaceAll("_", " ")}</p>
-                    ) : null}
-                    {environmentMetadata?.reconstruction_status ? (
-                        <p className="mt-1 text-[11px] text-neutral-500">
-                            Status: {environmentMetadata.reconstruction_status.replaceAll("_", " ")}
-                        </p>
-                    ) : null}
-                </div>
-
-                {environmentMetadata?.rendering || environmentQuality || environmentDelivery ? (
-                    <div className="rounded-xl border border-neutral-800 bg-neutral-900/70 px-3 py-3 space-y-3 text-xs text-neutral-300">
-                        <div className="flex items-center justify-between gap-3">
-                            <div>
-                                <p className="font-medium tracking-wide uppercase text-[10px] text-neutral-500">
-                                    {environmentQuality ? "Reconstruction Quality" : "Splat Rendering"}
-                                </p>
-                                <p className="mt-1 text-white">
-                                    {environmentQuality?.band ? formatQualityBand(environmentQuality.band) : "Colorized splat output"}
-                                </p>
-                            </div>
-                            {typeof environmentQuality?.score === "number" ? (
-                                <div className="rounded-lg border border-neutral-800 bg-neutral-950 px-2.5 py-2 text-right">
-                                    <p className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">Score</p>
-                                    <p className="text-sm text-white">{environmentQuality.score.toFixed(1)}</p>
-                                </div>
-                            ) : null}
-                        </div>
-
-                        {environmentQuality ? (
-                            <div className="grid grid-cols-2 gap-2 text-[11px]">
-                                <div className="rounded-lg border border-neutral-800 bg-neutral-950/70 px-3 py-2">
-                                    Alignment {formatMetric(environmentQuality.alignment?.score)}
-                                </div>
-                                <div className="rounded-lg border border-neutral-800 bg-neutral-950/70 px-3 py-2">
-                                    Appearance {formatMetric(environmentQuality.appearance?.score)}
-                                </div>
-                                <div className="rounded-lg border border-neutral-800 bg-neutral-950/70 px-3 py-2">
-                                    Pose pairs {environmentQuality.alignment?.pose_pairs ?? 0}/{environmentQuality.alignment?.pair_count ?? 0}
-                                </div>
-                                <div className="rounded-lg border border-neutral-800 bg-neutral-950/70 px-3 py-2">
-                                    Exposure span {formatMetric(environmentQuality.appearance?.exposure_span, 3)}
-                                </div>
-                            </div>
-                        ) : null}
-
-                        {environmentWarnings.length > 0 ? (
-                            <div className="space-y-1">
-                                {environmentWarnings.slice(0, 3).map((warning) => (
-                                    <p key={warning} className="text-[11px] text-amber-200">
-                                        {warning}
-                                    </p>
-                                ))}
-                            </div>
-                        ) : null}
-
-                        {environmentDelivery ? (
-                            <div className="rounded-lg border border-neutral-800 bg-neutral-950/70 px-3 py-3 space-y-3">
-                                <div className="flex items-start justify-between gap-3">
-                                    <div>
-                                        <p className="font-medium tracking-wide uppercase text-[10px] text-neutral-500">Delivery Gate</p>
-                                        <p className="mt-1 text-white">
-                                            {environmentDelivery.label || formatQualityBand(environmentDelivery.readiness) || "Not scored"}
-                                        </p>
-                                        {environmentDelivery.summary ? (
-                                            <p className="mt-1 text-[11px] text-neutral-500">{environmentDelivery.summary}</p>
-                                        ) : null}
-                                    </div>
-                                    {typeof environmentDelivery.score === "number" ? (
-                                        <div className="rounded-lg border border-neutral-800 bg-black/20 px-2.5 py-2 text-right">
-                                            <p className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">Gate Score</p>
-                                            <p className="text-sm text-white">{environmentDelivery.score.toFixed(1)}</p>
-                                        </div>
-                                    ) : null}
-                                </div>
-
-                                {environmentDelivery.axes ? (
-                                    <div className="grid grid-cols-2 gap-2 text-[11px] text-neutral-300">
-                                        <div className="rounded-lg border border-neutral-800 bg-black/20 px-3 py-2">
-                                            Geometry {formatMetric(environmentDelivery.axes.geometry?.score)}
-                                        </div>
-                                        <div className="rounded-lg border border-neutral-800 bg-black/20 px-3 py-2">
-                                            Color {formatMetric(environmentDelivery.axes.color?.score)}
-                                        </div>
-                                        <div className="rounded-lg border border-neutral-800 bg-black/20 px-3 py-2">
-                                            Coverage {formatMetric(environmentDelivery.axes.coverage?.score)}
-                                        </div>
-                                        <div className="rounded-lg border border-neutral-800 bg-black/20 px-3 py-2">
-                                            Density {formatMetric(environmentDelivery.axes.density?.score)}
-                                        </div>
-                                    </div>
-                                ) : null}
-
-                                {environmentDelivery.recommended_viewer_mode || environmentDelivery.render_targets ? (
-                                    <p className="text-[11px] text-neutral-400">
-                                        Viewer profile {formatQualityBand(environmentDelivery.recommended_viewer_mode) || "standard"}
-                                        {environmentDelivery.render_targets?.desktop_fps
-                                            ? ` · ${environmentDelivery.render_targets.desktop_fps}fps desktop`
-                                            : ""}
-                                        {environmentDelivery.render_targets?.mobile_fps
-                                            ? ` · ${environmentDelivery.render_targets.mobile_fps}fps mobile`
-                                            : ""}
-                                    </p>
-                                ) : null}
-
-                                {environmentBlockingIssues.length > 0 ? (
-                                    <div className="space-y-1">
-                                        {environmentBlockingIssues.slice(0, 3).map((issue) => (
-                                            <p key={issue} className="text-[11px] text-amber-200">
-                                                {issue}
-                                            </p>
-                                        ))}
-                                    </div>
-                                ) : null}
-
-                                {environmentNextActions.length > 0 ? (
-                                    <div className="space-y-1">
-                                        {environmentNextActions.slice(0, 3).map((action) => (
-                                            <p key={action} className="text-[11px] text-sky-200">
-                                                {action}
-                                            </p>
-                                        ))}
-                                    </div>
-                                ) : null}
-                            </div>
-                        ) : null}
-
-                        {environmentCapture || environmentTraining || environmentHoldout || environmentComparison || environmentReleaseGates ? (
-                            <div className="rounded-lg border border-neutral-800 bg-neutral-950/70 px-3 py-3 space-y-3">
-                                <p className="font-medium tracking-wide uppercase text-[10px] text-neutral-500">World-Class Gates</p>
-                                <div className="grid grid-cols-2 gap-2 text-[11px] text-neutral-300">
-                                    <div className="rounded-lg border border-neutral-800 bg-black/20 px-3 py-2">
-                                        Capture {environmentCapture?.frame_count ?? environmentMetadata?.frame_count ?? 0} frames
-                                    </div>
-                                    <div className="rounded-lg border border-neutral-800 bg-black/20 px-3 py-2">
-                                        Benchmark {formatQualityBand(environmentComparison?.benchmark_status) || "not benchmarked"}
-                                    </div>
-                                    <div className="rounded-lg border border-neutral-800 bg-black/20 px-3 py-2">
-                                        Training {formatQualityBand(environmentTraining?.backend) || "unknown"}
-                                    </div>
-                                    <div className="rounded-lg border border-neutral-800 bg-black/20 px-3 py-2">
-                                        Holdout {environmentHoldout?.available ? "available" : "missing"}
-                                    </div>
-                                </div>
-                                {environmentReleaseGates ? (
-                                    <div className="rounded-lg border border-neutral-800 bg-black/20 px-3 py-3">
-                                        <p className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">Promotion gate</p>
-                                        <p className="mt-1 text-sm text-white">
-                                            {environmentReleaseGates.summary || "Promotion gates not reported"}
-                                        </p>
-                                        {environmentGateFailures.length > 0 ? (
-                                            <div className="mt-2 space-y-1">
-                                                {environmentGateFailures.slice(0, 4).map((failure) => (
-                                                    <p key={failure} className="text-[11px] text-rose-200">
-                                                        {failure}
-                                                    </p>
-                                                ))}
-                                            </div>
-                                        ) : null}
-                                    </div>
-                                ) : null}
-                            </div>
-                        ) : null}
-                    </div>
-                ) : null}
-
-                <div className="grid grid-cols-2 gap-2">
-                    <button
-                        onClick={copyReviewLink}
-                        className="rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-3 text-xs text-white hover:border-blue-500/50 hover:text-blue-200 transition-colors flex items-center justify-center gap-2"
-                    >
-                        <Share2 className="h-3.5 w-3.5" />
-                        Copy review link
-                    </button>
-                    <button
-                        onClick={exportScenePackage}
-                        className="rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-3 text-xs text-white hover:border-blue-500/50 hover:text-blue-200 transition-colors flex items-center justify-center gap-2"
-                    >
-                        <Download className="h-3.5 w-3.5" />
-                        Export scene package
-                    </button>
-                </div>
-                {shareStatus && <p className="text-[11px] text-blue-300">{shareStatus}</p>}
-
-                {clarityMode ? (
-                    <>
-                        <div className="grid grid-cols-2 gap-2">
-                            <div className="rounded-xl border border-neutral-800 bg-neutral-900/70 px-3 py-3">
-                                <p className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">Persistent world</p>
-                                <p className="mt-1 text-sm text-white">{normalizedSceneGraph.environment ? "World state stays persistent" : "No world loaded yet"}</p>
-                                <p className="mt-1 text-[11px] leading-5 text-neutral-500">{persistentWorldSummary}</p>
-                            </div>
-                            <div className="rounded-xl border border-neutral-800 bg-neutral-900/70 px-3 py-3">
-                                <p className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">Scene direction</p>
-                                <p className="mt-1 text-sm text-white">{normalizedSceneGraph.camera_views.length || normalizedSceneGraph.pins.length || normalizedSceneGraph.director_brief ? "Shot-only changes" : "No shot direction yet"}</p>
-                                <p className="mt-1 text-[11px] leading-5 text-neutral-500">{sceneDirectionSummary}</p>
-                            </div>
-                        </div>
-
-                        <div className="rounded-xl border border-neutral-800 bg-neutral-900/70 px-3 py-3">
-                            <p className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">What changed since the current output</p>
-                            <p className="mt-2 text-sm text-white">{lastOutputLabel ?? "No output loaded yet"}</p>
-                            {changeSummary ? (
-                                <div className="mt-3 space-y-3">
-                                    {changeSummary.persistent.length > 0 ? (
-                                        <div>
-                                            <p className="text-[10px] uppercase tracking-[0.16em] text-neutral-500">Persistent world changes</p>
-                                            <div className="mt-2 flex flex-wrap gap-2">
-                                                {changeSummary.persistent.map((item) => (
-                                                    <span key={item} className="rounded-full border border-emerald-500/20 bg-emerald-950/20 px-2.5 py-1 text-[11px] text-emerald-200">
-                                                        {item}
-                                                    </span>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    ) : null}
-                                    {changeSummary.sceneDirection.length > 0 ? (
-                                        <div>
-                                            <p className="text-[10px] uppercase tracking-[0.16em] text-neutral-500">Scene direction changes</p>
-                                            <div className="mt-2 flex flex-wrap gap-2">
-                                                {changeSummary.sceneDirection.map((item) => (
-                                                    <span key={item} className="rounded-full border border-sky-500/20 bg-sky-950/20 px-2.5 py-1 text-[11px] text-sky-200">
-                                                        {item}
-                                                    </span>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    ) : null}
-                                </div>
-                            ) : (
-                                <p className="mt-2 text-[11px] leading-5 text-neutral-500">No input changes since the current output was loaded.</p>
-                            )}
-                        </div>
-
-                        <div className="rounded-xl border border-neutral-800 bg-neutral-900/70 px-3 py-3">
-                            <div className="flex items-center justify-between gap-3">
-                                <div>
-                                    <p className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">Recent activity</p>
-                                    <p className="mt-1 text-sm text-white">Lightweight version and action trail</p>
-                                </div>
-                                <span className="rounded-full border border-neutral-800 bg-black/20 px-2.5 py-1 text-[10px] uppercase tracking-[0.18em] text-neutral-400">
-                                    {versions.length} versions
-                                </span>
-                            </div>
-
-                            {activityLog.length > 0 ? (
-                                <div className="mt-3 space-y-2">
-                                    {activityLog.slice(0, 4).map((entry) => (
-                                        <div key={entry.id} className={`rounded-lg border px-3 py-2 ${activityToneClass(entry.tone)}`}>
-                                            <div className="flex items-center justify-between gap-3">
-                                                <p className="text-xs text-white">{entry.label}</p>
-                                                <p className="text-[11px] text-neutral-500">{formatTimestamp(entry.at)}</p>
-                                            </div>
-                                            <p className="mt-1 text-[11px] leading-5 text-neutral-400">{entry.detail}</p>
-                                        </div>
-                                    ))}
-                                </div>
-                            ) : (
-                                <p className="mt-3 text-[11px] leading-5 text-neutral-500">Open the demo, build a world, save a version, or export a package to start the activity trail.</p>
-                            )}
-
-                            {versions.length > 0 ? (
-                                <div className="mt-3 space-y-2">
-                                    {versions.slice(0, 3).map((version) => (
-                                        <div key={version.version_id} className="rounded-lg border border-neutral-800 bg-black/20 px-3 py-2">
-                                            <div className="flex items-center justify-between gap-3">
-                                                <p className="text-xs text-white">{formatTimestamp(version.saved_at) || version.version_id}</p>
-                                                <button
-                                                    onClick={() => void onRestoreVersion(version.version_id)}
-                                                    className="rounded-full border border-neutral-800 bg-neutral-950 px-2 py-1 text-[10px] uppercase tracking-[0.16em] text-neutral-300 hover:border-blue-500/40 hover:text-blue-200"
-                                                >
-                                                    Restore
-                                                </button>
-                                            </div>
-                                            <p className="mt-1 text-[11px] text-neutral-500">
-                                                {version.source ?? "manual"} · {version.summary?.asset_count ?? 0} assets
-                                                {version.summary?.has_environment ? " · world loaded" : ""}
-                                            </p>
-                                        </div>
-                                    ))}
-                                </div>
-                            ) : null}
-                        </div>
-                    </>
-                ) : null}
-            </div>
+            <RightPanelWorkspaceOverviewSection
+                clarityMode={clarityMode}
+                saveState={saveState}
+                saveMessage={saveMessage}
+                saveError={saveError}
+                lastSavedAt={lastSavedAt}
+                shareStatus={shareStatus}
+                lastOutputLabel={lastOutputLabel}
+                changeSummary={changeSummary}
+                activityLog={activityLog}
+                versions={versions}
+                onCopyReviewLink={copyReviewLink}
+                onExportScenePackage={exportScenePackage}
+                onRestoreVersion={onRestoreVersion}
+            />
 
             <div className="p-4 space-y-4 border-b border-neutral-800">
                 <div className="rounded-xl border border-neutral-800 bg-neutral-900/70 px-3 py-3 space-y-3">
@@ -1113,12 +1556,7 @@ export default function RightPanel({
                     {selectedVersion ? (
                         <>
                             <p className="text-[11px] text-neutral-500">
-                                Anchors:{" "}
-                                {selectedPin
-                                    ? `pin ${selectedPin.label}`
-                                    : selectedView
-                                      ? `view ${selectedView.label}`
-                                      : "select a pin or saved view to bind the issue"}
+                                Anchors: {selectedAnchorLabel}
                             </p>
                             <input
                                 value={issueDraft.title}
@@ -1316,273 +1754,23 @@ export default function RightPanel({
                 </div>
             </div>
 
-            <div className="p-4 border-b border-neutral-800 shrink-0">
-                <div className="flex items-center gap-2 mb-4 text-xs font-bold text-neutral-500 uppercase tracking-wider">
-                    <Layers className="h-3 w-3" />
-                    Scene Graph
-                </div>
+            <RightPanelSceneGraphSectionConnected
+                assetsList={assetsList}
+                onFocusWorkspace={focusWorkspace}
+                onStageNextLocalAsset={stageNextLocalAsset}
+                onFocusView={focusView}
+                onDeleteView={deleteView}
+                onFocusPin={focusPin}
+                onDeletePin={deletePin}
+                onDuplicateSceneAsset={duplicateSceneAsset}
+                onDeleteSceneAsset={deleteSceneAsset}
+            />
 
-                <div className="grid grid-cols-2 gap-2">
-                    <div className="rounded-xl border border-neutral-800 bg-neutral-900/70 px-3 py-3">
-                        <p className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">Workspace</p>
-                        <p className="mt-1 text-sm text-white">{sceneGraphItemCount} staged elements</p>
-                        <p className="mt-1 text-[11px] text-neutral-500">
-                            {normalizedSceneGraph.environment ? "Environment anchored" : "No environment yet"}
-                        </p>
-                    </div>
-                    <div className="rounded-xl border border-neutral-800 bg-neutral-900/70 px-3 py-3">
-                        <p className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">Coverage</p>
-                        <p className="mt-1 text-sm text-white">
-                            {normalizedSceneGraph.camera_views.length} views · {normalizedSceneGraph.pins.length} pins
-                        </p>
-                        <p className="mt-1 text-[11px] text-neutral-500">
-                            {normalizedSceneGraph.assets.length} placed assets in the scene
-                        </p>
-                    </div>
-                </div>
-
-                <div className="mt-3 flex flex-wrap gap-2">
-                    <button
-                        onClick={focusWorkspace}
-                        className="rounded-full border border-neutral-800 bg-neutral-900 px-3 py-2 text-[11px] text-white transition-colors hover:border-blue-500/40 hover:text-blue-200"
-                    >
-                        <Focus className="mr-1 inline h-3.5 w-3.5" />
-                        Focus Workspace
-                    </button>
-                    <button
-                        onClick={stageNextLocalAsset}
-                        disabled={!nextLocalAsset}
-                        className="rounded-full border border-neutral-800 bg-neutral-900 px-3 py-2 text-[11px] text-white transition-colors hover:border-blue-500/40 hover:text-blue-200 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                        <Box className="mr-1 inline h-3.5 w-3.5" />
-                        {nextLocalAsset ? "Stage Next Asset" : "No Local Assets Yet"}
-                    </button>
-                </div>
-
-                <div className="mt-4 space-y-3 max-h-[28rem] overflow-y-auto pr-1">
-                    {normalizedSceneGraph.environment ? (
-                        <div className="bg-neutral-900/80 rounded-lg px-3 py-2.5 text-emerald-400 border border-emerald-900/30 flex justify-between items-center shadow-inner">
-                            <span className="font-medium">{environmentState.lane === "preview" ? "Preview Splat" : "Environment Splat"}</span>
-                            <span className="text-[10px] bg-emerald-950/50 px-1.5 py-0.5 rounded text-emerald-500 font-mono tracking-wider">
-                                {environmentState.badge}
-                            </span>
-                        </div>
-                    ) : null}
-
-                    {normalizedSceneGraph.camera_views.length > 0 ? (
-                        <div className="rounded-xl border border-neutral-800 bg-neutral-900/70 px-3 py-3">
-                            <p className="text-[10px] uppercase tracking-[0.18em] text-neutral-500 mb-2">Saved Views</p>
-                            <div className="space-y-2">
-                                {normalizedSceneGraph.camera_views.map((view) => (
-                                    <div key={view.id} className="rounded-lg border border-neutral-800 bg-neutral-950/70 px-3 py-2">
-                                        <div className="flex items-center justify-between gap-2">
-                                            <div>
-                                                <p className="text-xs text-white">{view.label}</p>
-                                                <p className="text-[11px] text-neutral-500">
-                                                    {view.lens_mm.toFixed(0)}mm · FOV {view.fov.toFixed(1)}
-                                                </p>
-                                            </div>
-                                            <div className="flex items-center gap-1">
-                                                <button
-                                                    onClick={() => focusView(view)}
-                                                    className="p-1 rounded text-neutral-300 hover:text-white hover:bg-neutral-800"
-                                                    title="Focus view"
-                                                >
-                                                    <Focus className="h-3.5 w-3.5" />
-                                                </button>
-                                                <button
-                                                    onClick={() => deleteView(view.id)}
-                                                    className="p-1 rounded text-rose-300 hover:text-rose-200 hover:bg-rose-950/40"
-                                                    title="Delete view"
-                                                >
-                                                    <Trash2 className="h-3.5 w-3.5" />
-                                                </button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    ) : null}
-
-                    {normalizedSceneGraph.pins.length > 0 ? (
-                        <div className="rounded-xl border border-neutral-800 bg-neutral-900/70 px-3 py-3">
-                            <p className="text-[10px] uppercase tracking-[0.18em] text-neutral-500 mb-2">Spatial Pins</p>
-                            <div className="space-y-2">
-                                {normalizedSceneGraph.pins.map((pin) => (
-                                    <div key={pin.id} className="rounded-lg border border-neutral-800 bg-neutral-950/70 px-3 py-2">
-                                        <div className="flex items-center justify-between gap-2">
-                                            <div>
-                                                <p className="text-xs text-white">{pin.label}</p>
-                                                <p className="text-[11px] text-neutral-500">
-                                                    {formatPinTypeLabel(pin.type)} · [{pin.position.map((value) => value.toFixed(2)).join(", ")}]
-                                                </p>
-                                            </div>
-                                            <div className="flex items-center gap-1">
-                                                <button
-                                                    onClick={() => focusPin(pin)}
-                                                    className="p-1 rounded text-neutral-300 hover:text-white hover:bg-neutral-800"
-                                                    title="Focus pin"
-                                                >
-                                                    <Focus className="h-3.5 w-3.5" />
-                                                </button>
-                                                <button
-                                                    onClick={() => deletePin(pin.id)}
-                                                    className="p-1 rounded text-rose-300 hover:text-rose-200 hover:bg-rose-950/40"
-                                                    title="Delete pin"
-                                                >
-                                                    <Trash2 className="h-3.5 w-3.5" />
-                                                </button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    ) : null}
-
-                    {normalizedSceneGraph.assets.map((asset: any, index: number) => (
-                        <div
-                            key={asset.instanceId || index}
-                            className="bg-neutral-900/50 rounded-lg px-3 py-2.5 text-blue-400 border border-blue-900/30 flex flex-col gap-2 hover:border-blue-700/50 hover:bg-neutral-900 transition-colors"
-                        >
-                            <div className="flex justify-between items-center">
-                                <span className="font-medium flex items-center gap-2 truncate">
-                                    <Box className="h-3 w-3 opacity-50 shrink-0" /> {asset.name}
-                                </span>
-                                <div className="flex items-center gap-1 shrink-0">
-                                    <button
-                                        onClick={() => duplicateSceneAsset(asset.instanceId)}
-                                        className="p-1 rounded text-neutral-300 hover:text-white hover:bg-neutral-800"
-                                        title="Duplicate"
-                                    >
-                                        <Copy className="h-3.5 w-3.5" />
-                                    </button>
-                                    <button
-                                        onClick={() => deleteSceneAsset(asset.instanceId)}
-                                        className="p-1 rounded text-rose-300 hover:text-rose-200 hover:bg-rose-950/40"
-                                        title="Delete"
-                                    >
-                                        <Trash2 className="h-3.5 w-3.5" />
-                                    </button>
-                                </div>
-                            </div>
-                            <span className="text-xs text-neutral-500 font-mono">
-                                pos [{(asset.position ?? [0, 0, 0]).map((value: number) => Number(value).toFixed(2)).join(", ")}]
-                            </span>
-                        </div>
-                    ))}
-
-                    {normalizedSceneGraph.assets.length === 0 && !normalizedSceneGraph.environment ? (
-                        <div className="rounded-2xl border border-dashed border-neutral-800 bg-neutral-900/40 px-4 py-4">
-                            <p className="text-sm text-white">Nothing is staged yet.</p>
-                            <p className="mt-2 text-xs text-neutral-400">
-                                Generate a preview or reconstruction on the left, save views from the viewer, drop pins for blocking notes,
-                                and place assets here for layout.
-                            </p>
-                            <div className="mt-3 flex flex-wrap gap-2">
-                                <button
-                                    onClick={focusWorkspace}
-                                    className="rounded-full border border-neutral-800 bg-black/20 px-3 py-2 text-[11px] text-neutral-200 hover:border-blue-500/40 hover:text-blue-200"
-                                >
-                                    Scout Viewer
-                                </button>
-                                <button
-                                    onClick={stageNextLocalAsset}
-                                    disabled={!nextLocalAsset}
-                                    className="rounded-full border border-neutral-800 bg-black/20 px-3 py-2 text-[11px] text-neutral-200 hover:border-blue-500/40 hover:text-blue-200 disabled:cursor-not-allowed disabled:opacity-50"
-                                >
-                                    {nextLocalAsset ? "Place First Asset" : "Generate an Asset First"}
-                                </button>
-                            </div>
-                        </div>
-                    ) : null}
-                </div>
-            </div>
-
-            <div className="p-4 bg-neutral-900/20 shrink-0">
-                <div className="flex items-center gap-2 mb-4 text-xs font-bold text-neutral-500 uppercase tracking-wider">
-                    <Box className="h-3 w-3" />
-                    Local Assets
-                </div>
-
-                <div className="grid grid-cols-2 gap-2">
-                    <div className="rounded-xl border border-neutral-800 bg-neutral-900/70 px-3 py-3">
-                        <p className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">Library</p>
-                        <p className="mt-1 text-sm text-white">{assetsList.length} assets ready</p>
-                        <p className="mt-1 text-[11px] text-neutral-500">Click or drag assets into the viewer.</p>
-                    </div>
-                    <div className="rounded-xl border border-neutral-800 bg-neutral-900/70 px-3 py-3">
-                        <p className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">Scene Usage</p>
-                        <p className="mt-1 text-sm text-white">{normalizedSceneGraph.assets.length} staged instances</p>
-                        <p className="mt-1 text-[11px] text-neutral-500">
-                            {nextLocalAsset ? `${nextLocalAsset.name} is next to place.` : "Generate or restore assets to start layout."}
-                        </p>
-                    </div>
-                </div>
-
-                <p className="mt-3 text-[11px] text-neutral-500">
-                    Filmmaker workflow: build the environment first, then click or drag hero props into the viewer and place notes or views around them.
-                </p>
-
-                {assetsList.length > 0 ? (
-                    <div className="mt-4 grid max-h-[30rem] grid-cols-2 gap-3 overflow-y-auto pb-8 pr-1">
-                        {assetsList.map((asset: any, index: number) => (
-                            <div
-                                key={asset.id || index}
-                                draggable
-                                onDragStart={(event) => handleDragStart(event, asset)}
-                                onClick={() => addAssetToScene(asset)}
-                                className="bg-neutral-900 border border-neutral-800 rounded-xl p-3 hover:border-blue-500/50 cursor-grab active:cursor-grabbing transition-all group aspect-square flex flex-col justify-between hover:shadow-xl hover:shadow-black/50 animate-in zoom-in-95 duration-200"
-                                title="Click to place in scene or drag into the viewer"
-                            >
-                                <div className="flex items-center justify-between gap-2 mb-2">
-                                    <span className="text-[10px] uppercase tracking-[0.16em] text-neutral-500">
-                                        {(libraryAssetCounts.get(assetLibraryKey(asset, index)) ?? 0) > 0
-                                            ? `${libraryAssetCounts.get(assetLibraryKey(asset, index))} in scene`
-                                            : "Ready to place"}
-                                    </span>
-                                    <button
-                                        onClick={(event) => {
-                                            event.stopPropagation();
-                                            addAssetToScene(asset);
-                                        }}
-                                        className="rounded-full border border-neutral-800 bg-black/20 px-2 py-1 text-[10px] uppercase tracking-[0.14em] text-neutral-200 hover:border-blue-500/40 hover:text-blue-200"
-                                    >
-                                        Place
-                                    </button>
-                                </div>
-                                <div
-                                    className="w-full flex-1 bg-gradient-to-tr from-neutral-800 to-neutral-700 rounded-lg mb-2 overflow-hidden relative shadow-inner bg-cover bg-center"
-                                    style={asset.preview ? { backgroundImage: `url(${asset.preview})` } : undefined}
-                                >
-                                    <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 bg-neutral-900/40 transition-opacity backdrop-blur-[2px]">
-                                        <div className="bg-blue-600 text-white rounded-full p-1 shadow-lg pointer-events-none">
-                                            <Box className="h-4 w-4" />
-                                        </div>
-                                    </div>
-                                </div>
-                                <div>
-                                    <p className="text-xs text-center text-neutral-400 font-medium truncate group-hover:text-blue-200">{asset.name}</p>
-                                    <p className="mt-1 text-[10px] text-center text-neutral-400">
-                                        Click to stage at origin or drag into the viewer.
-                                    </p>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                ) : (
-                    <div className="mt-4 flex min-h-[10rem] items-center justify-center rounded-xl border-2 border-dashed border-neutral-800/50 bg-neutral-900/30 px-4 py-6 text-center">
-                        <div>
-                            <p className="text-sm text-white">No local assets yet.</p>
-                            <p className="mt-2 text-xs text-neutral-500">
-                                Generate an asset from a selected frame in the left rail. When it finishes, it will appear here with one-click
-                                staging into the scene.
-                            </p>
-                        </div>
-                    </div>
-                )}
-            </div>
+            <RightPanelLocalAssetsSectionConnected
+                assetsList={assetsList}
+                onHandleDragStart={handleDragStart}
+                onAddAssetToScene={addAssetToScene}
+            />
         </div>
     );
 }
