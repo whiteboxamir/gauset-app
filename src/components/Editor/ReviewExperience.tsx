@@ -2,9 +2,12 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { MessageSquareText, Share2 } from "lucide-react";
+import DeploymentFingerprintBadge from "@/components/Editor/DeploymentFingerprintBadge";
 import ViewerPanel from "@/components/Editor/ViewerPanel";
 import { extractApiError, MVP_API_BASE_URL } from "@/lib/mvp-api";
+import { MvpDeploymentFingerprint } from "@/lib/mvp-deployment";
 import { decodeReviewPackage, ReviewPackage } from "@/lib/mvp-review";
+import { SceneReviewRecord } from "@/lib/mvp-workspace";
 import { useSearchParams } from "next/navigation";
 
 interface ReviewComment {
@@ -12,16 +15,6 @@ interface ReviewComment {
     author: string;
     body: string;
     created_at: string;
-}
-
-interface SceneReview {
-    metadata?: Record<string, string>;
-    approval?: {
-        state?: string;
-        updated_at?: string | null;
-        updated_by?: string | null;
-        note?: string;
-    };
 }
 
 const formatTimestamp = (value?: string | null) => {
@@ -36,12 +29,16 @@ const formatTimestamp = (value?: string | null) => {
     });
 };
 
-export default function ReviewExperience() {
+export default function ReviewExperience({
+    deploymentFingerprint,
+}: {
+    deploymentFingerprint: MvpDeploymentFingerprint;
+}) {
     const searchParams = useSearchParams();
     const [reviewPackage, setReviewPackage] = useState<ReviewPackage | null>(null);
     const [comments, setComments] = useState<ReviewComment[]>([]);
     const [statusMessage, setStatusMessage] = useState("Loading review scene...");
-    const [reviewData, setReviewData] = useState<SceneReview | null>(null);
+    const [reviewData, setReviewData] = useState<SceneReviewRecord | null>(null);
 
     const sceneId = searchParams.get("scene");
     const versionId = searchParams.get("version");
@@ -96,7 +93,7 @@ export default function ReviewExperience() {
 
                 const reviewResponse = await fetch(`${MVP_API_BASE_URL}/scene/${sceneId}/review`, { cache: "no-store" });
                 if (reviewResponse.ok) {
-                    const reviewPayload = (await reviewResponse.json()) as SceneReview;
+                    const reviewPayload = (await reviewResponse.json()) as SceneReviewRecord;
                     if (!cancelled) {
                         setReviewData(reviewPayload);
                     }
@@ -135,7 +132,7 @@ export default function ReviewExperience() {
             <div className="border-b border-neutral-800 bg-black/30 backdrop-blur px-6 py-4 flex items-center justify-between gap-4">
                 <div>
                     <p className="text-xs uppercase tracking-[0.2em] text-neutral-500">Gauset Review</p>
-                    <h1 className="text-xl font-semibold mt-1">Read-only Scene Review</h1>
+                    <h1 className="text-xl font-semibold mt-1" data-testid="review-page-title">Read-only Scene Review</h1>
                     <p className="text-xs text-neutral-400 mt-2">{statusMessage}</p>
                 </div>
                 <div className="text-right text-xs text-neutral-400">
@@ -146,7 +143,7 @@ export default function ReviewExperience() {
 
             <div className="grid grid-cols-1 xl:grid-cols-[1fr_360px] flex-1">
                 <div className="min-h-[70vh] border-b xl:border-b-0 xl:border-r border-neutral-900">
-                    <ViewerPanel sceneGraph={sceneGraph} setSceneGraph={() => undefined} readOnly />
+                    <ViewerPanel sceneGraph={sceneGraph} readOnly />
                 </div>
                 <aside className="p-6 space-y-5 bg-neutral-950">
                     <div className="rounded-2xl border border-neutral-800 bg-neutral-900/60 p-4">
@@ -212,6 +209,7 @@ export default function ReviewExperience() {
                     </div>
                 </aside>
             </div>
+            <DeploymentFingerprintBadge fingerprint={deploymentFingerprint} testId="review-deployment-fingerprint" />
         </div>
     );
 }
