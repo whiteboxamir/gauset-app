@@ -110,6 +110,8 @@ export interface WorkspaceSceneGraph {
     viewer: ViewerState;
 }
 
+export type PersistedSceneGraphV1 = WorkspaceSceneGraph;
+
 export const DEFAULT_FOV = 45;
 export const DEFAULT_LENS_MM = 35;
 
@@ -156,6 +158,18 @@ export function defaultViewerState(): ViewerState {
     return {
         fov: DEFAULT_FOV,
         lens_mm: DEFAULT_LENS_MM,
+    };
+}
+
+export function createEmptyWorkspaceSceneGraph(): PersistedSceneGraphV1 {
+    return {
+        environment: null,
+        assets: [],
+        camera_views: [],
+        pins: [],
+        director_path: [],
+        director_brief: "",
+        viewer: defaultViewerState(),
     };
 }
 
