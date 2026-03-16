@@ -419,13 +419,92 @@ def _merge_preview_metadata(metadata_path: Path, enhancement: Dict[str, Any], in
     metadata_path.write_text(json.dumps(payload, indent=2))
 
 
-def _write_mock_environment(output_dir: Path) -> None:
+def _write_mock_environment(output_dir: Path, input_image: Path | None = None) -> None:
     time.sleep(1.5)
-    (output_dir / "splats.ply").write_text("mock ply data for gaussian splats")
-    (output_dir / "cameras.json").write_text(json.dumps([]))
-    (output_dir / "metadata.json").write_text(
-        json.dumps({"model": "ml-sharp-mock", "note": "mock fallback"}, indent=2)
+    mock_points = [
+        (-0.32, -0.12, 1.8, 238, 230, 216),
+        (0.28, -0.08, 1.86, 224, 188, 124),
+        (-0.18, 0.22, 1.92, 122, 168, 214),
+        (0.16, 0.3, 2.02, 96, 122, 168),
+        (0.0, 0.0, 1.74, 252, 246, 236),
+    ]
+    ply_lines = [
+        "ply",
+        "format ascii 1.0",
+        f"element vertex {len(mock_points)}",
+        "property float x",
+        "property float y",
+        "property float z",
+        "property uchar red",
+        "property uchar green",
+        "property uchar blue",
+        "end_header",
+    ]
+    ply_lines.extend(
+        f"{x:.5f} {y:.5f} {z:.5f} {red} {green} {blue}"
+        for x, y, z, red, green, blue in mock_points
     )
+    (output_dir / "splats.ply").write_text("\n".join(ply_lines))
+    (output_dir / "cameras.json").write_text(json.dumps([], indent=2))
+
+    preview_projection_path = output_dir / "preview-projection.png"
+    if input_image is not None and input_image.exists():
+        with Image.open(input_image) as image:
+            preview = image.convert("RGB")
+            preview.thumbnail((768, 768))
+            preview.save(preview_projection_path)
+    else:
+        Image.new("RGB", (768, 768), color=(24, 30, 40)).save(preview_projection_path)
+
+    capture = {
+        "status": "single_image_mock_capture",
+        "summary": "Mock fallback produced a single-image preview; multi-view capture QC is not available in this lane.",
+        "frame_count": 1,
+        "minimum_images": 1,
+        "recommended_images": 1,
+        "warnings": [
+            "This preview was generated from a mock fallback path.",
+            "Treat this output as a local contract proof, not a faithful world reconstruction.",
+        ],
+    }
+    holdout = {
+        "available": False,
+        "passed": False,
+        "summary": "No holdout renders were produced for the mock fallback preview.",
+    }
+    comparison = {
+        "benchmark_status": "not_benchmarked",
+        "benchmarked": False,
+        "summary": "Mock fallback previews are not benchmarked against the locked real-space suite.",
+    }
+    metadata = {
+        "generator": "gauset-local-backend",
+        "lane": "preview",
+        "truth_label": "Instant Preview",
+        "quality_tier": "single_image_preview_mock",
+        "execution_mode": "mock",
+        "faithfulness": "synthetic",
+        "model": "ml-sharp-mock",
+        "note": "mock fallback",
+        "preview_projection": preview_projection_path.name,
+        "point_count": len(mock_points),
+        "capture": capture,
+        "holdout": holdout,
+        "comparison": comparison,
+        "rendering": {
+            "viewer_renderer": "sharp_gaussian_direct",
+            "source_format": "mock_ascii_ply",
+            "has_explicit_vertex_colors": True,
+        },
+        "delivery": {
+            "ready": False,
+            "summary": "Mock fallback output is suitable for local backend proof only.",
+        },
+    }
+    (output_dir / "metadata.json").write_text(json.dumps(metadata, indent=2))
+    (output_dir / "capture-scorecard.json").write_text(json.dumps(capture, indent=2))
+    (output_dir / "holdout-report.json").write_text(json.dumps(holdout, indent=2))
+    (output_dir / "benchmark-report.json").write_text(json.dumps(comparison, indent=2))
 
 
 def _run_ml_sharp_predict(image_path: Path, staging_dir: Path) -> Path:
@@ -564,6 +643,6 @@ def generate_environment(image_path: str, output_dir: str) -> str:
             ) from exc
 
         print(f"[ML-Sharp] Falling back to mock output: {exc}")
-        _write_mock_environment(final_output_dir)
+        _write_mock_environment(final_output_dir, input_image)
 
     return str(final_output_dir)
