@@ -1,185 +1,30 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useMemo, useRef, useSyncExternalStore } from "react";
+
 import LeftPanel from "@/components/Editor/LeftPanel";
 import ViewerPanel from "@/components/Editor/ViewerPanel";
 import RightPanel from "@/components/Editor/RightPanel";
-import { MVP_API_BASE_URL, toProxyUrl } from "@/lib/mvp-api";
-import { resolveEnvironmentRenderState } from "@/lib/mvp-product";
+import { normalizeWorkspaceSceneGraph } from "@/lib/mvp-workspace";
+import { createEmptySceneDocumentWorkspaceGraph, mergeWorkspaceSceneGraphIntoSceneDocument } from "@/lib/scene-graph/document";
+import { migrateSceneGraphToSceneDocument } from "@/lib/scene-graph/migrate";
+import type { SceneDocumentV2 } from "@/lib/scene-graph/types";
+import { normalizePersistedSceneGraph, serializeSceneDocumentToPersistedSceneGraph } from "@/lib/scene-graph/workspaceAdapter";
+import { createMvpEditorSessionStore } from "@/state/mvpEditorSessionStore";
+import { selectRenderableSceneDocument } from "@/state/mvpSceneSelectors";
+import type { MvpSceneDraftTransformMap } from "@/state/mvpSceneStore";
+import { createMvpSceneStore } from "@/state/mvpSceneStore";
+
 import MVPClarityLaunchpad from "./_components/MVPClarityLaunchpad";
-import { MvpActivityEntry, buildChangeSummary, createActivityEntry, createDemoWorldPreset } from "./_lib/clarity";
-import { trackMvpEvent } from "./_lib/analytics";
+import { useMvpWorkspaceShellController } from "./_hooks/useMvpWorkspaceShellController";
 
-const LOCAL_DRAFT_KEY = "gauset:mvp:draft:v1";
-const MVP_WORKSPACE_SHELL_LOCK_VERSION = "2026-03-11";
-const HUD_LAYOUT_STORAGE_KEY_PREFIX = `gauset:mvp:hud:${MVP_WORKSPACE_SHELL_LOCK_VERSION}`;
-const AUTOSAVE_DEBOUNCE_MS = 1500;
-const PROGRAMMATIC_CHANGE_RESET_MS = 80;
-const HUD_RAIL_EXPANDED_WIDTH_CLASS = "w-80";
-const HUD_RAIL_COLLAPSED_WIDTH_CLASS = "w-14";
-
-type SaveState = "idle" | "saving" | "saved" | "recovered" | "error";
-type WorkspaceEntryMode = "launchpad" | "workspace";
 type MvpRouteVariant = "workspace" | "preview";
 
-interface WorkspaceHudState {
-    leftRailCollapsed: boolean;
-    rightRailCollapsed: boolean;
-    directorHudCompact: boolean;
-}
+const leftRailClassName = (collapsed: boolean) =>
+    collapsed ? "h-14 w-full lg:h-full lg:w-14" : "h-[24rem] w-full lg:h-full lg:w-80";
 
-interface SceneVersion {
-    version_id: string;
-    saved_at: string;
-    source?: string;
-    summary?: {
-        asset_count?: number;
-        has_environment?: boolean;
-    };
-}
-
-interface StoredDraft {
-    activeScene: string | null;
-    sceneGraph: any;
-    assetsList: any[];
-    updatedAt?: string | null;
-}
-
-interface StepStatus {
-    busy: boolean;
-    label: string;
-    detail?: string;
-}
-
-interface GenerationTelemetry {
-    kind: "environment" | "asset";
-    label: string;
-    detail?: string;
-    inputLabel?: string;
-    sceneId?: string;
-    assetId?: string;
-    sceneGraph?: any;
-}
-
-const createSceneId = () => `scene_${Date.now().toString(36)}`;
-
-const hasTextContent = (value: unknown) => typeof value === "string" && value.trim().length > 0;
-
-const shouldKeepEnvironment = (environment: any) => {
-    if (!environment || typeof environment !== "object") {
-        return false;
-    }
-
-    const renderState = resolveEnvironmentRenderState(environment);
-    return (
-        renderState.hasRenderableOutput ||
-        Boolean(renderState.referenceImage) ||
-        hasTextContent(environment?.sourceLabel) ||
-        hasTextContent(environment?.statusLabel) ||
-        hasTextContent(environment?.label) ||
-        hasTextContent(environment?.lane) ||
-        hasTextContent(environment?.metadata?.truth_label) ||
-        hasTextContent(environment?.metadata?.reconstruction_status)
-    );
-};
-
-const normalizeEnvironmentResourceUrls = (environment: any) => {
-    if (!environment || typeof environment !== "object") {
-        return environment ?? null;
-    }
-
-    const urls = environment.urls && typeof environment.urls === "object" ? environment.urls : null;
-    const normalized = {
-        ...environment,
-        ...(urls
-            ? {
-                  urls: {
-                      ...urls,
-                      viewer: typeof urls.viewer === "string" ? toProxyUrl(urls.viewer) : urls.viewer,
-                      splats: typeof urls.splats === "string" ? toProxyUrl(urls.splats) : urls.splats,
-                      cameras: typeof urls.cameras === "string" ? toProxyUrl(urls.cameras) : urls.cameras,
-                      metadata: typeof urls.metadata === "string" ? toProxyUrl(urls.metadata) : urls.metadata,
-                      preview_projection:
-                          typeof urls.preview_projection === "string" ? toProxyUrl(urls.preview_projection) : urls.preview_projection,
-                      holdout_report: typeof urls.holdout_report === "string" ? toProxyUrl(urls.holdout_report) : urls.holdout_report,
-                      capture_scorecard:
-                          typeof urls.capture_scorecard === "string" ? toProxyUrl(urls.capture_scorecard) : urls.capture_scorecard,
-                      benchmark_report:
-                          typeof urls.benchmark_report === "string" ? toProxyUrl(urls.benchmark_report) : urls.benchmark_report,
-                  },
-              }
-            : {}),
-    };
-
-    return shouldKeepEnvironment(normalized) ? normalized : null;
-};
-
-const normalizeAssetEntries = (assets: any[]) =>
-    assets.map((asset) =>
-        asset && typeof asset === "object"
-            ? {
-                  ...asset,
-                  mesh: typeof asset.mesh === "string" ? toProxyUrl(asset.mesh) : asset.mesh,
-                  texture: typeof asset.texture === "string" ? toProxyUrl(asset.texture) : asset.texture,
-                  preview: typeof asset.preview === "string" ? toProxyUrl(asset.preview) : asset.preview,
-              }
-            : asset,
-    );
-
-const normalizeSceneGraph = (sceneGraph: any) => ({
-    environment: normalizeEnvironmentResourceUrls(sceneGraph?.environment),
-    assets: Array.isArray(sceneGraph?.assets) ? normalizeAssetEntries(sceneGraph.assets) : [],
-    sceneDirectionNote: typeof sceneGraph?.sceneDirectionNote === "string" ? sceneGraph.sceneDirectionNote : "",
-});
-
-const hasSceneContent = (sceneGraph: any) => {
-    const normalized = normalizeSceneGraph(sceneGraph);
-    return (
-        normalized.assets.length > 0 ||
-        (normalized.environment ? resolveEnvironmentRenderState(normalized.environment).hasRenderableOutput || Boolean(resolveEnvironmentRenderState(normalized.environment).referenceImage) : false)
-    );
-};
-
-const formatTimestamp = (value?: string | null) => {
-    if (!value) return "";
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return "";
-    return date.toLocaleString([], {
-        hour: "numeric",
-        minute: "2-digit",
-        month: "short",
-        day: "numeric",
-    });
-};
-
-const createDefaultHudState = (routeVariant: MvpRouteVariant): WorkspaceHudState =>
-    routeVariant === "preview"
-        ? {
-              leftRailCollapsed: true,
-              rightRailCollapsed: true,
-              directorHudCompact: true,
-          }
-        : {
-              leftRailCollapsed: false,
-              rightRailCollapsed: false,
-              directorHudCompact: false,
-          };
-
-const normalizeHudState = (routeVariant: MvpRouteVariant, value: unknown): WorkspaceHudState => {
-    const fallback = createDefaultHudState(routeVariant);
-    if (!value || typeof value !== "object") {
-        return fallback;
-    }
-
-    const input = value as Partial<WorkspaceHudState>;
-    return {
-        leftRailCollapsed: typeof input.leftRailCollapsed === "boolean" ? input.leftRailCollapsed : fallback.leftRailCollapsed,
-        rightRailCollapsed: typeof input.rightRailCollapsed === "boolean" ? input.rightRailCollapsed : fallback.rightRailCollapsed,
-        directorHudCompact: typeof input.directorHudCompact === "boolean" ? input.directorHudCompact : fallback.directorHudCompact,
-    };
-};
-
-const hudStorageKey = (routeVariant: MvpRouteVariant) => `${HUD_LAYOUT_STORAGE_KEY_PREFIX}:${routeVariant}`;
+const rightRailClassName = (collapsed: boolean) =>
+    collapsed ? "h-14 w-full lg:h-full lg:w-14" : "h-[28rem] w-full lg:h-full lg:w-80";
 
 export default function MVPRouteClient({
     clarityMode = false,
@@ -188,583 +33,78 @@ export default function MVPRouteClient({
     clarityMode?: boolean;
     routeVariant?: MvpRouteVariant;
 }) {
-    const demoPreset = useMemo(() => createDemoWorldPreset(), []);
-    const flowName = clarityMode ? "clarity_preview" : "classic";
-
-    const [entryMode, setEntryMode] = useState<WorkspaceEntryMode>(clarityMode ? "launchpad" : "workspace");
-    const [activeScene, setActiveScene] = useState<string | null>(null);
-    const [sceneGraph, setSceneGraph] = useState<any>(() => normalizeSceneGraph({ environment: null, assets: [] }));
-    const [assetsList, setAssetsList] = useState<any[]>([]);
-    const [saveState, setSaveState] = useState<SaveState>("idle");
-    const [saveMessage, setSaveMessage] = useState(
-        clarityMode ? "Open the demo world or upload a still to begin." : "Scene is empty.",
-    );
-    const [saveError, setSaveError] = useState("");
-    const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
-    const [versions, setVersions] = useState<SceneVersion[]>([]);
-    const [storedDraft, setStoredDraft] = useState<StoredDraft | null>(null);
-    const [stepStatus, setStepStatus] = useState<StepStatus | null>(null);
-    const [activityLog, setActivityLog] = useState<MvpActivityEntry[]>([]);
-    const [currentInputLabel, setCurrentInputLabel] = useState<string | null>(null);
-    const [lastOutputInputLabel, setLastOutputInputLabel] = useState<string | null>(null);
-    const [lastOutputSceneGraph, setLastOutputSceneGraph] = useState<any | null>(null);
-    const [lastOutputLabel, setLastOutputLabel] = useState("No world output yet");
-    const [hudState, setHudState] = useState<WorkspaceHudState>(() => createDefaultHudState(routeVariant));
-
-    const hasHydratedRef = useRef(false);
-    const hudHydratedRef = useRef(false);
-    const lastSavedFingerprintRef = useRef("");
-    const versionsRequestRef = useRef(0);
-    const saveInFlightRef = useRef<Promise<any> | null>(null);
-    const programmaticSceneChangeRef = useRef(false);
-    const previousSceneFingerprintRef = useRef("");
-    const sessionAnalyticsRef = useRef({
-        firstEdit: false,
-        firstGenerate: false,
-        firstSuccess: false,
+    const sceneStoreRef = useRef(createMvpSceneStore(migrateSceneGraphToSceneDocument(createEmptySceneDocumentWorkspaceGraph())));
+    const editorSessionStoreRef = useRef(createMvpEditorSessionStore());
+    const sceneStoreActions = useMemo(() => sceneStoreRef.current.getState().actions, []);
+    const editorSessionActions = useMemo(() => editorSessionStoreRef.current.getState().actions, []);
+    const renderSceneDocumentSnapshotRef = useRef<{
+        document: SceneDocumentV2;
+        draftTransforms: MvpSceneDraftTransformMap;
+        snapshot: SceneDocumentV2;
+    }>({
+        document: sceneStoreRef.current.getState().document,
+        draftTransforms: sceneStoreRef.current.getState().draftTransforms,
+        snapshot: sceneStoreRef.current.getState().document,
     });
 
-    const sceneFingerprint = useMemo(
-        () => JSON.stringify({ activeScene, sceneGraph: normalizeSceneGraph(sceneGraph), assetsList, currentInputLabel }),
-        [activeScene, assetsList, currentInputLabel, sceneGraph],
-    );
-
-    const appendActivity = useCallback((label: string, detail: string, tone: MvpActivityEntry["tone"] = "neutral") => {
-        setActivityLog((prev) => [createActivityEntry(label, detail, tone), ...prev].slice(0, 8));
-    }, []);
-
-    const markProgrammaticSceneChange = useCallback(() => {
-        programmaticSceneChangeRef.current = true;
-        window.setTimeout(() => {
-            programmaticSceneChangeRef.current = false;
-        }, PROGRAMMATIC_CHANGE_RESET_MS);
-    }, []);
-
-    const registerFirstEdit = useCallback(
-        (surface: string) => {
-            if (sessionAnalyticsRef.current.firstEdit) return;
-            sessionAnalyticsRef.current.firstEdit = true;
-            trackMvpEvent("mvp_first_edit", {
-                flow: flowName,
-                surface,
-            });
-            appendActivity("First edit", `Changed ${surface} after the current output loaded.`, "info");
-        },
-        [appendActivity, flowName],
-    );
-
-    const loadVersions = useCallback(async (sceneId: string) => {
-        const requestId = ++versionsRequestRef.current;
-        try {
-            const response = await fetch(`${MVP_API_BASE_URL}/scene/${sceneId}/versions`, {
-                cache: "no-store",
-            });
-            if (!response.ok) {
-                throw new Error(`Version history unavailable (${response.status})`);
-            }
-            const payload = await response.json();
-            if (versionsRequestRef.current === requestId) {
-                setVersions(Array.isArray(payload.versions) ? payload.versions : []);
-            }
-        } catch {
-            if (versionsRequestRef.current === requestId) {
-                setVersions([]);
-            }
-        }
-    }, []);
-
-    const applyWorkspaceSnapshot = useCallback(
-        (
-            snapshot: {
-                activeScene: string | null;
-                sceneGraph: any;
-                assetsList: any[];
-                saveState: SaveState;
-                saveMessage: string;
-                currentInputLabel?: string | null;
-                lastSavedAt?: string | null;
-                lastOutputLabel?: string;
-                lastOutputAt?: string | null;
-            },
-            options?: {
-                keepAsLastOutput?: boolean;
-            },
-        ) => {
-            const normalizedSceneGraph = normalizeSceneGraph(snapshot.sceneGraph);
-            const normalizedAssetsList = normalizeAssetEntries(Array.isArray(snapshot.assetsList) ? snapshot.assetsList : []);
-            markProgrammaticSceneChange();
-            setActiveScene(snapshot.activeScene);
-            setSceneGraph(normalizedSceneGraph);
-            setAssetsList(normalizedAssetsList);
-            setVersions([]);
-            setSaveState(snapshot.saveState);
-            setSaveError("");
-            setSaveMessage(snapshot.saveMessage);
-            setLastSavedAt(snapshot.lastSavedAt ?? null);
-            setCurrentInputLabel(snapshot.currentInputLabel ?? null);
-            setLastOutputLabel(snapshot.lastOutputLabel ?? "Current workspace");
-            setEntryMode("workspace");
-
-            if (options?.keepAsLastOutput) {
-                setLastOutputSceneGraph(normalizedSceneGraph);
-                setLastOutputInputLabel(snapshot.currentInputLabel ?? null);
-                lastSavedFingerprintRef.current = JSON.stringify({
-                    activeScene: snapshot.activeScene,
-                    sceneGraph: normalizedSceneGraph,
-                    assetsList: normalizedAssetsList,
-                });
-            } else {
-                setLastOutputSceneGraph(null);
-                setLastOutputInputLabel(null);
-                lastSavedFingerprintRef.current = "";
-            }
-        },
-        [markProgrammaticSceneChange],
-    );
-
-    const openDemoWorld = useCallback(() => {
-        applyWorkspaceSnapshot(
-            {
-                activeScene: null,
-                sceneGraph: demoPreset.sceneGraph,
-                assetsList: demoPreset.assetsList,
-                saveState: "recovered",
-                saveMessage: "Demo world loaded. Change the scene direction note or export a version when you are ready.",
-                currentInputLabel: demoPreset.inputLabel,
-                lastOutputLabel: "Demo world",
-                lastOutputAt: new Date().toISOString(),
-            },
-            { keepAsLastOutput: true },
-        );
-
-        setStepStatus(null);
-        appendActivity("Demo world opened", "Loaded a sample world so persistence is visible immediately.", "info");
-        trackMvpEvent("mvp_demo_open", { flow: flowName });
-    }, [appendActivity, applyWorkspaceSnapshot, demoPreset, flowName]);
-
-    const startBlankWorkspace = useCallback(() => {
-        applyWorkspaceSnapshot(
-            {
-                activeScene: null,
-                sceneGraph: { environment: null, assets: [], sceneDirectionNote: "" },
-                assetsList: [],
-                saveState: "idle",
-                saveMessage: "Upload one still to build your first persistent world.",
-                currentInputLabel: null,
-                lastOutputLabel: "No world output yet",
-                lastOutputAt: null,
-            },
-            { keepAsLastOutput: false },
-        );
-        setStepStatus(null);
-        appendActivity("Workspace ready", "Upload one still or return to the demo world.", "neutral");
-    }, [appendActivity, applyWorkspaceSnapshot]);
-
-    const resumeStoredDraft = useCallback(() => {
-        if (!storedDraft) {
-            startBlankWorkspace();
-            return;
+    const getRenderableSceneDocumentSnapshot = useCallback(() => {
+        const state = sceneStoreRef.current.getState();
+        const cached = renderSceneDocumentSnapshotRef.current;
+        if (cached.document === state.document && cached.draftTransforms === state.draftTransforms) {
+            return cached.snapshot;
         }
 
-        applyWorkspaceSnapshot(
-            {
-                activeScene: storedDraft.activeScene,
-                sceneGraph: storedDraft.sceneGraph,
-                assetsList: storedDraft.assetsList,
-                saveState: "recovered",
-                saveMessage: storedDraft.updatedAt
-                    ? `Recovered local draft from ${formatTimestamp(storedDraft.updatedAt)}`
-                    : "Recovered local draft.",
-                currentInputLabel:
-                    typeof storedDraft.sceneGraph?.environment?.sourceLabel === "string"
-                        ? storedDraft.sceneGraph.environment.sourceLabel
-                        : null,
-                lastSavedAt: null,
-                lastOutputLabel: "Recovered draft",
-                lastOutputAt: storedDraft.updatedAt ?? null,
-            },
-            { keepAsLastOutput: false },
-        );
-        appendActivity("Draft resumed", "Recovered the last local /mvp draft.", "info");
-    }, [applyWorkspaceSnapshot, startBlankWorkspace, storedDraft, appendActivity]);
+        const snapshot = selectRenderableSceneDocument(state);
+        renderSceneDocumentSnapshotRef.current = {
+            document: state.document,
+            draftTransforms: state.draftTransforms,
+            snapshot,
+        };
+        return snapshot;
+    }, []);
 
-    const saveScene = useCallback(
-        async (source: "manual" | "autosave" = "manual") => {
-            const nextSceneId = activeScene ?? createSceneId();
-            const normalizedSceneGraph = normalizeSceneGraph(sceneGraph);
-
-            if (!hasSceneContent(normalizedSceneGraph)) {
-                setSaveState("idle");
-                setSaveError("");
-                setSaveMessage(
-                    clarityMode ? "Open the demo world or build your own world before saving." : "Scene is empty.",
-                );
-                return null;
-            }
-
-            setSaveState("saving");
-            setSaveError("");
-            setSaveMessage(source === "autosave" ? "Autosaving scene..." : "Saving scene...");
-
-            const request = fetch(`${MVP_API_BASE_URL}/scene/save`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    scene_id: nextSceneId,
-                    scene_graph: normalizedSceneGraph,
-                    source,
-                }),
-            })
-                .then(async (response) => {
-                    if (!response.ok) {
-                        throw new Error(`Scene save failed (${response.status})`);
-                    }
-
-                    const payload = await response.json();
-                    const savedAt = payload.saved_at ?? new Date().toISOString();
-                    setActiveScene(nextSceneId);
-                    setSaveState("saved");
-                    setSaveMessage(
-                        source === "autosave"
-                            ? `Autosaved ${formatTimestamp(savedAt)}`
-                            : `Saved ${nextSceneId} at ${formatTimestamp(savedAt)}`,
-                    );
-                    setLastSavedAt(savedAt);
-                    lastSavedFingerprintRef.current = JSON.stringify({
-                        activeScene: nextSceneId,
-                        sceneGraph: normalizedSceneGraph,
-                        assetsList,
-                    });
-                    void loadVersions(nextSceneId);
-                    if (source === "manual") {
-                        appendActivity("Version saved", "Saved the current world and scene direction state.", "success");
-                    }
-                    return payload;
-                })
-                .catch((error) => {
-                    const message = error instanceof Error ? error.message : "Scene save failed";
-                    setSaveState("error");
-                    setSaveError(message);
-                    setSaveMessage("Autosave failed.");
-                    return null;
-                })
-                .finally(() => {
-                    saveInFlightRef.current = null;
-                });
-
-            saveInFlightRef.current = request;
-            return request;
-        },
-        [activeScene, appendActivity, assetsList, clarityMode, loadVersions, sceneGraph],
+    const sceneDocument = useSyncExternalStore(
+        sceneStoreRef.current.subscribe,
+        getRenderableSceneDocumentSnapshot,
+        getRenderableSceneDocumentSnapshot,
     );
+    const sceneGraph = useMemo(() => serializeSceneDocumentToPersistedSceneGraph(sceneDocument), [sceneDocument]);
 
-    const restoreVersion = useCallback(
-        async (versionId: string) => {
-            if (!activeScene) return;
-
-            markProgrammaticSceneChange();
-            setSaveState("saving");
-            setSaveError("");
-            setSaveMessage("Restoring version...");
-
-            try {
-                const response = await fetch(`${MVP_API_BASE_URL}/scene/${activeScene}/versions/${versionId}`, {
-                    cache: "no-store",
-                });
-                if (!response.ok) {
-                    throw new Error(`Version restore failed (${response.status})`);
-                }
-
-                const payload = await response.json();
-                const restoredGraph = normalizeSceneGraph(payload.scene_graph ?? { environment: null, assets: [] });
-                setSceneGraph(restoredGraph);
-                setCurrentInputLabel(
-                    typeof restoredGraph.environment?.sourceLabel === "string" ? restoredGraph.environment.sourceLabel : null,
-                );
-                setSaveState("recovered");
-                setSaveMessage(`Restored version from ${formatTimestamp(payload.saved_at) || "history"}`);
-                setLastSavedAt(payload.saved_at ?? null);
-                setLastOutputSceneGraph(restoredGraph);
-                setLastOutputInputLabel(
-                    typeof restoredGraph.environment?.sourceLabel === "string" ? restoredGraph.environment.sourceLabel : null,
-                );
-                setLastOutputLabel("Restored version");
-                lastSavedFingerprintRef.current = "";
-                appendActivity("Version restored", "Loaded a saved world state back into the workspace.", "info");
-            } catch (error) {
-                const message = error instanceof Error ? error.message : "Version restore failed";
-                setSaveState("error");
-                setSaveError(message);
-                setSaveMessage("Version restore failed.");
-            }
-        },
-        [activeScene, appendActivity, markProgrammaticSceneChange],
-    );
-
-    useEffect(() => {
-        hasHydratedRef.current = true;
-        try {
-            const rawDraft = window.localStorage.getItem(LOCAL_DRAFT_KEY);
-            if (!rawDraft) return;
-            const draft = JSON.parse(rawDraft) as StoredDraft;
-            if (!draft || !draft.sceneGraph) return;
-
-            const restoredGraph = normalizeSceneGraph(draft.sceneGraph);
-            const restoredAssetsList = Array.isArray(draft.assetsList) ? normalizeAssetEntries(draft.assetsList) : [];
-            const restoredSceneId = typeof draft.activeScene === "string" ? draft.activeScene : null;
-
-            if (!hasSceneContent(restoredGraph) && restoredAssetsList.length === 0) return;
-
-            const nextDraft = {
-                activeScene: restoredSceneId,
-                sceneGraph: restoredGraph,
-                assetsList: restoredAssetsList,
-                updatedAt: draft.updatedAt,
-            };
-
-            window.localStorage.setItem(LOCAL_DRAFT_KEY, JSON.stringify(nextDraft));
-            setStoredDraft(nextDraft);
-
-            if (!clarityMode) {
-                setActiveScene(restoredSceneId);
-                setSceneGraph(restoredGraph);
-                setAssetsList(restoredAssetsList);
-                setCurrentInputLabel(
-                    typeof restoredGraph.environment?.sourceLabel === "string" ? restoredGraph.environment.sourceLabel : null,
-                );
-                setSaveState("recovered");
-                setSaveMessage(
-                    draft.updatedAt
-                        ? `Recovered local draft from ${formatTimestamp(draft.updatedAt)}`
-                        : "Recovered local draft.",
-                );
-                if (restoredSceneId) {
-                    void loadVersions(restoredSceneId);
-                }
-            }
-        } catch {
-            window.localStorage.removeItem(LOCAL_DRAFT_KEY);
-        }
-    }, [clarityMode, loadVersions]);
-
-    useEffect(() => {
-        try {
-            const rawHudState = window.localStorage.getItem(hudStorageKey(routeVariant));
-            if (!rawHudState) {
-                setHudState(createDefaultHudState(routeVariant));
+    const setSceneGraph = useCallback<React.Dispatch<React.SetStateAction<any>>>(
+        (updater) => {
+            if (typeof updater !== "function") {
+                sceneStoreActions.loadSceneGraph(normalizePersistedSceneGraph(updater));
                 return;
             }
-            setHudState(normalizeHudState(routeVariant, JSON.parse(rawHudState)));
-        } catch {
-            setHudState(createDefaultHudState(routeVariant));
-        } finally {
-            hudHydratedRef.current = true;
-        }
-    }, [routeVariant]);
 
-    useEffect(() => {
-        if (!hudHydratedRef.current) {
-            return;
-        }
-        try {
-            window.localStorage.setItem(hudStorageKey(routeVariant), JSON.stringify(hudState));
-        } catch {
-            // Ignore local storage failures so the workspace stays usable.
-        }
-    }, [hudState, routeVariant]);
-
-    useEffect(() => {
-        if (!activeScene) {
-            setVersions([]);
-            return;
-        }
-        void loadVersions(activeScene);
-    }, [activeScene, loadVersions]);
-
-    useEffect(() => {
-        if (!hasHydratedRef.current || entryMode !== "workspace") return;
-        window.localStorage.setItem(
-            LOCAL_DRAFT_KEY,
-            JSON.stringify({
-                activeScene,
-                sceneGraph: normalizeSceneGraph(sceneGraph),
-                assetsList: normalizeAssetEntries(assetsList),
-                updatedAt: new Date().toISOString(),
-            }),
-        );
-    }, [activeScene, assetsList, entryMode, sceneGraph]);
-
-    useEffect(() => {
-        if (!hasHydratedRef.current || entryMode !== "workspace") return;
-        if (!hasSceneContent(sceneGraph)) return;
-        if (sceneFingerprint === lastSavedFingerprintRef.current) return;
-        if (saveInFlightRef.current) return;
-
-        const timer = window.setTimeout(() => {
-            void saveScene("autosave");
-        }, AUTOSAVE_DEBOUNCE_MS);
-
-        return () => window.clearTimeout(timer);
-    }, [entryMode, saveScene, sceneFingerprint, sceneGraph]);
-
-    useEffect(() => {
-        trackMvpEvent("mvp_landed", {
-            flow: flowName,
-            entry_mode: clarityMode ? "launchpad" : "workspace",
-        });
-    }, [clarityMode, flowName]);
-
-    useEffect(() => {
-        const handlePageHide = () => {
-            if (sessionAnalyticsRef.current.firstSuccess) return;
-            trackMvpEvent("mvp_abandonment", {
-                flow: flowName,
-                entry_mode: entryMode,
-                had_content: hasSceneContent(sceneGraph),
-            });
-        };
-
-        window.addEventListener("pagehide", handlePageHide);
-        return () => {
-            window.removeEventListener("pagehide", handlePageHide);
-        };
-    }, [entryMode, flowName, sceneGraph]);
-
-    const handleInputReady = useCallback(
-        (inputLabel: string) => {
-            setCurrentInputLabel(inputLabel);
-            appendActivity("Reference still ready", `${inputLabel} is ready to build a persistent world.`, "info");
+            const previousSceneGraph = serializeSceneDocumentToPersistedSceneGraph(getRenderableSceneDocumentSnapshot());
+            const nextSceneGraph = normalizeWorkspaceSceneGraph(normalizePersistedSceneGraph(updater(previousSceneGraph)));
+            const mergedDocument = mergeWorkspaceSceneGraphIntoSceneDocument(
+                sceneStoreRef.current.getState().document,
+                nextSceneGraph,
+            );
+            sceneStoreActions.loadDocument(mergedDocument);
         },
-        [appendActivity],
+        [getRenderableSceneDocumentSnapshot, sceneStoreActions],
     );
 
-    const handleGenerationStart = useCallback(
-        (event: GenerationTelemetry) => {
-            setStepStatus({
-                busy: true,
-                label: event.label,
-                detail: event.detail,
-            });
-            appendActivity(event.label, event.detail ?? "Generation started.", "info");
+    const workspace = useMvpWorkspaceShellController({
+        clarityMode,
+        routeVariant,
+        sceneStore: sceneStoreRef.current,
+        sceneGraph,
+        getRenderableSceneDocumentSnapshot,
+        editorSessionActions,
+    });
 
-            if (!sessionAnalyticsRef.current.firstGenerate) {
-                sessionAnalyticsRef.current.firstGenerate = true;
-                trackMvpEvent("mvp_first_generate", {
-                    flow: flowName,
-                    kind: event.kind,
-                    input_label: event.inputLabel ?? currentInputLabel ?? "",
-                });
-            }
-        },
-        [appendActivity, currentInputLabel, flowName],
-    );
-
-    const handleGenerationSuccess = useCallback(
-        (event: GenerationTelemetry) => {
-            const nextSceneGraph = normalizeSceneGraph(event.sceneGraph ?? sceneGraph);
-            const detail = event.detail ?? "The current output is ready.";
-            setStepStatus({
-                busy: false,
-                label: event.label,
-                detail,
-            });
-            setLastOutputSceneGraph(nextSceneGraph);
-            setLastOutputLabel(event.label);
-            setLastOutputInputLabel(event.inputLabel ?? currentInputLabel ?? null);
-            appendActivity(event.label, detail, "success");
-
-            if (!sessionAnalyticsRef.current.firstSuccess) {
-                sessionAnalyticsRef.current.firstSuccess = true;
-                trackMvpEvent("mvp_first_success", {
-                    flow: flowName,
-                    kind: event.kind,
-                    input_label: event.inputLabel ?? currentInputLabel ?? "",
-                });
-            }
-        },
-        [appendActivity, currentInputLabel, flowName, sceneGraph],
-    );
-
-    const handleGenerationError = useCallback(
-        (event: Pick<GenerationTelemetry, "label" | "detail">) => {
-            setStepStatus({
-                busy: false,
-                label: event.label,
-                detail: event.detail,
-            });
-            appendActivity(event.label, event.detail ?? "Generation failed.", "warning");
-        },
-        [appendActivity],
-    );
-
-    useEffect(() => {
-        if (!stepStatus || stepStatus.busy) return;
-        const timer = window.setTimeout(() => setStepStatus(null), 4000);
-        return () => window.clearTimeout(timer);
-    }, [stepStatus]);
-
-    const changeSummary = useMemo(
-        () => buildChangeSummary(normalizeSceneGraph(sceneGraph), lastOutputSceneGraph, currentInputLabel, lastOutputInputLabel),
-        [currentInputLabel, lastOutputInputLabel, lastOutputSceneGraph, sceneGraph],
-    );
-
-    useEffect(() => {
-        if (!hasHydratedRef.current) {
-            previousSceneFingerprintRef.current = sceneFingerprint;
-            return;
-        }
-        if (programmaticSceneChangeRef.current) {
-            previousSceneFingerprintRef.current = sceneFingerprint;
-            return;
-        }
-        if (!changeSummary) {
-            previousSceneFingerprintRef.current = sceneFingerprint;
-            return;
-        }
-        if (sceneFingerprint === previousSceneFingerprintRef.current) return;
-
-        previousSceneFingerprintRef.current = sceneFingerprint;
-        registerFirstEdit(changeSummary.sceneDirection.length > 0 ? "scene direction" : "world state");
-    }, [changeSummary, registerFirstEdit, sceneFingerprint]);
-
-    const handleExport = useCallback(() => {
-        trackMvpEvent("mvp_export", {
-            flow: flowName,
-            active_scene: activeScene ?? "",
-            last_output_label: lastOutputLabel,
-        });
-        appendActivity("Scene package exported", "Exported the current world and scene direction package.", "success");
-    }, [activeScene, appendActivity, flowName, lastOutputLabel]);
-
-    const toggleLeftRail = useCallback(() => {
-        setHudState((previous) => ({
-            ...previous,
-            leftRailCollapsed: !previous.leftRailCollapsed,
-        }));
-    }, []);
-
-    const toggleRightRail = useCallback(() => {
-        setHudState((previous) => ({
-            ...previous,
-            rightRailCollapsed: !previous.rightRailCollapsed,
-        }));
-    }, []);
-
-    const toggleDirectorHud = useCallback(() => {
-        setHudState((previous) => ({
-            ...previous,
-            directorHudCompact: !previous.directorHudCompact,
-        }));
-    }, []);
-
-    if (clarityMode && entryMode === "launchpad") {
+    if (workspace.showLaunchpad) {
         return (
             <MVPClarityLaunchpad
-                draftUpdatedAt={storedDraft?.updatedAt ?? null}
-                hasDraft={Boolean(storedDraft)}
-                onOpenDemoWorld={openDemoWorld}
-                onResumeDraft={resumeStoredDraft}
-                onStartBlank={startBlankWorkspace}
+                draftUpdatedAt={workspace.draftUpdatedAt}
+                hasDraft={workspace.hasDraft}
+                onOpenDemoWorld={workspace.openDemoWorld}
+                onResumeDraft={workspace.resumeStoredDraft}
+                onStartBlank={workspace.startBlankWorkspace}
             />
         );
     }
@@ -784,15 +124,16 @@ export default function MVPRouteClient({
                         <div className="flex flex-wrap gap-2">
                             <button
                                 type="button"
-                                onClick={openDemoWorld}
+                                onClick={workspace.openDemoWorld}
                                 className="rounded-full bg-white px-4 py-2 text-xs font-medium text-black transition-colors hover:bg-neutral-200"
                             >
                                 Open demo world
                             </button>
                             <button
                                 type="button"
-                                onClick={() => setEntryMode("launchpad")}
+                                onClick={workspace.returnToLaunchpad}
                                 className="rounded-full border border-neutral-700 bg-neutral-900 px-4 py-2 text-xs font-medium text-white transition-colors hover:border-neutral-500"
+                                data-testid="mvp-preview-back-to-start"
                             >
                                 Back to preview intro
                             </button>
@@ -815,20 +156,21 @@ export default function MVPRouteClient({
                 </div>
             ) : null}
 
-            <div className="flex min-h-0 flex-1 overflow-hidden">
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden lg:flex-row">
                 <div
-                    className={`z-10 flex h-full flex-col border-r border-neutral-800 bg-neutral-950 shadow-2xl transition-[width] duration-200 ${
-                        hudState.leftRailCollapsed ? HUD_RAIL_COLLAPSED_WIDTH_CLASS : HUD_RAIL_EXPANDED_WIDTH_CLASS
+                    className={`z-10 flex shrink-0 flex-col border-b border-neutral-800 bg-neutral-950 shadow-2xl transition-[width,height] duration-200 lg:border-b-0 lg:border-r ${
+                        leftRailClassName(workspace.hudState.leftRailCollapsed)
                     }`}
                 >
-                    {hudState.leftRailCollapsed ? (
+                    {workspace.hudState.leftRailCollapsed ? (
                         <button
                             type="button"
-                            onClick={toggleLeftRail}
-                            className="flex h-full w-full flex-col items-center justify-center gap-4 px-2 text-center text-white transition-colors hover:bg-neutral-900"
+                            onClick={workspace.toggleLeftRail}
+                            className="flex h-full w-full items-center justify-between gap-4 px-4 text-center text-white transition-colors hover:bg-neutral-900 lg:flex-col lg:justify-center lg:px-2"
                             aria-label="Show left HUD"
                         >
-                            <span className="text-[10px] uppercase tracking-[0.3em] text-cyan-200/65 [writing-mode:vertical-rl] rotate-180">Capture HUD</span>
+                            <span className="text-[10px] uppercase tracking-[0.3em] text-cyan-200/65 lg:hidden">Capture HUD</span>
+                            <span className="hidden text-[10px] uppercase tracking-[0.3em] text-cyan-200/65 [writing-mode:vertical-rl] rotate-180 lg:inline">Capture HUD</span>
                             <span className="rounded-full border border-neutral-800 bg-neutral-900 px-2 py-1 text-[10px] uppercase tracking-[0.18em] text-neutral-200">Expand</span>
                         </button>
                     ) : (
@@ -840,7 +182,7 @@ export default function MVPRouteClient({
                                 </div>
                                 <button
                                     type="button"
-                                    onClick={toggleLeftRail}
+                                    onClick={workspace.toggleLeftRail}
                                     className="rounded-full border border-neutral-800 bg-neutral-900 px-3 py-1.5 text-[11px] text-white transition-colors hover:border-neutral-700 hover:text-neutral-100"
                                 >
                                     Hide
@@ -849,49 +191,50 @@ export default function MVPRouteClient({
                             <div className="min-h-0 flex-1 overflow-hidden">
                                 <LeftPanel
                                     clarityMode={clarityMode}
-                                    setActiveScene={setActiveScene}
+                                    setActiveScene={workspace.setActiveScene}
                                     setSceneGraph={setSceneGraph}
-                                    setAssetsList={setAssetsList}
-                                    onProgrammaticSceneChange={markProgrammaticSceneChange}
-                                    onInputReady={handleInputReady}
-                                    onGenerationStart={handleGenerationStart}
-                                    onGenerationSuccess={handleGenerationSuccess}
-                                    onGenerationError={handleGenerationError}
+                                    setAssetsList={workspace.setAssetsList}
+                                    onProgrammaticSceneChange={workspace.markProgrammaticSceneChange}
+                                    onInputReady={workspace.handleInputReady}
+                                    onGenerationStart={workspace.handleGenerationStart}
+                                    onGenerationSuccess={workspace.handleGenerationSuccess}
+                                    onGenerationError={workspace.handleGenerationError}
                                 />
                             </div>
                         </>
                     )}
                 </div>
 
-                <div className="relative z-0 flex-1">
+                <div className="relative z-0 min-h-[24rem] flex-1 lg:min-h-0">
                     <ViewerPanel
                         clarityMode={clarityMode}
                         routeVariant={routeVariant}
-                        leftHudCollapsed={hudState.leftRailCollapsed}
-                        rightHudCollapsed={hudState.rightRailCollapsed}
-                        directorHudCompact={hudState.directorHudCompact}
-                        onToggleLeftHud={toggleLeftRail}
-                        onToggleRightHud={toggleRightRail}
-                        onToggleDirectorHud={toggleDirectorHud}
-                        processingStatus={stepStatus}
+                        leftHudCollapsed={workspace.hudState.leftRailCollapsed}
+                        rightHudCollapsed={workspace.hudState.rightRailCollapsed}
+                        directorHudCompact={workspace.hudState.directorHudCompact}
+                        onToggleLeftHud={workspace.toggleLeftRail}
+                        onToggleRightHud={workspace.toggleRightRail}
+                        onToggleDirectorHud={workspace.toggleDirectorHud}
+                        processingStatus={workspace.stepStatus}
                         sceneGraph={sceneGraph}
                         setSceneGraph={setSceneGraph}
                     />
                 </div>
 
                 <div
-                    className={`z-10 flex h-full flex-col border-l border-neutral-800 bg-neutral-950 shadow-2xl transition-[width] duration-200 ${
-                        hudState.rightRailCollapsed ? HUD_RAIL_COLLAPSED_WIDTH_CLASS : HUD_RAIL_EXPANDED_WIDTH_CLASS
+                    className={`z-10 flex shrink-0 flex-col border-t border-neutral-800 bg-neutral-950 shadow-2xl transition-[width,height] duration-200 lg:border-t-0 lg:border-l ${
+                        rightRailClassName(workspace.hudState.rightRailCollapsed)
                     }`}
                 >
-                    {hudState.rightRailCollapsed ? (
+                    {workspace.hudState.rightRailCollapsed ? (
                         <button
                             type="button"
-                            onClick={toggleRightRail}
-                            className="flex h-full w-full flex-col items-center justify-center gap-4 px-2 text-center text-white transition-colors hover:bg-neutral-900"
+                            onClick={workspace.toggleRightRail}
+                            className="flex h-full w-full items-center justify-between gap-4 px-4 text-center text-white transition-colors hover:bg-neutral-900 lg:flex-col lg:justify-center lg:px-2"
                             aria-label="Show right HUD"
                         >
-                            <span className="text-[10px] uppercase tracking-[0.3em] text-cyan-200/65 [writing-mode:vertical-rl]">Review HUD</span>
+                            <span className="text-[10px] uppercase tracking-[0.3em] text-cyan-200/65 lg:hidden">Review HUD</span>
+                            <span className="hidden text-[10px] uppercase tracking-[0.3em] text-cyan-200/65 [writing-mode:vertical-rl] lg:inline">Review HUD</span>
                             <span className="rounded-full border border-neutral-800 bg-neutral-900 px-2 py-1 text-[10px] uppercase tracking-[0.18em] text-neutral-200">Expand</span>
                         </button>
                     ) : (
@@ -903,7 +246,7 @@ export default function MVPRouteClient({
                                 </div>
                                 <button
                                     type="button"
-                                    onClick={toggleRightRail}
+                                    onClick={workspace.toggleRightRail}
                                     className="rounded-full border border-neutral-800 bg-neutral-900 px-3 py-1.5 text-[11px] text-white transition-colors hover:border-neutral-700 hover:text-neutral-100"
                                 >
                                     Hide
@@ -912,21 +255,21 @@ export default function MVPRouteClient({
                             <div className="min-h-0 flex-1 overflow-hidden">
                                 <RightPanel
                                     clarityMode={clarityMode}
-                                    activityLog={activityLog}
-                                    changeSummary={changeSummary}
-                                    lastOutputLabel={lastOutputLabel}
+                                    activityLog={workspace.activityLog}
+                                    changeSummary={workspace.changeSummary}
+                                    lastOutputLabel={workspace.lastOutputLabel}
                                     sceneGraph={sceneGraph}
                                     setSceneGraph={setSceneGraph}
-                                    assetsList={assetsList}
-                                    activeScene={activeScene}
-                                    saveState={saveState}
-                                    saveMessage={saveMessage}
-                                    saveError={saveError}
-                                    lastSavedAt={lastSavedAt}
-                                    versions={versions}
-                                    onManualSave={() => saveScene("manual")}
-                                    onRestoreVersion={restoreVersion}
-                                    onExport={handleExport}
+                                    assetsList={workspace.assetsList}
+                                    activeScene={workspace.activeScene}
+                                    saveState={workspace.saveState}
+                                    saveMessage={workspace.saveMessage}
+                                    saveError={workspace.saveError}
+                                    lastSavedAt={workspace.lastSavedAt}
+                                    versions={workspace.versions}
+                                    onManualSave={workspace.manualSave}
+                                    onRestoreVersion={workspace.restoreVersion}
+                                    onExport={workspace.handleExport}
                                 />
                             </div>
                         </>
