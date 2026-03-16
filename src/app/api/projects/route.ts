@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
-import { ensureSceneOwnershipForOwner } from "@/server/projects/ownership";
-import { requireOperatorEmail, respondWithRouteError } from "@/server/projects/http";
-import { createProjectForOwner, listProjectsForOwner } from "@/server/projects/service";
+import { loadProjectOwnership, loadProjectService, requireOperatorEmail, respondWithRouteError } from "@/server/projects/http";
 import { deliveryPostureValues, laneTruthKindValues, worldSourceKindValues } from "@/server/projects/types";
 
 export const runtime = "nodejs";
@@ -48,6 +46,7 @@ const createProjectSchema = z
 export async function GET(request: NextRequest) {
     try {
         const operatorEmail = requireOperatorEmail(request);
+        const { listProjectsForOwner } = await loadProjectService();
         return NextResponse.json({
             projects: listProjectsForOwner(operatorEmail),
         });
@@ -62,6 +61,7 @@ export async function POST(request: NextRequest) {
         const input = createProjectSchema.parse(await request.json());
 
         if ((input.mode ?? "create") === "ensure_ownership") {
+            const { ensureSceneOwnershipForOwner } = await loadProjectOwnership();
             return NextResponse.json(
                 ensureSceneOwnershipForOwner({
                     ownerEmail: operatorEmail,
@@ -74,6 +74,7 @@ export async function POST(request: NextRequest) {
             );
         }
 
+        const { createProjectForOwner } = await loadProjectService();
         return NextResponse.json(
             createProjectForOwner({
                 ownerEmail: operatorEmail,

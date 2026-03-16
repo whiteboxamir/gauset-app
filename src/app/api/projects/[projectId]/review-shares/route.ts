@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { requireOperatorEmail, respondWithRouteError } from "@/server/projects/http";
-import { listReviewSharesForOwner } from "@/server/review-shares/service";
+import { loadReviewShareService, requireOperatorEmail, respondWithRouteError } from "@/server/projects/http";
 
 export const runtime = "nodejs";
 
@@ -9,6 +8,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ pro
     try {
         const operatorEmail = requireOperatorEmail(request);
         const { projectId } = await context.params;
+        const { listReviewSharesForOwner } = await loadReviewShareService();
 
         return NextResponse.json(
             listReviewSharesForOwner({

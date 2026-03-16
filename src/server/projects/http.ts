@@ -15,6 +15,18 @@ export function requireOperatorEmail(request: NextRequest) {
     return parsed.data.toLowerCase();
 }
 
+export function loadProjectOwnership() {
+    return import("./ownership");
+}
+
+export function loadProjectService() {
+    return import("./service");
+}
+
+export function loadReviewShareService() {
+    return import("../review-shares/service");
+}
+
 function resolveRouteErrorStatus(message: string) {
     if (message === "Login required.") {
         return 401;

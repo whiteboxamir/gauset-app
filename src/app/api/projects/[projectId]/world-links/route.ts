@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
-import { requireOperatorEmail, respondWithRouteError } from "@/server/projects/http";
-import { addOrRefreshWorldLinkForOwner, getProjectDetailForOwner, recordProjectWorldOpenedForOwner } from "@/server/projects/service";
+import { loadProjectService, requireOperatorEmail, respondWithRouteError } from "@/server/projects/http";
 import { deliveryPostureValues, laneTruthKindValues, worldSourceKindValues } from "@/server/projects/types";
 
 export const runtime = "nodejs";
@@ -34,6 +33,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ pro
     try {
         const operatorEmail = requireOperatorEmail(request);
         const { projectId } = await context.params;
+        const { getProjectDetailForOwner } = await loadProjectService();
         const detail = getProjectDetailForOwner(operatorEmail, projectId);
 
         if (!detail) {
@@ -54,6 +54,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
         const operatorEmail = requireOperatorEmail(request);
         const { projectId } = await context.params;
         const input = addWorldLinkSchema.parse(await request.json());
+        const { addOrRefreshWorldLinkForOwner } = await loadProjectService();
 
         return NextResponse.json(
             addOrRefreshWorldLinkForOwner({
@@ -75,6 +76,7 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ p
         const operatorEmail = requireOperatorEmail(request);
         const { projectId } = await context.params;
         const input = recordReopenSchema.parse(await request.json());
+        const { recordProjectWorldOpenedForOwner } = await loadProjectService();
 
         return NextResponse.json(
             recordProjectWorldOpenedForOwner({

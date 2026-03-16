@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
-import { requireOperatorEmail, respondWithRouteError } from "@/server/projects/http";
-import { getProjectDetailForOwner, updateProjectForOwner } from "@/server/projects/service";
+import { loadProjectService, requireOperatorEmail, respondWithRouteError } from "@/server/projects/http";
 import { projectStatusValues } from "@/server/projects/types";
 
 export const runtime = "nodejs";
@@ -17,6 +16,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ pro
     try {
         const operatorEmail = requireOperatorEmail(request);
         const { projectId } = await context.params;
+        const { getProjectDetailForOwner } = await loadProjectService();
         const detail = getProjectDetailForOwner(operatorEmail, projectId);
 
         if (!detail) {
@@ -34,6 +34,7 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ p
         const operatorEmail = requireOperatorEmail(request);
         const { projectId } = await context.params;
         const input = updateProjectSchema.parse(await request.json());
+        const { updateProjectForOwner } = await loadProjectService();
 
         return NextResponse.json(
             updateProjectForOwner({

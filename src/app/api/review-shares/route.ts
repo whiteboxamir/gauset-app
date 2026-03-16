@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
-import { requireOperatorEmail, respondWithRouteError } from "@/server/projects/http";
-import { createReviewShareForOwner, listReviewSharesForOwner } from "@/server/review-shares/service";
+import { loadReviewShareService, requireOperatorEmail, respondWithRouteError } from "@/server/projects/http";
 import { reviewShareContentModeValues, reviewShareDeliveryModeValues } from "@/server/review-shares/types";
 
 export const runtime = "nodejs";
@@ -57,6 +56,7 @@ export async function GET(request: NextRequest) {
     try {
         const operatorEmail = requireOperatorEmail(request);
         const projectId = request.nextUrl.searchParams.get("projectId");
+        const { listReviewSharesForOwner } = await loadReviewShareService();
 
         return NextResponse.json(
             listReviewSharesForOwner({
@@ -74,6 +74,7 @@ export async function POST(request: NextRequest) {
     try {
         const operatorEmail = requireOperatorEmail(request);
         const input = createReviewShareSchema.parse(await request.json());
+        const { createReviewShareForOwner } = await loadReviewShareService();
 
         return NextResponse.json(
             createReviewShareForOwner({
