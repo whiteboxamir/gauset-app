@@ -1,0 +1,87 @@
+{
+  "contract_version": "world_ingest.external_world_package.v1",
+  "request_id": "ingest_req_01jqvd5k7lftv96jvd06r1tnmm",
+  "source_kind": "external_world_package",
+  "submitted_at": "2026-03-16T18:05:00.000Z",
+  "submitted_by": {
+    "actor_type": "user",
+    "actor_id": "user_design_partner_alpha",
+    "display_name": "Design Partner Alpha"
+  },
+  "package": {
+    "package_id": "pkg_ext_warehouse_scan_20260316",
+    "label": "Warehouse A external package",
+    "format": "zip_manifest_bundle",
+    "entry_manifest": "manifest.json",
+    "producer": {
+      "system": "polycam",
+      "kind": "lidar_capture_export",
+      "version": "4.2.1"
+    },
+    "files": [
+      {
+        "path": "manifest.json",
+        "artifact_kind": "package_manifest",
+        "media_type": "application/json",
+        "sha256": "d04068fcf4623f4c8f6b5ef83693be4024b8ae89d0b078ff6bc7cc345e9a3220"
+      },
+      {
+        "path": "scene/scene-document.json",
+        "artifact_kind": "scene_document_snapshot",
+        "media_type": "application/json",
+        "sha256": "0cc024af1ba49ab657e1458140f61bd3f4cbe55a802f57df1dc4f7f6bcc88fb5"
+      },
+      {
+        "path": "environment/splats.ply",
+        "artifact_kind": "environment_splats",
+        "media_type": "application/octet-stream",
+        "sha256": "1ae28132292ed83291c2b5b133457d22fe5fd87d03f632dc0dcb82d9b3a3a742"
+      },
+      {
+        "path": "environment/cameras.json",
+        "artifact_kind": "camera_poses",
+        "media_type": "application/json",
+        "sha256": "c2a43a78567e5c78e8b7405fdc1d7f22e27d9fc49af06256ed4b57b00e58434e"
+      },
+      {
+        "path": "environment/metadata.json",
+        "artifact_kind": "environment_metadata",
+        "media_type": "application/json",
+        "sha256": "d55dd8c8439e75fcb6118f4e27af30756ab9004ccf0c733abf06a641eb679d11"
+      },
+      {
+        "path": "review/review.json",
+        "artifact_kind": "review_report",
+        "media_type": "application/json",
+        "sha256": "441b52db560665e8d0aeaa7676e102b1298d75e2cb73e11a2d235f6c44c5c36b"
+      }
+    ]
+  },
+  "declared_truth": {
+    "lane": "reconstruction",
+    "truth_label": "Imported external reconstruction",
+    "lane_truth": "Third-party capture output imported into Gauset; source fidelity is declared by the package producer and is not yet verified by Gauset.",
+    "production_readiness": "review_required",
+    "blockers": [
+      "gauset_review_not_started",
+      "downstream_handoff_not_generated"
+    ]
+  },
+  "workspace_target": {
+    "mode": "new_scene",
+    "scene_label": "Warehouse A"
+  },
+  "project_link": {
+    "project_id": "proj_design_partner_alpha"
+  },
+  "review_seed": {
+    "metadata": {
+      "project_name": "Design Partner Alpha",
+      "scene_title": "Warehouse A",
+      "location_name": "Warehouse A",
+      "owner": "Design Partner Alpha",
+      "notes": "Imported from external package and must enter the normal review flow."
+    },
+    "approval_state": "draft"
+  }
+}

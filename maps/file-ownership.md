@@ -76,3 +76,17 @@ Every restarted branch begins from the new freeze commit created on top of `orig
 - `codex/backend-ingest-truth`: restart fresh from the freeze commit.
 - `codex/projects-review-links`: restart fresh from the freeze commit.
 - `codex/vercel-backend-parity`: restart fresh from the freeze commit.
+
+## Shared Contract Files Introduced By This Lane
+
+Runtime lanes may implement against these files, but they should not silently redefine them in product code:
+
+- `contracts/world-ingest.md`
+- `contracts/downstream-handoff.md`
+- `contracts/schemas/world-ingest.external-world-package.request.json`
+- `contracts/schemas/world-ingest.third-party-world-model-output.request.json`
+- `contracts/schemas/world-ingest.record.response.json`
+- `contracts/schemas/review-package.inline.scene-document-first.json`
+- `contracts/schemas/downstream-handoff.unreal.ready.manifest.json`
+- `contracts/schemas/downstream-handoff.unreal.preview-blocked.manifest.json`
+- `docs/core-product-truth-validation-gates.md`

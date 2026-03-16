@@ -1,0 +1,112 @@
+{
+  "contract_version": "downstream_handoff.unreal_scene.v1",
+  "handoff_id": "handoff_01jqvdjv6tzw8cg23xh9jk6t7j",
+  "status": "ready",
+  "created_at": "2026-03-16T18:28:00.000Z",
+  "target": {
+    "system": "unreal_engine",
+    "profile": "unreal_scene_handoff",
+    "profile_version": "v1",
+    "engine_version": "5.4",
+    "unit_scale": "centimeters",
+    "up_axis": "Z",
+    "handedness": "left"
+  },
+  "source_scene": {
+    "scene_id": "scene_stage_benchmark_01jqvdkq6g7m25ta8b77g1pqtg",
+    "version_id": "20260316T182800000000Z",
+    "scene_document_ref": "scene-document.json",
+    "origin_ingest_id": "ing_01jqvdk72zkq5bv69hqajv7f2j"
+  },
+  "truth": {
+    "lane": "reconstruction",
+    "truth_label": "Benchmarked reconstruction",
+    "lane_truth": "Multi-view reconstruction with named Unreal handoff package generated from the canonical scene document.",
+    "production_readiness": "handoff_ready",
+    "handoff_status": "ready",
+    "blockers": []
+  },
+  "delivery_profile": {
+    "label": "Ready for Unreal validation",
+    "readiness": "handoff_ready",
+    "summary": "Geometry, camera, review, and delivery gates passed for Unreal validation.",
+    "blocking_issues": [],
+    "render_targets": {
+      "desktop_fps": 30,
+      "mobile_fps": 18,
+      "preferred_point_budget": 2500000
+    }
+  },
+  "review": {
+    "approval_state": "approved",
+    "updated_at": "2026-03-16T18:26:42.000Z",
+    "issues_open": 0
+  },
+  "artifacts": [
+    {
+      "artifact_id": "art_scene_document",
+      "kind": "scene_document",
+      "path": "scene-document.json",
+      "required": true,
+      "consumed_by": [
+        "unreal_import_adapter"
+      ]
+    },
+    {
+      "artifact_id": "art_environment_mesh",
+      "kind": "environment_mesh",
+      "path": "artifacts/environment/warehouse-shell.glb",
+      "required": true,
+      "consumed_by": [
+        "unreal_import_adapter"
+      ],
+      "transform": {
+        "unit_scale": "centimeters",
+        "up_axis": "Z",
+        "handedness": "left"
+      }
+    },
+    {
+      "artifact_id": "art_camera_views",
+      "kind": "camera_views",
+      "path": "artifacts/cameras/views.json",
+      "required": true,
+      "consumed_by": [
+        "unreal_import_adapter"
+      ]
+    },
+    {
+      "artifact_id": "art_director_path",
+      "kind": "director_path",
+      "path": "artifacts/cameras/director-path.json",
+      "required": true,
+      "consumed_by": [
+        "unreal_import_adapter"
+      ]
+    },
+    {
+      "artifact_id": "art_review_report",
+      "kind": "review_report",
+      "path": "artifacts/review/review.json",
+      "required": true,
+      "consumed_by": [
+        "production_review"
+      ]
+    },
+    {
+      "artifact_id": "art_environment_splats",
+      "kind": "environment_splats",
+      "path": "artifacts/environment/splats.ply",
+      "required": false,
+      "consumed_by": [
+        "gauset_reference_only"
+      ]
+    }
+  ],
+  "adapter_hints": {
+    "import_mode": "environment_plus_cameras",
+    "material_strategy": "use_embedded_textures_when_present",
+    "nanite_candidate": true,
+    "world_partition": false
+  }
+}

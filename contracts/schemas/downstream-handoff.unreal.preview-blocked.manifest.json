@@ -1,0 +1,80 @@
+{
+  "contract_version": "downstream_handoff.unreal_scene.v1",
+  "handoff_id": "handoff_01jqvdmwv6hb7kx08gkhyj3vme",
+  "status": "blocked",
+  "created_at": "2026-03-16T18:34:00.000Z",
+  "target": {
+    "system": "unreal_engine",
+    "profile": "unreal_scene_handoff",
+    "profile_version": "v1",
+    "engine_version": "5.4",
+    "unit_scale": "centimeters",
+    "up_axis": "Z",
+    "handedness": "left"
+  },
+  "source_scene": {
+    "scene_id": "scene_preview_import_01jqvdm9s5dcedhf3b0ck6mgd6",
+    "version_id": "20260316T183400000000Z",
+    "scene_document_ref": "scene-document.json",
+    "origin_ingest_id": "ing_01jqvdm1aygq7cggrghr2zccxk"
+  },
+  "truth": {
+    "lane": "preview",
+    "truth_label": "Instant Preview",
+    "lane_truth": "Single-photo synthesized preview; useful for creative review but not a faithful production handoff source.",
+    "production_readiness": "preview_only",
+    "handoff_status": "blocked",
+    "blockers": [
+      "preview_lane_is_not_a_production_handoff_source",
+      "unreal_consumable_environment_artifact_missing",
+      "review_approval_not_complete"
+    ]
+  },
+  "delivery_profile": {
+    "label": "Blocked for Unreal handoff",
+    "readiness": "blocked",
+    "summary": "Preview output can support review context, but it is not promotable to Unreal handoff.",
+    "blocking_issues": [
+      "Preview lane cannot be claimed as downstream-ready.",
+      "No environment mesh or named Unreal import artifact is present."
+    ]
+  },
+  "review": {
+    "approval_state": "in_review",
+    "updated_at": "2026-03-16T18:33:12.000Z",
+    "issues_open": 3
+  },
+  "artifacts": [
+    {
+      "artifact_id": "art_scene_document",
+      "kind": "scene_document",
+      "path": "scene-document.json",
+      "required": true,
+      "consumed_by": [
+        "review_only"
+      ]
+    },
+    {
+      "artifact_id": "art_environment_splats",
+      "kind": "environment_splats",
+      "path": "artifacts/environment/splats.ply",
+      "required": false,
+      "consumed_by": [
+        "gauset_reference_only"
+      ]
+    },
+    {
+      "artifact_id": "art_preview_projection",
+      "kind": "preview_projection",
+      "path": "artifacts/environment/preview-projection.png",
+      "required": false,
+      "consumed_by": [
+        "review_only"
+      ]
+    }
+  ],
+  "adapter_hints": {
+    "import_mode": "blocked_preview_reference",
+    "material_strategy": "review_reference_only"
+  }
+}

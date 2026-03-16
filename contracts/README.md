@@ -26,4 +26,19 @@ This directory documents the current repo-implemented API contract for the MVP e
 ## Files
 
 - `mvp-api.md`: human-readable endpoint contract snapshot, proxy behavior, backend diffs, and error handling.
+- `world-ingest.md`: first-class multi-source world-ingest contract, including external packages and third-party world-model outputs.
+- `downstream-handoff.md`: explicit downstream handoff contract, including the first Unreal target profile.
 - `schemas/`: machine-readable JSON examples for the main request and response families.
+
+## Shared Restart Contracts Added On The Freeze Baseline
+
+These files define the missing shared semantics runtime lanes should now implement against:
+
+- `contracts/world-ingest.md`
+- `contracts/downstream-handoff.md`
+- `contracts/schemas/world-ingest.external-world-package.request.json`
+- `contracts/schemas/world-ingest.third-party-world-model-output.request.json`
+- `contracts/schemas/world-ingest.record.response.json`
+- `contracts/schemas/review-package.inline.scene-document-first.json`
+- `contracts/schemas/downstream-handoff.unreal.ready.manifest.json`
+- `contracts/schemas/downstream-handoff.unreal.preview-blocked.manifest.json`

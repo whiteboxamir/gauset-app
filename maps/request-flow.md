@@ -246,3 +246,30 @@ These should be treated as deliberate but fragile differences.
 - Local `/scene/save` writes the full incoming `scene_graph`; deployed `/scene/save` normalizes and keeps only `environment` and `assets`.
 
 Those divergences are the highest-risk area for any cross-backend contract change.
+
+## 10. Restart-Baseline Shared Contracts
+
+The freeze baseline runtime still uses the current upload/capture/save/review flows above. Restarted runtime lanes should now converge on three explicit shared contracts:
+
+1. `WorldIngestRecord` after every source enters the product
+2. `review_package.inline.scene_document_first.v1` for inline review/share/export payloads
+3. `DownstreamHandoffManifest` for Unreal and later named downstream targets
+
+### Source Normalization Map
+
+| Current or planned source path | Shared `source_kind` | Required normalized output |
+| --- | --- | --- |
+| Demo world open | `demo_world` | ingest record that preserves demo/reference truth |
+| Upload still -> preview or asset | `upload_still` | ingest record with upload provenance and lane truth |
+| Provider still -> upload tray -> preview or asset | `provider_generated_still` | ingest record with provider, model, prompt, and generation job provenance |
+| Capture session -> reconstruction | `capture_session` | ingest record with capture evidence, reconstruction truth, and blockers if incomplete |
+| Saved scene reopen | `saved_scene_reopen` | ingest record that reuses the durable `scene_id` and prior provenance |
+| External package import | `external_world_package` | ingest record seeded from package manifest and file inventory |
+| Third-party world-model import | `third_party_world_model_output` | ingest record seeded from producer metadata, artifact inventory, and conversion requirements |
+
+### Shared Contract Consequences
+
+- No future intake path should open straight into editor-only state without first resolving through the ingest contract.
+- Review/export payloads should move from ad hoc `sceneGraph` packages toward the scene-document-first package documented in `contracts/schemas/review-package.inline.scene-document-first.json`.
+- Downstream delivery should move from generic "Scene package exported" language toward named handoff manifests with explicit `ready` or `blocked` state.
+- Preview worlds may still export review context, but they must remain blocked for Unreal or other downstream-ready claims.
