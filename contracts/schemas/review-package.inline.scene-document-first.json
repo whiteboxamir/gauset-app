@@ -1,0 +1,147 @@
+{
+  "contract_version": "review_package.inline.scene_document_first.v1",
+  "scene_id": "scene_warehouse_a_01jqvdbn6m88a6f3ypp6s46v7n",
+  "version_id": "20260316T181621000000Z",
+  "mode": "inline_review",
+  "exported_at": "2026-03-16T18:20:00.000Z",
+  "truth": {
+    "lane": "reconstruction",
+    "truth_label": "Imported third-party reconstruction",
+    "lane_truth": "Imported from Nerfstudio Splatfacto and seeded into Gauset for review.",
+    "production_readiness": "review_required",
+    "handoff_status": "blocked",
+    "blockers": [
+      "review_approval_not_started",
+      "named_downstream_handoff_missing"
+    ]
+  },
+  "scene_document": {
+    "schema": "gauset.scene-document.v1",
+    "document_id": "scene_doc_01jqvdf1ppzvpa3ctzv0g1sfmw",
+    "scene_id": "scene_warehouse_a_01jqvdbn6m88a6f3ypp6s46v7n",
+    "environment": {
+      "artifact_ref": "art_environment_splats",
+      "lane": "reconstruction"
+    },
+    "assets": [
+      {
+        "id": "asset_dock_crane_proxy",
+        "label": "Dock crane proxy",
+        "artifact_ref": "art_asset_crane_mesh",
+        "transform": {
+          "position": [
+            4.2,
+            0.0,
+            -1.5
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      }
+    ],
+    "camera_views": [
+      {
+        "id": "view_establishing",
+        "label": "Establishing",
+        "position": [
+          8.0,
+          3.0,
+          12.0
+        ],
+        "target": [
+          0.0,
+          1.8,
+          0.0
+        ],
+        "fov": 40,
+        "lens_mm": 50,
+        "note": "Opening shot from dock entrance."
+      }
+    ],
+    "pins": [
+      {
+        "id": "pin_hazard_forklift",
+        "label": "Forklift crossing",
+        "type": "hazard",
+        "position": [
+          -2.5,
+          0.0,
+          4.0
+        ]
+      }
+    ],
+    "director": {
+      "brief": "Hold the entrance reveal, then push toward the loading bays.",
+      "path": [
+        {
+          "time": 0,
+          "position": [
+            8.0,
+            3.0,
+            12.0
+          ],
+          "target": [
+            0.0,
+            1.8,
+            0.0
+          ]
+        }
+      ]
+    }
+  },
+  "review": {
+    "metadata": {
+      "project_name": "Design Partner Alpha",
+      "scene_title": "Warehouse A",
+      "location_name": "Warehouse A",
+      "owner": "Capture Ops",
+      "notes": "Imported third-party reconstruction pending review."
+    },
+    "approval": {
+      "state": "in_review",
+      "updated_at": "2026-03-16T18:19:22.000Z",
+      "updated_by": "Capture Ops",
+      "note": "Imported package opened for review."
+    },
+    "issues": [
+      {
+        "id": "issue_scale_check",
+        "title": "Confirm dock-door scale",
+        "severity": "medium",
+        "status": "open"
+      }
+    ]
+  },
+  "artifacts": [
+    {
+      "artifact_id": "art_environment_splats",
+      "artifact_kind": "environment_splats",
+      "path": "scenes/scene_warehouse_a_01jqvdbn6m88a6f3ypp6s46v7n/environment/imported-splats.ply"
+    },
+    {
+      "artifact_id": "art_camera_poses",
+      "artifact_kind": "camera_poses",
+      "path": "scenes/scene_warehouse_a_01jqvdbn6m88a6f3ypp6s46v7n/environment/cameras.json"
+    }
+  ],
+  "legacy_scene_graph": {
+    "included_for_compatibility": true,
+    "environment": {
+      "id": "scene_warehouse_a_01jqvdbn6m88a6f3ypp6s46v7n",
+      "lane": "reconstruction"
+    },
+    "assets": []
+  },
+  "summary": {
+    "assetCount": 1,
+    "hasEnvironment": true
+  }
+}

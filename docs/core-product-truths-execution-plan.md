@@ -21,12 +21,26 @@ Every restarted thread must preserve these truths:
 - service-dependent diagnostics exist, but they are not part of the freeze contract until a later control-plane change makes them restart-safe
 - no thread may edit the stop-sign surfaces listed in `docs/post-merge-truth-freeze-baseline.md` without a new freeze pass
 
+## Shared Contract Outputs From This Lane
+
+The contracts/validation/handoff lane now owns the following restart-baseline specs:
+
+- `contracts/world-ingest.md`
+- `contracts/downstream-handoff.md`
+- `docs/core-product-truth-validation-gates.md`
+
+Those files define the shared semantics runtime lanes should implement for:
+
+- canonical normalization of every world source, including external world packages and third-party world-model outputs
+- scene-document-first inline review/export payloads
+- named downstream handoff manifests with explicit Unreal `ready` vs `blocked` posture
+
 ## Restart Lanes
 
 | Thread | Owns on restart | Mission | Hard avoids |
 | --- | --- | --- | --- |
 | `codex/editor-scene-document` | `src/app/mvp`, non-frozen `src/components/Editor`, `src/lib/mvp-workspace.ts`, future `src/lib/scene-graph/**`, future `src/state/**` | replay the allowed editor/scene-document subset and continue scene-document-first work | stop-sign surfaces, deployment-boundary files, unrelated experience/marketing files |
-| `codex/contracts-validation-handoff` | `docs/**`, `maps/**`, `contracts/**`, `scripts/check_*`, `scripts/test_*`, `tests/**` | define missing handoff contracts and validation gates without falsifying runtime truth | runtime/product code except narrow test fixes approved by the owning lane |
+| `codex/contracts-validation-handoff` | `docs/**`, `maps/**`, `contracts/**`, `scripts/check_*`, `scripts/test_*`, `tests/**` | define the shared world-ingest, scene-document-first review/export, and named downstream handoff contracts without falsifying runtime truth | runtime/product code except narrow test fixes approved by the owning lane |
 | `codex/backend-ingest-truth` | `backend/**` | harden local ingest and truth metadata | `vercel-backend/**`, stop-sign surfaces |
 | `codex/projects-review-links` | future `src/app/api/projects/**`, future `src/app/api/review-shares/**`, future `src/components/worlds/**`, future `src/server/projects/**`, future `src/server/review-shares/**` | restart project/world ownership and review-share work from a clean base | editor/runtime stop-sign surfaces and ad hoc reuse of rejected branch work |
 | `codex/vercel-backend-parity` | `vercel-backend/**`, `api/_mvp_backend/**` | restart deployed parity work from the new baseline | local backend internals unless explicitly synchronizing a stable contract |

@@ -1,0 +1,121 @@
+{
+  "contract_version": "world_ingest.record.v1",
+  "ingest_id": "ing_01jqvdak9x54ev2h1vvjyrh0ea",
+  "status": "normalized",
+  "scene_id": "scene_warehouse_a_01jqvdbn6m88a6f3ypp6s46v7n",
+  "source_kind": "third_party_world_model_output",
+  "source_label": "Nerfstudio Splatfacto import",
+  "normalized_at": "2026-03-16T18:16:21.000Z",
+  "workspace_resume": {
+    "route": "/mvp",
+    "open_mode": "scene",
+    "scene_id": "scene_warehouse_a_01jqvdbn6m88a6f3ypp6s46v7n",
+    "review_route": "/mvp/review?scene=scene_warehouse_a_01jqvdbn6m88a6f3ypp6s46v7n&version=20260316T181621000000Z"
+  },
+  "provenance": {
+    "submitted_by": {
+      "actor_type": "user",
+      "actor_id": "user_ops_capture_team",
+      "display_name": "Capture Ops"
+    },
+    "producer": {
+      "system": "nerfstudio",
+      "model": "splatfacto",
+      "version": "1.1.3"
+    },
+    "external_ids": {
+      "external_run_id": "ns_run_bay_dock_20260316"
+    }
+  },
+  "artifacts": [
+    {
+      "artifact_id": "art_scene_document",
+      "artifact_kind": "scene_document",
+      "path": "scenes/scene_warehouse_a_01jqvdbn6m88a6f3ypp6s46v7n/scene-document.json",
+      "media_type": "application/json",
+      "status": "ready",
+      "required_for_workspace": true,
+      "required_for_handoff": true
+    },
+    {
+      "artifact_id": "art_environment_splats",
+      "artifact_kind": "environment_splats",
+      "path": "scenes/scene_warehouse_a_01jqvdbn6m88a6f3ypp6s46v7n/environment/imported-splats.ply",
+      "url": "/storage/scenes/scene_warehouse_a_01jqvdbn6m88a6f3ypp6s46v7n/environment/imported-splats.ply",
+      "source_path": "exports/scene.splat.ply",
+      "media_type": "application/octet-stream",
+      "status": "ready",
+      "required_for_workspace": true,
+      "required_for_handoff": false
+    },
+    {
+      "artifact_id": "art_camera_poses",
+      "artifact_kind": "camera_poses",
+      "path": "scenes/scene_warehouse_a_01jqvdbn6m88a6f3ypp6s46v7n/environment/cameras.json",
+      "url": "/storage/scenes/scene_warehouse_a_01jqvdbn6m88a6f3ypp6s46v7n/environment/cameras.json",
+      "source_path": "exports/cameras.json",
+      "media_type": "application/json",
+      "status": "ready",
+      "required_for_workspace": true,
+      "required_for_handoff": true
+    },
+    {
+      "artifact_id": "art_holdout_report",
+      "artifact_kind": "holdout_report",
+      "path": "scenes/scene_warehouse_a_01jqvdbn6m88a6f3ypp6s46v7n/environment/holdout-report.json",
+      "source_path": "exports/holdout_metrics.json",
+      "media_type": "application/json",
+      "status": "ready",
+      "required_for_workspace": false,
+      "required_for_handoff": false
+    }
+  ],
+  "truth": {
+    "lane": "reconstruction",
+    "truth_label": "Imported third-party reconstruction",
+    "lane_truth": "Imported from Nerfstudio Splatfacto. Gauset has not yet validated this scene as production-ready.",
+    "production_readiness": "review_required",
+    "handoff_status": "blocked",
+    "blockers": [
+      "review_approval_not_started",
+      "unreal_consumable_environment_artifact_missing"
+    ],
+    "promotion_requirements": [
+      "seed_scene_document",
+      "complete_review_approval",
+      "generate_named_downstream_handoff_manifest"
+    ]
+  },
+  "scene_document": {
+    "schema": "gauset.scene-document.v1",
+    "status": "seeded",
+    "path": "scenes/scene_warehouse_a_01jqvdbn6m88a6f3ypp6s46v7n/scene-document.json",
+    "legacy_scene_graph_path": "scenes/scene_warehouse_a_01jqvdbn6m88a6f3ypp6s46v7n/scene.json",
+    "canonical_source": "scene_document"
+  },
+  "review_seed": {
+    "metadata": {
+      "project_name": "Design Partner Alpha",
+      "scene_title": "Warehouse A",
+      "location_name": "Warehouse A",
+      "owner": "Capture Ops",
+      "notes": "Imported third-party reconstruction pending review."
+    },
+    "approval": {
+      "state": "draft"
+    },
+    "issues": []
+  },
+  "downstream_targets": [
+    {
+      "target": "unreal_engine",
+      "profile": "unreal_scene_handoff",
+      "profile_version": "v1",
+      "status": "blocked",
+      "blockers": [
+        "unreal_consumable_environment_artifact_missing",
+        "review_approval_not_started"
+      ]
+    }
+  ]
+}
