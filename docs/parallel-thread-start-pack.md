@@ -1,64 +1,66 @@
 # Parallel Thread Start Pack
 
-Date: March 17, 2026
+Date: March 18, 2026
 
-Status: Freeze gate is still blocked. Do not start implementation lanes until the clean truth-freeze commit exists.
+Status: Freeze reset complete. Start new implementation lanes from `codex/truth-freeze-baseline-20260318`, not from historical dirty worktrees.
 
 ## Current Shared Base
 
-- Base commit: `origin/main` at `ddd4f216b4b5e4af1257d3b57ea7f8c693f6c3aa`
-- Entry commit must be `codex/truth-freeze-baseline` (or equivalent freeze-safe commit).
-- `codex/editor-scene-document` is mixed-scope and cannot be resumed as-is.
+- Accepted wave: `codex/editor-scene-document-finalize-20260318` at `477e544`
+- Active restart branch: `codex/truth-freeze-baseline-20260318`
+- New lanes should use fresh worktrees cut from this branch
 
-## Safe Pre-Freeze Work
+## Start Rule
 
-These tasks may run now without violating the gate:
+1. Create a fresh worktree from `codex/truth-freeze-baseline-20260318`.
+2. Start the lane branch from that worktree.
+3. Keep stop-sign files isolated to deliberate owners.
+4. Re-run the relevant deterministic checks before merging back into a shared baseline.
 
-- Freeze/docs updates in `docs/**` and `maps/**`.
-- Read-only stop-sign overlap scans.
-- Read-only contract/runtime gap reports.
-- Read-only backend parity maps.
-- Isolated `/tmp` baseline captures and verification notes.
+## Stop-Sign Reminder
 
-No implementation edits should land outside the freeze/docs surface until the truth-freeze commit exists.
+Do not casually edit:
 
-## Start Gate
-
-1. Cut freeze doc branch from `origin/main`.
-2. Commit repaired freeze docs (`docs/post-merge-truth-freeze-baseline.md`, `maps/file-ownership.md`) and any required ownership updates.
-3. Re-run verified checks on exact freeze tree.
-4. Publish the baseline branch and only then start the split lanes.
-5. No edits into:
-   - `src/app/mvp/_components/MVPWorkspaceRuntime.tsx`
-   - `src/components/Editor/ViewerPanel.tsx`
-   - `src/components/Editor/LeftPanel.tsx`
-   - `src/components/Editor/RightPanel.tsx`
-   - `src/components/Editor/ThreeOverlay.tsx`
-   - `src/app/api/mvp/[...path]/route.ts`
-   - related shell composition files owned by the viewer-first HUD redesign
+- `src/app/mvp/_components/MVPWorkspaceRuntime.tsx`
+- `src/components/Editor/ViewerPanel.tsx`
+- `src/components/Editor/LeftPanel.tsx`
+- `src/components/Editor/RightPanel.tsx`
+- `src/components/Editor/ThreeOverlay.tsx`
+- `src/app/api/mvp/[...path]/route.ts`
+- root/shared shell files called out in [post-merge-truth-freeze-baseline.md](/Users/amirboz/gauset-app/docs/post-merge-truth-freeze-baseline.md)
 
 ## Clean Lane Split
 
 | Lane | Branch | Scope |
 | --- | --- | --- |
-| Freeze/docs | `codex/truth-freeze-baseline` | `docs/**`, `maps/**`, contract gate docs. Owns freeze protocol, stop-sign list, and lane naming. |
-| Editor/document | `codex/editor-scene-document` | `src/app/mvp/_hooks/**`, `src/lib/mvp-review.ts`, `src/lib/scene-graph/**`, `src/state/**` excluding redesign shell files. |
-| Contracts + validation | `codex/contracts-validation-handoff` | `contracts/**`, `src/server/contracts/**`, platform scenario/schema validation updates. |
-| Backend ingest truth | `codex/backend-ingest-truth` | `backend/**`, `api/_mvp_backend/**` except redesign-owned front-end surfaces. |
-| Projects + handoff | `codex/projects-review-links` | `src/server/projects/**`, `src/server/review-shares/**`, `src/components/worlds/**`, project/review route contracts. |
-| Vercel parity | `codex/vercel-backend-parity` | `vercel-backend/**` and parity normalization at public/proxy boundary. |
+| Freeze/docs baseline | `codex/truth-freeze-baseline-20260318` | baseline docs, stop-sign coordination, lane naming |
+| World-workflow entrypoints | `codex/world-workflow-refocus-entrypoints` | authenticated `/app` entry, shell copy, nav hierarchy, world-library-first framing |
+| World-workflow contracts | `codex/world-workflow-refocus-contracts` | canonical ingest/handoff runtime interfaces after Wave 1 lands |
+| Existing specialist lanes | existing branch families | backend/contracts/projects/parity follow-ups only when rebased or restarted from this baseline |
 
-## Shared Resume Rule
+## Wave 1 Priority
 
-- Each lane starts from `codex/truth-freeze-baseline` and must preserve the scene-document-first contract while remaining backward-compatible to `scene_graph`.
-- Any lane touching shared MVP transport or HUD shell surfaces must halt and coordinate with the redesign stop-sign owner.
-- Contracts, backend, and projects lanes should align on provenance/handoff truth without redefining shell ownership.
-- If the shared working tree contains stop-sign edits, implementation lanes must use fresh worktrees from the freeze commit rather than continuing in-place.
+`codex/world-workflow-refocus-entrypoints` is the first intended lane from this baseline.
 
-## Freeze Restart Status
+Wave 1 owns:
 
-- `codex/editor-scene-document` currently needs a replay-split and should be constrained to allowed paths.
-- `codex/contracts-validation-handoff` starts fresh from the new freeze commit.
-- `codex/backend-ingest-truth` starts fresh from the new freeze commit.
-- `codex/projects-review-links` starts fresh from the new freeze commit.
-- `codex/vercel-backend-parity` starts fresh from the new freeze commit.
+- `src/app/(app)/app/page.tsx`
+- `src/app/(app)/layout.tsx`
+- `src/app/(app)/app/worlds/page.tsx`
+- `src/components/platform/Sidebar.tsx`
+- adjacent world-library framing surfaces that do not import the freshly changed review-share internals
+
+Wave 1 avoids:
+
+- `/mvp` runtime
+- `/pro`
+- backend truth/handoff files
+- just-finished review-share truth files
+
+## Verification Expectations
+
+- Baseline acceptance already ran through `npm run closeout:static` plus the explicit Python truth/save bundle.
+- Wave 1 should at minimum pass:
+  - `npm run typecheck`
+  - `npm run test:platform-routes`
+  - `npm run build`
