@@ -1,0 +1,150 @@
+"use client";
+
+import { useEffect, useState, useTransition } from "react";
+
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+
+import type { AccessibleStudioSummary } from "@/server/contracts/account";
+import type { CoverageSnapshot } from "@/server/contracts/coverage";
+import type { CoordinationWorkload } from "@/server/contracts/coordination";
+import type { OperationsSnapshot } from "@/server/contracts/operations";
+
+import { StatusBadge } from "./StatusBadge";
+
+export function WorkspaceSwitcher({
+    studios,
+    activeStudioId,
+    workload,
+    operations,
+    coverage,
+}: {
+    studios: AccessibleStudioSummary[];
+    activeStudioId: string | null;
+    workload?: CoordinationWorkload | null;
+    operations?: OperationsSnapshot | null;
+    coverage?: CoverageSnapshot | null;
+}) {
+    const router = useRouter();
+    const [selectedStudioId, setSelectedStudioId] = useState(activeStudioId ?? studios[0]?.studioId ?? "");
+    const [error, setError] = useState<string | null>(null);
+    const [isPending, startTransition] = useTransition();
+
+    useEffect(() => {
+        setSelectedStudioId(activeStudioId ?? studios.find((studio) => studio.isActive)?.studioId ?? studios[0]?.studioId ?? "");
+    }, [activeStudioId, studios]);
+
+    const activeStudio = studios.find((studio) => studio.studioId === (activeStudioId ?? selectedStudioId)) ?? studios[0] ?? null;
+
+    if (studios.length === 0) {
+        return (
+            <div data-testid="workspace-switcher" className="min-w-[260px] rounded-[1.35rem] border border-white/10 bg-black/25 p-4">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-cyan-200/70">Workspace</p>
+                <p className="mt-3 text-sm font-medium text-white">No studio is active yet</p>
+                <p className="mt-2 text-sm leading-6 text-neutral-400">Create the first workspace from the dashboard to unlock team, billing, support, and studio settings.</p>
+                <Link href="/app/dashboard#studio-bootstrap" className="mt-4 inline-flex text-sm font-medium text-white transition-opacity hover:opacity-80">
+                    Open bootstrap
+                </Link>
+            </div>
+        );
+    }
+
+    return (
+        <div data-testid="workspace-switcher" className="min-w-[280px] rounded-[1.35rem] border border-white/10 bg-black/25 p-4">
+            <div className="flex items-start justify-between gap-3">
+                <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-cyan-200/70">Workspace</p>
+                    <p data-testid="workspace-switcher-active-name" className="mt-2 text-sm font-medium text-white">
+                        {activeStudio?.name ?? "Studio"}
+                    </p>
+                    <p data-testid="workspace-switcher-active-role" className="mt-1 text-xs text-neutral-500">
+                        {activeStudio ? `${activeStudio.role} access` : "No role mounted"}
+                    </p>
+                    {workload ? (
+                        <div className="mt-3 flex flex-wrap gap-2">
+                            <StatusBadge
+                                label={coverage?.health ?? workload.coverageHealth}
+                                tone={
+                                    (coverage?.health ?? workload.coverageHealth) === "stable"
+                                        ? "success"
+                                        : (coverage?.health ?? workload.coverageHealth) === "overloaded"
+                                          ? "danger"
+                                          : "warning"
+                                }
+                            />
+                            {workload.unownedItemCount > 0 ? <StatusBadge label={`${workload.unownedItemCount} unowned`} tone="warning" /> : null}
+                            {workload.undercoveredLaneCount > 0 ? <StatusBadge label={`${workload.undercoveredLaneCount} lane gaps`} tone="warning" /> : null}
+                            {workload.unavailableOwnerItemCount > 0 ? (
+                                <StatusBadge label={`${workload.unavailableOwnerItemCount} unavailable-owner`} tone="warning" />
+                            ) : null}
+                            {workload.overloadedOperatorCount > 0 ? (
+                                <StatusBadge label={`${workload.overloadedOperatorCount} overloaded`} tone="warning" />
+                            ) : null}
+                            {operations ? (
+                                <StatusBadge
+                                    label={`${operations.urgentCount} urgent / ${operations.watchCount} watch`}
+                                    tone={operations.urgentCount > 0 ? "danger" : operations.watchCount > 0 ? "warning" : "neutral"}
+                                />
+                            ) : null}
+                        </div>
+                    ) : null}
+                </div>
+                <StatusBadge label={`${studios.length} live`} tone="neutral" />
+            </div>
+
+            <div className="mt-4 space-y-2">
+                <label className="text-[11px] font-semibold uppercase tracking-[0.22em] text-neutral-400">Switch active workspace</label>
+                <select
+                    data-testid="workspace-switcher-select"
+                    value={selectedStudioId}
+                    disabled={isPending || studios.length === 1}
+                    onChange={(event) => {
+                        const nextStudioId = event.target.value;
+                        setSelectedStudioId(nextStudioId);
+                        setError(null);
+
+                        if (!nextStudioId || nextStudioId === activeStudioId) {
+                            return;
+                        }
+
+                        startTransition(async () => {
+                            try {
+                                const response = await fetch("/api/account/active-studio", {
+                                    method: "PATCH",
+                                    headers: {
+                                        "Content-Type": "application/json",
+                                    },
+                                    body: JSON.stringify({
+                                        studioId: nextStudioId,
+                                    }),
+                                });
+                                const payload = (await response.json()) as { success?: boolean; message?: string };
+                                if (!response.ok || !payload.success) {
+                                    throw new Error(payload.message || "Unable to switch workspace.");
+                                }
+
+                                router.refresh();
+                            } catch (switchError) {
+                                setSelectedStudioId(activeStudioId ?? studios.find((studio) => studio.isActive)?.studioId ?? studios[0]?.studioId ?? "");
+                                setError(switchError instanceof Error ? switchError.message : "Unable to switch workspace.");
+                            }
+                        });
+                    }}
+                    className="w-full rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-sm text-white outline-none transition-colors focus:border-cyan-300/40 disabled:text-neutral-500"
+                >
+                    {studios.map((studio) => (
+                        <option key={studio.studioId} value={studio.studioId} className="bg-neutral-950 text-white">
+                            {studio.name} ({studio.role})
+                        </option>
+                    ))}
+                </select>
+            </div>
+
+            {error ? (
+                <p data-testid="workspace-switcher-error" className="mt-3 rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
+                    {error}
+                </p>
+            ) : null}
+        </div>
+    );
+}
