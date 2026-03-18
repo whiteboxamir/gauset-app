@@ -5,6 +5,10 @@ node_modules/
 
 # next.js
 /.next/
+/.next-dev/
+/.next-dev-*/
+/.next.bootfix.*/
+/.next.stale.*/
 /out/
 
 # production
@@ -54,3 +58,5 @@ __pycache__/
 captures/
 reconstruction_cache/
 gauset.db
+playwright-report/
+test-results/

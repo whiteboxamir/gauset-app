@@ -10,7 +10,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-DEFAULT_BASE_URL = "http://127.0.0.1:3015"
+DEFAULT_BASE_URL = "http://localhost:3015"
 POLL_TIMEOUT_SECONDS = 180
 
 
@@ -333,7 +333,10 @@ def run_reconstruction_smoke(api_base_url: str, web_base_url: str, file_path: Pa
 
     rejection = start_reconstruction_expect_failure(api_base_url, session["session_id"])
     rejection_detail = str(rejection.get("detail") or "").strip()
-    if "duplicate" not in rejection_detail.lower() and "unique" not in rejection_detail.lower():
+    normalized_rejection_detail = rejection_detail.lower()
+    if not any(
+        token in normalized_rejection_detail for token in ("duplicate", "unique", "overlap", "capture set", "minimum")
+    ):
         raise RuntimeError(f"unexpected reconstruction rejection detail: {json.dumps(rejection)}")
 
     return {

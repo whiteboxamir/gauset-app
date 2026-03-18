@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Upload, Image as ImageIcon, Loader2, Sparkles } from "lucide-react";
+import { Upload, Loader2, Sparkles } from "lucide-react";
 
 interface ImageIngestionFlowProps {
     onGenerationComplete: (url: string) => void;
@@ -18,7 +18,7 @@ export function ImageIngestionFlow({ onGenerationComplete }: ImageIngestionFlowP
         setIsGenerating(true);
         let currentProgress = 0;
 
-        // Determine the splat to return based on the filename to make it "fully functional"
+        // Choose a deterministic preview fixture based on the filename.
         const filename = file.name.toLowerCase();
 
         const splats = [
@@ -38,7 +38,7 @@ export function ImageIngestionFlow({ onGenerationComplete }: ImageIngestionFlowP
             finalSplatUrl = splats[hash % splats.length];
         }
 
-        // Simulate complex Luma/Veo 3D generation pipeline
+        // Simulate a sandboxed image-to-scene preview flow.
         const interval = setInterval(() => {
             currentProgress += Math.random() * 15;
             if (currentProgress >= 100) {
@@ -63,7 +63,10 @@ export function ImageIngestionFlow({ onGenerationComplete }: ImageIngestionFlowP
 
             <h2 className="text-2xl font-bold text-white mb-2 tracking-tight">Image to 3D Scene</h2>
             <p className="text-white/50 text-sm text-center mb-8 px-4">
-                Upload concept art or a reference photo. The AI will instantly hallucinate a navigable 3D world around it.
+                Upload concept art or a reference photo. This sandbox maps it to a prewired scene preview fixture for review.
+            </p>
+            <p className="text-[11px] leading-5 text-white/35 text-center -mt-4 mb-6 px-4">
+                The preview fixture is deterministic and does not call a live capture provider.
             </p>
 
             {!isGenerating ? (
@@ -72,7 +75,7 @@ export function ImageIngestionFlow({ onGenerationComplete }: ImageIngestionFlowP
                         <div className="bg-white/10 p-4 rounded-full mb-4 group-hover:scale-110 group-hover:bg-indigo-500/20 transition-all">
                             <Upload className="w-6 h-6 text-white/70 group-hover:text-indigo-400" />
                         </div>
-                        <span className="text-sm text-white/70 font-medium">Click to upload 2D inspiration</span>
+                        <span className="text-sm text-white/70 font-medium">Click to load demo reference</span>
                         <input type="file" className="hidden" accept="image/*" onChange={handleSimulateGeneration} />
                     </div>
                 </label>

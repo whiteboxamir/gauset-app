@@ -4,7 +4,7 @@ import dynamic from "next/dynamic";
 import { useState, useEffect } from "react";
 import { DirectorControls } from "@/components/Viewfinder/DirectorControls";
 import { AgenticChat, AgentAction } from "@/components/Viewfinder/AgenticChat";
-import { AssetOrchestrator, AssetType, LightingPreset, SceneAsset } from "@/components/Viewfinder/AssetOrchestrator";
+import { AssetOrchestrator, LightingPreset, SceneAsset } from "@/components/Viewfinder/AssetOrchestrator";
 import { ImageIngestionFlow } from "@/components/Viewfinder/ImageIngestionFlow";
 import { Annotation } from "@/components/Viewfinder/AnnotationSystem";
 import { TimelineEditor } from "@/components/Viewfinder/TimelineEditor";
@@ -14,12 +14,65 @@ const SceneViewer = dynamic(() => import("@/components/Viewfinder/SceneViewer"),
     ssr: false,
 });
 
+const PRO_EXPERIMENT_TRUTH =
+    "Experimental /pro sandbox. Video generation uses a mocked API response and is not connected to live providers, auth, billing, or entitlements.";
+
+type GeneratedVideoResponse = {
+    success?: boolean;
+    videoUrl?: string;
+    truthLabel?: string;
+    message?: string;
+    mode?: string;
+    experimental?: boolean;
+    liveProvider?: boolean;
+    error?: string;
+    pathSummary?: {
+        frameCount?: number;
+    };
+};
+
+type RecordedPathFrame = {
+    time: number;
+    position: [number, number, number];
+    rotation: [number, number, number, number];
+};
+
+function isFiniteNumber(value: unknown): value is number {
+    return typeof value === "number" && Number.isFinite(value);
+}
+
+function isRecordedPathFrame(value: unknown): value is RecordedPathFrame {
+    if (!value || typeof value !== "object") {
+        return false;
+    }
+
+    const frame = value as Partial<Record<string, unknown>>;
+    return (
+        isFiniteNumber(frame.time) &&
+        Array.isArray(frame.position) &&
+        frame.position.length === 3 &&
+        frame.position.every(isFiniteNumber) &&
+        Array.isArray(frame.rotation) &&
+        frame.rotation.length === 4 &&
+        frame.rotation.every(isFiniteNumber)
+    );
+}
+
+function isRecordedPath(value: unknown): value is RecordedPathFrame[] {
+    return Array.isArray(value) && value.length > 0 && value.every(isRecordedPathFrame);
+}
+
+type RecordingCompleteEvent = CustomEvent<{
+    path: RecordedPathFrame[];
+}>;
+
 export default function ProPage() {
     const [isRecording, setIsRecording] = useState(false);
     const [prompt, setPrompt] = useState("");
     const [isGenerating, setIsGenerating] = useState(false);
     const [videoUrl, setVideoUrl] = useState<string | null>(null);
-    const [recordedPath, setRecordedPath] = useState<any[] | null>(null);
+    const [videoTruth, setVideoTruth] = useState(PRO_EXPERIMENT_TRUTH);
+    const [recordedPath, setRecordedPath] = useState<RecordedPathFrame[] | null>(null);
     const [assets, setAssets] = useState<SceneAsset[]>([]);
     const [lightingPreset, setLightingPreset] = useState<LightingPreset>("cinematic");
     const [shaderPreset, setShaderPreset] = useState<string>("natural");
@@ -79,10 +132,21 @@ export default function ProPage() {
 
     useEffect(() => {
         // Listen for the custom event from the SceneViewer payload
-        const handleRecordingComplete = (event: any) => {
-            const { path } = event.detail;
-            console.log("Received recorded path, showing timeline editor. length:", path.length, "frames");
-            setRecordedPath(path);
+        const handleRecordingComplete = (event: Event) => {
+            const path = (event as Partial<RecordingCompleteEvent> & { detail?: { path?: unknown } }).detail?.path;
+            console.log(
+                "Received recorded path, showing timeline editor. length:",
+                Array.isArray(path) ? path.length : 0,
+                "frames",
+            );
+            if (isRecordedPath(path)) {
+                setRecordedPath(path);
+                setVideoTruth(PRO_EXPERIMENT_TRUTH);
+                return;
+            }
+
+            setRecordedPath(null);
+            setVideoTruth("Recorded camera path data is missing or invalid. Capture a new path before running the experimental render.");
         };
 
         window.addEventListener("gauset-recording-complete", handleRecordingComplete);
@@ -92,7 +156,12 @@ export default function ProPage() {
     }, []);
 
     const handleGenerateVideo = async () => {
-        if (!recordedPath) return;
+        if (!isRecordedPath(recordedPath)) {
+            setVideoTruth("Recorded camera path data is missing or invalid. Capture a new path before running the experimental render.");
+            return;
+        }
+
+        const pathToGenerate = recordedPath;
         setIsGenerating(true);
         setRecordedPath(null); // Hide timeline when generating
 
@@ -103,19 +172,29 @@ export default function ProPage() {
                     "Content-Type": "application/json",
                 },
                 body: JSON.stringify({
-                    prompt: prompt || "A cinematic journey through the world",
-                    pathData: recordedPath
+                    prompt: prompt.trim() || "A cinematic journey through the world",
+                    pathData: pathToGenerate
                 }),
             });
 
-            const data = await response.json();
+            const data = (await response.json()) as GeneratedVideoResponse;
+
+            if (!response.ok) {
+                setRecordedPath(pathToGenerate);
+                setVideoTruth(data.error || data.message || PRO_EXPERIMENT_TRUTH);
+                console.error("Failed to generate mock video:", data.error || data.message);
+                return;
+            }
 
             if (data.success && data.videoUrl) {
                 setVideoUrl(data.videoUrl);
+                setVideoTruth(data.truthLabel || data.message || PRO_EXPERIMENT_TRUTH);
             } else {
+                setRecordedPath(pathToGenerate);
                 console.error("Failed to generate video:", data.error);
             }
         } catch (err) {
+            setRecordedPath(pathToGenerate);
             console.error("API error:", err);
         } finally {
             setIsGenerating(false);
@@ -128,6 +207,7 @@ export default function ProPage() {
 
     const handleStartRecording = () => {
         setVideoUrl(null); // Reset prev video
+        setVideoTruth(PRO_EXPERIMENT_TRUTH);
         setRecordedPath(null); // Reset previous path
         setIsRecording(true);
     };
@@ -146,7 +226,10 @@ export default function ProPage() {
                         <div className="w-8 h-8 rounded-lg bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center">
                             <Sparkles className="w-4 h-4 text-indigo-400" />
                         </div>
-                        <h1 className="font-bold tracking-widest text-sm uppercase">Gauset Pro</h1>
+                        <div>
+                            <h1 className="font-bold tracking-widest text-sm uppercase">Gauset Pro Experimental</h1>
+                            <p className="text-[10px] uppercase tracking-[0.16em] text-amber-300/80">Mock render lane</p>
+                        </div>
                     </div>
                     {isSceneReady && (
                         <button
@@ -158,6 +241,20 @@ export default function ProPage() {
                         </button>
                     )}
                 </div>
+
+                <div
+                    className="mx-5 mt-5 rounded-2xl border border-amber-400/20 bg-amber-400/10 px-4 py-3 text-[11px] leading-5 text-amber-100"
+                    data-testid="pro-experimental-truth-banner"
+                >
+                    <p className="text-[10px] font-medium uppercase tracking-[0.16em] text-amber-50">Experimental surface</p>
+                    <p className="mt-2">{PRO_EXPERIMENT_TRUTH}</p>
+                </div>
+                {videoTruth !== PRO_EXPERIMENT_TRUTH && !videoUrl && (
+                    <div className="mx-5 rounded-2xl border border-rose-400/20 bg-rose-400/10 px-4 py-3 text-[11px] leading-5 text-rose-100">
+                        <p className="text-[10px] font-medium uppercase tracking-[0.16em] text-rose-50">Render status</p>
+                        <p className="mt-2">{videoTruth}</p>
+                    </div>
+                )}
 
                 <div className="flex-1 overflow-y-auto p-5 pb-24 space-y-6">
                     {/* Only show orchestration if a scene isn't loaded */}
@@ -285,7 +382,7 @@ export default function ProPage() {
                                                 />
                                                 <select
                                                     value={a.type}
-                                                    onChange={(e) => setAnnotations(prev => prev.map(x => x.id === a.id ? { ...x, type: e.target.value as any } : x))}
+                                                    onChange={(e) => setAnnotations(prev => prev.map(x => x.id === a.id ? { ...x, type: e.target.value as Annotation["type"] } : x))}
                                                     className="w-full bg-white/5 border border-transparent rounded p-2 text-xs text-white focus:outline-none focus:border-indigo-500 focus:bg-white/10 transition-colors appearance-none cursor-pointer"
                                                 >
                                                     <option value="general">General Note</option>
@@ -328,7 +425,7 @@ export default function ProPage() {
                             shaderPreset={shaderPreset}
                             isPlacingAnnotation={isPlacingAnnotation}
                             annotations={annotations}
-                            onAnnotationAdded={(ann) => {
+                            onAnnotationAdded={(ann: Annotation) => {
                                 setAnnotations(prev => [...prev, ann]);
                                 setIsPlacingAnnotation(false);
                             }}
@@ -377,14 +474,15 @@ export default function ProPage() {
                     </div>
                 )}
 
-                {/* Veo Generating Overlay */}
+                {/* Experimental mock generating overlay */}
                 {isGenerating && (
                     <div className="absolute inset-0 bg-black/50 backdrop-blur-3xl z-40 flex flex-col items-center justify-center">
                         <div className="flex flex-col items-center gap-6 bg-white/5 p-12 rounded-3xl border border-white/10 shadow-2xl">
                             <div className="w-16 h-16 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin shadow-[0_0_30px_rgba(79,70,229,0.5)]"></div>
                             <div className="text-center">
-                                <h3 className="text-xl font-bold text-white tracking-tight mb-2">Google Veo is Rendering</h3>
-                                <p className="text-sm text-indigo-300 font-mono tracking-widest uppercase">Synthesizing path to video...</p>
+                                <h3 className="text-xl font-bold text-white tracking-tight mb-2">Simulating Mock Render</h3>
+                                <p className="text-sm text-indigo-300 font-mono tracking-widest uppercase">Validating path and returning a preview clip...</p>
+                                <p className="mt-3 max-w-md text-xs leading-5 text-white/60">{PRO_EXPERIMENT_TRUTH}</p>
                             </div>
                         </div>
                     </div>
@@ -395,9 +493,15 @@ export default function ProPage() {
                     <div className="absolute inset-0 flex items-center justify-center bg-black z-30">
                         <div className="w-full h-full max-w-6xl p-8 flex flex-col">
                             <div className="flex justify-between items-center mb-6">
-                                <h3 className="text-2xl font-bold tracking-tight pb-1 border-b border-white/20">Final Render</h3>
+                                <div>
+                                    <h3 className="text-2xl font-bold tracking-tight pb-1 border-b border-white/20">Experimental Render Preview</h3>
+                                    <p className="mt-2 text-xs leading-5 text-amber-200">{videoTruth}</p>
+                                </div>
                                 <button
-                                    onClick={() => setVideoUrl(null)}
+                                    onClick={() => {
+                                        setVideoUrl(null);
+                                        setVideoTruth(PRO_EXPERIMENT_TRUTH);
+                                    }}
                                     className="px-6 py-2 bg-white/10 text-white hover:bg-white/20 font-semibold rounded-full border border-white/20 transition-all text-sm"
                                 >
                                     Dismiss to Viewfinder

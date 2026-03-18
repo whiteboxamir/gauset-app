@@ -1,8 +1,11 @@
 import fs from "fs/promises";
 import path from "path";
 import { chromium } from "@playwright/test";
+import hostGuard from "./mvp_host_guard.cjs";
 
-const baseUrl = (process.argv[2] ?? "http://127.0.0.1:3000").replace(/\/$/, "");
+const { assertLocalMvpBaseUrl } = hostGuard;
+
+const baseUrl = assertLocalMvpBaseUrl(process.argv[2] ?? "http://localhost:3000", "scripts/mvp_preview_repro.mjs");
 const fixturePath = path.resolve(process.argv[3] ?? "tests/fixtures/public-scenes/03-neon-streets.png");
 const screenshotPath = process.argv[4] ?? "/tmp/mvp-preview-repro.png";
 const routePath = process.argv[5] ?? "/mvp";
@@ -192,7 +195,7 @@ await page.addInitScript((payload) => {
 }, draftJson);
 
 await page.goto(`${baseUrl}${routePath}`, { waitUntil: "networkidle", timeout: 120000 });
-const resumeDraftButton = page.getByRole("button", { name: /Resume last draft/i });
+const resumeDraftButton = page.getByRole("button", { name: /Return to my last world|Resume last draft/i });
 if (await resumeDraftButton.count()) {
     await resumeDraftButton.first().click();
     await page.waitForLoadState("networkidle");

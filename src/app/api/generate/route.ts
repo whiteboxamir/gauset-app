@@ -1,66 +1,114 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "next/server.js";
+
+type GenerateRequestBody = {
+    prompt?: string;
+    pathData?: unknown;
+    baseVideo?: string | null;
+};
+
+type RecordedPathFrame = {
+    time: number;
+    position: [number, number, number];
+    rotation: [number, number, number, number];
+};
+
+function isFiniteNumber(value: unknown): value is number {
+    return typeof value === "number" && Number.isFinite(value);
+}
+
+function isRecordedPathFrame(value: unknown): value is RecordedPathFrame {
+    if (!value || typeof value !== "object") {
+        return false;
+    }
+
+    const frame = value as Partial<Record<string, unknown>>;
+    return (
+        isFiniteNumber(frame.time) &&
+        Array.isArray(frame.position) &&
+        frame.position.length === 3 &&
+        frame.position.every(isFiniteNumber) &&
+        Array.isArray(frame.rotation) &&
+        frame.rotation.length === 4 &&
+        frame.rotation.every(isFiniteNumber)
+    );
+}
+
+function isRecordedPath(value: unknown): value is RecordedPathFrame[] {
+    return Array.isArray(value) && value.length > 0 && value.every(isRecordedPathFrame);
+}
+
+function buildExperimentalMockHeaders() {
+    return {
+        "x-gauset-experimental": "1",
+        "x-gauset-live-provider": "0",
+    };
+}
+
+function buildExperimentalMockEnvelope(frameCount: number, truthLabel?: string) {
+    return {
+        mode: "experimental_mock",
+        experimental: true,
+        liveProvider: false,
+        provider: "gauset_mock_render_preview",
+        truthLabel:
+            truthLabel ??
+            `Experimental mock render preview. Consumed ${frameCount} recorded camera frames and did not call a live provider.`,
+    };
+}
 
 export async function POST(req: Request) {
     try {
-        const { prompt, baseVideo } = await req.json();
+        const { prompt, pathData, baseVideo } = (await req.json()) as GenerateRequestBody;
+        const normalizedPrompt = typeof prompt === "string" ? prompt.trim() : "";
 
-        if (!prompt) {
+        if (!normalizedPrompt) {
             return NextResponse.json({ error: "Prompt is required" }, { status: 400 });
         }
 
-        // Example payload structure for a Google Veo / Video generation API
-        // (This is a simplified representation of what the Veo API expects)
-        const veoPayload = {
-            instances: [
+        if (!isRecordedPath(pathData)) {
+            return NextResponse.json(
                 {
-                    prompt: prompt,
-                    // If we captured keyframes, we'd include them here to guide the sequence
-                    condition: baseVideo ? {
-                        type: "video/mp4",
-                        data: baseVideo,
-                    } : undefined,
-                }
-            ],
-            parameters: {
-                aspectRatio: "16:9",
-                duration: "5s",
-                fps: 24,
-            }
+                    success: false,
+                    error: "Recorded camera path data must be a non-empty array of recorded camera frames.",
+                    message: "The experimental mock render route only accepts captured frames with time, position, and rotation data.",
+                    ...buildExperimentalMockEnvelope(0, "Experimental mock render route rejected invalid camera path data and did not call a live provider."),
+                },
+                { status: 400, headers: buildExperimentalMockHeaders() },
+            );
+        }
+
+        const frameCount = pathData.length;
+        const mockInputSummary = {
+            promptLength: normalizedPrompt.length,
+            frameCount,
+            hasBaseVideo: Boolean(baseVideo),
         };
 
-        // Google Veo/Vertex AI endpoint (placeholder)
-        const VEO_API_ENDPOINT = "https://us-central1-aiplatform.googleapis.com/v1/projects/YOUR_PROJECT/locations/us-central1/publishers/google/models/veo:predict";
+        console.log(
+            "Experimental /api/generate mock render request:",
+            JSON.stringify(mockInputSummary),
+        );
 
-        // NOTE: In a real environment, we'd use Google Auth Library to get a bearer token
-        const VEO_API_KEY = process.env.VEO_API_KEY || "YOUR_API_KEY";
+        const mockGeneratedVideoUrl = "https://storage.googleapis.com/mux-demo-cdn/mux-video-demo.mp4";
 
-        // Simulate API call for the MVP since we might not have the actual live credentials yet
-        console.log("Sending payload to Veo API:", JSON.stringify(veoPayload).substring(0, 500) + "...");
+        return NextResponse.json(
+            {
+                success: true,
+                videoUrl: mockGeneratedVideoUrl,
+                ...buildExperimentalMockEnvelope(frameCount),
+                pathSummary: {
+                    frameCount,
+                },
+                message: "Experimental mock render response returned. The route validated the captured path locally and returned a static preview clip instead of invoking a production video backend.",
+            },
+            {
+                headers: buildExperimentalMockHeaders(),
+            },
+        );
 
-        /* 
-        const response = await fetch(VEO_API_ENDPOINT, {
-          method: "POST",
-          headers: {
-            "Authorization": `Bearer ${VEO_API_KEY}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(veoPayload)
-        });
-    
-        const data = await response.json();
-        */
-
-        // Mock successful response for the MVP builder
-        const mockGeneratedVideoUrl = "https://storage.googleapis.com/mux-demo-cdn/mux-video-demo.mp4"; // Sample placeholder video
-
-        return NextResponse.json({
-            success: true,
-            videoUrl: mockGeneratedVideoUrl,
-            message: "Successfully initiated Veo generation"
-        });
-
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error("Error in generate API:", error);
-        return NextResponse.json({ error: error.message || "Internal Server Error" }, { status: 500 });
+        const message = error instanceof Error ? error.message : "Internal Server Error";
+        return NextResponse.json({ error: message }, { status: 500 });
     }
 }

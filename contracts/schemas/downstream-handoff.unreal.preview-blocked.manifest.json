@@ -1,0 +1,222 @@
+{
+  "contract": "downstream-handoff/v1",
+  "manifest_id": "handoff_unreal_preview_blocked_01",
+  "target": {
+    "system": "unreal_engine",
+    "profile": "unreal_scene_package/v1",
+    "label": "Unreal 5.4 rooftop scout preview",
+    "engine_version": "5.4",
+    "coordinate_system": "left_handed_z_up",
+    "unit_scale": "centimeter"
+  },
+  "source": {
+    "ingest_contract": "world-ingest/v1",
+    "ingest_record_id": "ingest_rooftop_preview_01",
+    "project_id": "proj_rooftop_scout_01",
+    "scene_id": "scene_rooftop_preview_01",
+    "version_id": "20260316T160000000Z"
+  },
+  "scene_document": {
+    "version": 2,
+    "rootIds": [
+      "group_rooftop"
+    ],
+    "nodes": {
+      "group_rooftop": {
+        "id": "group_rooftop",
+        "kind": "group",
+        "parentId": null,
+        "childIds": [
+          "splat_rooftop_preview"
+        ],
+        "name": "Rooftop scout",
+        "visible": true,
+        "locked": false,
+        "transform": {
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        }
+      },
+      "splat_rooftop_preview": {
+        "id": "splat_rooftop_preview",
+        "kind": "splat",
+        "parentId": "group_rooftop",
+        "childIds": [],
+        "name": "Rooftop preview",
+        "visible": true,
+        "locked": false,
+        "transform": {
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        }
+      }
+    },
+    "groups": {
+      "group_rooftop": {
+        "id": "group_rooftop"
+      }
+    },
+    "cameras": {},
+    "lights": {},
+    "meshes": {},
+    "splats": {
+      "splat_rooftop_preview": {
+        "id": "splat_rooftop_preview",
+        "sceneId": "scene_rooftop_preview_01",
+        "viewerUrl": "/api/mvp/storage/scenes/scene_rooftop_preview_01/environment/metadata.json",
+        "splatUrl": "/api/mvp/storage/scenes/scene_rooftop_preview_01/environment/splats.ply",
+        "camerasUrl": "/api/mvp/storage/scenes/scene_rooftop_preview_01/environment/cameras.json",
+        "metadataUrl": "/api/mvp/storage/scenes/scene_rooftop_preview_01/environment/metadata.json",
+        "metadata": {
+          "lane": "preview",
+          "truth_label": "Instant Preview",
+          "quality_tier": "single_image_preview",
+          "lane_truth": "Single-image preview is useful for scouting nearby moves but does not claim faithful reconstruction."
+        }
+      }
+    },
+    "direction": {
+      "cameraViews": [],
+      "pins": [],
+      "directorPath": [],
+      "directorBrief": "Scout-only rooftop preview."
+    },
+    "review": null,
+    "viewer": {
+      "fov": 35,
+      "lens_mm": 35,
+      "activeCameraNodeId": null
+    }
+  },
+  "compatibility_scene_graph": {
+    "environment": {
+      "id": "scene_rooftop_preview_01",
+      "lane": "preview",
+      "urls": {
+        "splats": "/api/mvp/storage/scenes/scene_rooftop_preview_01/environment/splats.ply",
+        "cameras": "/api/mvp/storage/scenes/scene_rooftop_preview_01/environment/cameras.json",
+        "metadata": "/api/mvp/storage/scenes/scene_rooftop_preview_01/environment/metadata.json",
+        "preview_projection": "/api/mvp/storage/scenes/scene_rooftop_preview_01/environment/preview-projection.png"
+      },
+      "metadata": {
+        "lane": "preview",
+        "truth_label": "Instant Preview",
+        "quality_tier": "single_image_preview",
+        "lane_truth": "Single-image preview is useful for scouting nearby moves but does not claim faithful reconstruction."
+      }
+    },
+    "assets": [],
+    "camera_views": [],
+    "pins": [],
+    "director_path": [],
+    "director_brief": "Scout-only rooftop preview.",
+    "viewer": {
+      "fov": 35,
+      "lens_mm": 35
+    },
+    "__scene_document_v2": {
+      "version": 2
+    }
+  },
+  "review": {
+    "approval_state": "in_review",
+    "version_locked": false,
+    "share_ready": true,
+    "share_mode": "inline_payload",
+    "review_url": null
+  },
+  "truth": {
+    "source_kind": "third_party_world_model_output",
+    "lane": "preview",
+    "truth_label": "Instant Preview",
+    "lane_truth": "Single-image preview is useful for scouting nearby moves but does not claim faithful reconstruction.",
+    "production_readiness": "blocked",
+    "blockers": [
+      "preview_not_reconstruction",
+      "review_not_approved",
+      "version_not_locked"
+    ]
+  },
+  "payload": {
+    "root_dir": "handoff/unreal/rooftop_preview_01",
+    "files": [
+      {
+        "path": "scene-document.json",
+        "kind": "scene_document"
+      },
+      {
+        "path": "scene-graph.json",
+        "kind": "compatibility_scene_graph"
+      },
+      {
+        "path": "environment/splats.ply",
+        "kind": "environment_splat"
+      },
+      {
+        "path": "environment/metadata.json",
+        "kind": "environment_metadata"
+      }
+    ],
+    "environment": {
+      "splat_path": "environment/splats.ply",
+      "metadata_path": "environment/metadata.json",
+      "preview_projection_path": "environment/preview-projection.png"
+    },
+    "assets": []
+  },
+  "delivery": {
+    "status": "blocked",
+    "checked_at": "2026-03-16T16:05:00.000Z",
+    "checked_by": "contracts-validation-handoff",
+    "requirements": [
+      {
+        "key": "scene_document_present",
+        "passed": true
+      },
+      {
+        "key": "version_locked",
+        "passed": false
+      },
+      {
+        "key": "review_approved",
+        "passed": false
+      },
+      {
+        "key": "target_named",
+        "passed": true
+      },
+      {
+        "key": "lane_truth_preserved",
+        "passed": true
+      }
+    ]
+  }
+}

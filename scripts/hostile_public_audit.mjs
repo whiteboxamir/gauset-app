@@ -1,11 +1,22 @@
 import fs from "fs/promises";
 import path from "path";
 import crypto from "crypto";
+import hostGuard from "./mvp_host_guard.cjs";
 
-const BASE = process.env.GAUSET_MVP_BASE_URL || "https://gauset-app.vercel.app";
-const STORAGE_BASE = process.env.GAUSET_MVP_STORAGE_BASE_URL || BASE;
+const { assertPublicCertificationContext, assertPublicMvpBaseUrl } = hostGuard;
+
+const BASE = assertPublicMvpBaseUrl(
+  process.env.GAUSET_MVP_BASE_URL || "https://gauset-app.vercel.app",
+  "scripts/hostile_public_audit.mjs base",
+);
+const STORAGE_BASE = assertPublicMvpBaseUrl(
+  process.env.GAUSET_MVP_STORAGE_BASE_URL || BASE,
+  "scripts/hostile_public_audit.mjs storage base",
+);
 const FIXTURE_DIR = path.resolve("tests/fixtures/public-scenes");
-const REPORT_PATH = path.resolve("test-results/public-live/hostile-audit-report.json");
+const { artifactDir, runLabel } = assertPublicCertificationContext("scripts/hostile_public_audit.mjs");
+const REPORT_PATH = path.resolve(artifactDir, "hostile-audit-report.json");
+const ACTOR_LABEL = `Codex ${runLabel}`;
 
 const WAVES = [
   { name: "desert", file: "01-desert-dunes.png" },
@@ -107,15 +118,15 @@ async function upsertReview(sceneId) {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       metadata: {
-        project_name: "Hostile Public Audit",
-        scene_title: "World-Class Gate Audit",
-        location_name: "Public Proxy",
-        owner: "Codex",
-        notes: "Automated public hostile audit review payload.",
+        project_name: `Hostile Public Audit ${runLabel}`,
+        scene_title: `World-Class Gate Audit ${runLabel}`,
+        location_name: `Public Proxy ${runLabel}`,
+        owner: ACTOR_LABEL,
+        notes: `Automated public hostile audit review payload ${runLabel}.`,
       },
       approval_state: "draft",
-      updated_by: "Codex",
-      note: "Automated hostile audit touched this review.",
+      updated_by: ACTOR_LABEL,
+      note: `Automated hostile audit touched this review (${runLabel}).`,
       issues: [],
     }),
   });
@@ -130,8 +141,8 @@ async function postComment(sceneId, versionId, waveName) {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
-      author: "Codex",
-      body: `Hostile public audit comment for ${waveName}.`,
+      author: ACTOR_LABEL,
+      body: `Hostile public audit comment for ${waveName} (${runLabel}).`,
       anchor: "scene",
     }),
   });
@@ -267,6 +278,7 @@ async function main() {
 
   const report = {
     base: BASE,
+    run_label: runLabel,
     storage_base: STORAGE_BASE,
     executed_at: new Date().toISOString(),
     summary: {

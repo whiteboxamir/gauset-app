@@ -73,7 +73,7 @@ export function InterrogatorOverlay({ splatUrl }: InterrogatorOverlayProps) {
                         <div className="flex items-center justify-between p-5 border-b border-white/10 bg-indigo-500/10">
                             <div className="flex items-center gap-3">
                                 <Sparkles className="w-5 h-5 text-indigo-400" />
-                                <h3 className="text-white/90 font-semibold tracking-wide text-sm">AI Scene Interrogation</h3>
+                                <h3 className="text-white/90 font-semibold tracking-wide text-sm">Scene Interrogation Sandbox</h3>
                             </div>
                             <button onClick={() => setIsOpen(false)} className="text-white/50 hover:text-white transition-colors">
                                 <X className="w-5 h-5" />
@@ -84,7 +84,7 @@ export function InterrogatorOverlay({ splatUrl }: InterrogatorOverlayProps) {
                         <div className="bg-amber-500/10 border-b border-amber-500/20 p-3 px-5 flex items-start gap-3">
                             <ShieldAlert className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
                             <p className="text-xs text-amber-500/90 leading-relaxed">
-                                <strong className="text-amber-500">AWS POC Live:</strong> You are chatting with the experimental spatial reasoning engine.
+                                <strong className="text-amber-500">Experimental surface:</strong> This overlay uses mocked scene reasoning and does not call a live provider.
                             </p>
                         </div>
 

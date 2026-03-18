@@ -441,24 +441,29 @@ Request JSON:
 
 - Confirmed required fields:
   - `scene_id: string`
-  - `scene_graph: object`
+  - at least one of:
+    - `scene_document: object`
+    - `scene_graph: object`
 - Confirmed optional field:
+  - `scene_document: object`
+  - `scene_graph: object`
   - `source`, default `"manual"`
 
 Confirmed local behavior:
 
 - Writes `scenes/{scene_id}/scene.json`
 - Writes `scenes/{scene_id}/versions/{version_id}.json`
-- Stores the submitted `scene_graph` verbatim
+- Stores the canonical `scene_document` when it is provided
+- Stores a compatibility `scene_graph` alongside the canonical scene document in version payloads
 
 Confirmed Vercel behavior:
 
 - Writes `scenes/{scene_id}/scene.json`
 - Writes `scenes/{scene_id}/versions/{version_id}.json`
 - Updates `scenes/{scene_id}/versions_index.json`
-- Normalizes `scene_graph` to:
-  - `environment`
-  - `assets`
+- Accepts `scene_document` and/or `scene_graph`
+- Stores the canonical `scene_document`
+- Returns a compatibility `scene_graph` for backward compatibility
 
 Confirmed response shape:
 
@@ -512,6 +517,7 @@ Confirmed:
   - `saved_at`
   - `source`
   - `summary`
+  - `scene_document`
   - `scene_graph`
 
 Confirmed errors:

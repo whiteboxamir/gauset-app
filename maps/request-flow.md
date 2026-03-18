@@ -203,6 +203,12 @@ There are two ways the review page gets data:
 
 `ReviewExperience` reuses `ViewerPanel` in `readOnly` mode, so the review surface shares the same environment and asset rendering code as the editor.
 
+### Export truth
+
+- `src/lib/mvp-review.ts` currently produces the generic JSON package used for inline review/share export.
+- That package is a review/share artifact, not an explicit downstream handoff manifest.
+- Future external ingest and named downstream delivery work should implement against `/Users/amirboz/gauset-app/contracts/world-ingest.md` and `/Users/amirboz/gauset-app/contracts/downstream-handoff.md`.
+
 ## 7. Storage Contract
 
 The UI expects these path families to remain stable:

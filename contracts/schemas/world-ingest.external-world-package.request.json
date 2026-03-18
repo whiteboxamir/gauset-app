@@ -1,0 +1,39 @@
+{
+  "contract": "world-ingest/v1",
+  "request_id": "ingest_req_extpkg_warehouse_01",
+  "source": {
+    "kind": "external_world_package",
+    "label": "Warehouse scout package",
+    "vendor": "polycam",
+    "format": "polycam/world-package/v1",
+    "captured_at": "2026-03-14T18:42:00.000Z",
+    "source_uri": "s3://partner-drop/warehouse-scout/world-package.zip"
+  },
+  "package": {
+    "media_type": "application/zip",
+    "checksum_sha256": "9aa2a7c7307a4d0e75f8eb5b7c6a6e164f8179f3c6ff7cf2b88d7b0ab661f111",
+    "entrypoints": {
+      "scene_document": "bundle/scene-document.json",
+      "review_metadata": "bundle/review/review.json",
+      "preview_image": "bundle/previews/hero.png"
+    },
+    "files": [
+      {
+        "path": "bundle/scene-document.json",
+        "kind": "scene_document"
+      },
+      {
+        "path": "bundle/review/review.json",
+        "kind": "review_metadata"
+      },
+      {
+        "path": "bundle/previews/hero.png",
+        "kind": "preview_image"
+      }
+    ]
+  },
+  "binding": {
+    "project_id": "proj_partner_warehouse_01",
+    "scene_id": null
+  }
+}
