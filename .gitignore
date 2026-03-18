@@ -60,3 +60,7 @@ reconstruction_cache/
 gauset.db
 playwright-report/
 test-results/
+artifacts/
+tmp/
+tmp_playwright_*.mjs
+supabase/.temp/
