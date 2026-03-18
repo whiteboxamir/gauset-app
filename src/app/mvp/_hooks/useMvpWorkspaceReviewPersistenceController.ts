@@ -17,11 +17,14 @@ import {
 
 import {
     DEFAULT_ISSUE_DRAFT,
+    DEFAULT_VERSION_COMMENT_DRAFT,
+    resolveVersionCommentAnchor,
     resolveSelectedAnchorLabel,
     resolveSelectedVersion,
     type IssueDraft,
     type LegacyComment,
     type SceneVersion,
+    type VersionCommentDraft,
 } from "./mvpWorkspaceReviewShared";
 
 interface UseMvpWorkspaceReviewPersistenceControllerOptions {
@@ -49,6 +52,10 @@ export function useMvpWorkspaceReviewPersistenceController({
     const [reviewError, setReviewError] = useState("");
     const [isSavingReview, setIsSavingReview] = useState(false);
     const [legacyComments, setLegacyComments] = useState<LegacyComment[]>([]);
+    const [versionCommentDraft, setVersionCommentDraft] = useState<VersionCommentDraft>(DEFAULT_VERSION_COMMENT_DRAFT);
+    const [commentStatus, setCommentStatus] = useState("");
+    const [commentError, setCommentError] = useState("");
+    const [isSavingComment, setIsSavingComment] = useState(false);
     const [issueDraft, setIssueDraft] = useState<IssueDraft>(DEFAULT_ISSUE_DRAFT);
 
     const selectedVersion = useMemo(
@@ -65,11 +72,13 @@ export function useMvpWorkspaceReviewPersistenceController({
             }),
         [cameraViews, pins, selectedPinId, selectedViewId],
     );
+    const selectedCommentAnchor = useMemo(() => resolveVersionCommentAnchor(selectedAnchorLabel), [selectedAnchorLabel]);
     const visibleIssues = useMemo(
         () => reviewData.issues.filter((issue) => !selectedVersion || issue.version_id === selectedVersion.version_id),
         [reviewData.issues, selectedVersion],
     );
     const canAddIssue = Boolean(activeScene && selectedVersion && (issueDraft.title.trim() || issueDraft.body.trim()));
+    const canSubmitComment = Boolean(activeScene && selectedVersion && versionCommentDraft.body.trim());
 
     useEffect(() => {
         setSelectedVersionId(null);
@@ -128,6 +137,22 @@ export function useMvpWorkspaceReviewPersistenceController({
             author: reviewData.metadata.owner || previous.author || "Reviewer",
         }));
     }, [reviewData.metadata.owner]);
+
+    useEffect(() => {
+        setVersionCommentDraft((previous) => ({
+            ...previous,
+            author: reviewData.metadata.owner || previous.author || "Reviewer",
+        }));
+    }, [reviewData.metadata.owner]);
+
+    useEffect(() => {
+        setVersionCommentDraft((previous) => ({
+            ...previous,
+            body: "",
+        }));
+        setCommentStatus("");
+        setCommentError("");
+    }, [activeScene, selectedVersion?.version_id]);
 
     useEffect(() => {
         let cancelled = false;
@@ -242,6 +267,10 @@ export function useMvpWorkspaceReviewPersistenceController({
         setIssueDraft((previous) => ({ ...previous, [field]: value } as IssueDraft));
     }, []);
 
+    const setVersionCommentDraftField = useCallback((field: keyof VersionCommentDraft, value: string) => {
+        setVersionCommentDraft((previous) => ({ ...previous, [field]: value }));
+    }, []);
+
     const addIssue = useCallback(async () => {
         if (!activeScene || !selectedVersion?.version_id) return;
         if (!issueDraft.title.trim() && !issueDraft.body.trim()) return;
@@ -307,9 +336,68 @@ export function useMvpWorkspaceReviewPersistenceController({
         [activeScene, persistReview, reviewData],
     );
 
+    const submitVersionComment = useCallback(async () => {
+        if (!activeScene || !selectedVersion?.version_id || !versionCommentDraft.body.trim()) return;
+
+        setIsSavingComment(true);
+        setCommentStatus("");
+        setCommentError("");
+
+        try {
+            const response = await fetch(
+                `${MVP_API_BASE_URL}/scene/${activeScene}/versions/${selectedVersion.version_id}/comments`,
+                {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        author: versionCommentDraft.author.trim() || reviewData.metadata.owner.trim() || "Reviewer",
+                        body: versionCommentDraft.body.trim(),
+                        anchor: selectedCommentAnchor,
+                    }),
+                },
+            );
+            if (!response.ok) {
+                throw new Error(await extractApiError(response, `Version comment save failed (${response.status})`));
+            }
+
+            const payload = (await response.json()) as { comment?: LegacyComment };
+            if (payload.comment) {
+                setLegacyComments((previous) => [...previous, payload.comment as LegacyComment]);
+            }
+            setVersionCommentDraft((previous) => ({
+                ...DEFAULT_VERSION_COMMENT_DRAFT,
+                author: previous.author.trim() || reviewData.metadata.owner || "Reviewer",
+            }));
+            setCommentStatus("Version comment saved.");
+        } catch (error) {
+            setCommentError(error instanceof Error ? error.message : "Version comment save failed.");
+        } finally {
+            setIsSavingComment(false);
+        }
+    }, [
+        activeScene,
+        reviewData.metadata.owner,
+        selectedCommentAnchor,
+        selectedVersion?.version_id,
+        versionCommentDraft.author,
+        versionCommentDraft.body,
+    ]);
+
     const issueCountForVersion = useCallback(
         (versionId: string) => reviewData.issues.filter((issue) => issue.version_id === versionId).length,
         [reviewData.issues],
+    );
+
+    const commentCountForVersion = useCallback(
+        (versionId: string) => {
+            const persistedCount = versions.find((version) => version.version_id === versionId)?.comment_count ?? 0;
+            if (selectedVersion?.version_id !== versionId) {
+                return persistedCount;
+            }
+
+            return Math.max(persistedCount, legacyComments.length);
+        },
+        [legacyComments.length, selectedVersion?.version_id, versions],
     );
 
     const selectVersion = useCallback((versionId: string) => {
@@ -324,19 +412,28 @@ export function useMvpWorkspaceReviewPersistenceController({
         reviewError,
         isSavingReview,
         legacyComments,
+        versionCommentDraft,
+        commentStatus,
+        commentError,
+        isSavingComment,
         issueDraft,
         selectedAnchorLabel,
+        selectedCommentAnchor,
         visibleIssues,
         canAddIssue,
+        canSubmitComment,
         selectVersion,
         saveReview,
         updateReviewField,
         updateApprovalNote,
+        setVersionCommentDraftField,
         setIssueDraftField,
+        submitVersionComment,
         addIssue,
         deleteIssue,
         updateIssueStatus,
         issueCountForVersion,
+        commentCountForVersion,
     };
 }
 

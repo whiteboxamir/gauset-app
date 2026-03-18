@@ -18,6 +18,7 @@ const reviewShareTruthFieldSchema = z.object({
 });
 
 export const createReviewShareModeValues = ["secure_authenticated", "localhost_fallback"] as const;
+export const reviewShareReadinessStateValues = ["ready", "review_only", "blocked"] as const;
 
 function asRecord(value: unknown): Record<string, unknown> | null {
     return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
@@ -157,10 +158,22 @@ export const projectReviewSharesResponseSchema = z.object({
     summary: reviewShareCollectionSummarySchema,
 });
 
+export const reviewShareReadinessSchema = z.object({
+    state: z.enum(reviewShareReadinessStateValues),
+    canCreate: z.boolean(),
+    sceneId: z.string().min(1),
+    versionId: z.string().min(1),
+    summary: z.string().min(1),
+    detail: z.string().min(1),
+    blockers: z.array(z.string().min(1)),
+    truthSummary: worldTruthSummarySchema.nullable(),
+});
+
 export type CreateReviewShareRequest = z.infer<typeof createReviewShareRequestSchema>;
 export type CreateReviewShareResponse = z.infer<typeof createReviewShareResponseSchema>;
 export type ReviewShareEvent = z.infer<typeof reviewShareEventSchema>;
 export type ReviewShareSummary = z.infer<typeof reviewShareSummarySchema>;
 export type ReviewShareCollectionSummary = z.infer<typeof reviewShareCollectionSummarySchema>;
 export type ProjectReviewSharesResponse = z.infer<typeof projectReviewSharesResponseSchema>;
+export type ReviewShareReadiness = z.infer<typeof reviewShareReadinessSchema>;
 export type ReviewShareTruthSummary = WorldTruthSummary;

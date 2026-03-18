@@ -153,6 +153,10 @@ const apiChecks = [
         tokens: ["addWorldLinkToProjectForSession", "syncPlatformNotificationsAfterMutation"],
     },
     {
+        file: "src/app/api/projects/[projectId]/review-shares/readiness/route.ts",
+        tokens: ["getProjectReviewShareReadinessForSession", "getReviewShareErrorStatus"],
+    },
+    {
         file: "src/app/api/review-shares/route.ts",
         tokens: ["createReviewShareForSession", "syncPlatformNotificationsAfterMutation"],
     },

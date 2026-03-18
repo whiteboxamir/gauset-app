@@ -4,6 +4,7 @@ import type {
     CreateReviewShareRequest,
     CreateReviewShareResponse,
     ProjectReviewSharesResponse,
+    ReviewShareReadiness,
     ReviewShareEvent,
     ReviewShareSummary,
     ReviewShareTruthSummary,
@@ -16,6 +17,7 @@ import {
     recordProjectReviewShareForSession,
     recordProjectReviewShareRevocationForSession,
 } from "@/server/projects/service";
+import { deriveReviewShareReadiness } from "@/server/review-shares/readiness";
 import { canManageProjectReviewShares, getReviewShareRolePermissions } from "./permissions";
 import type { ReviewShareTokenPayload } from "@/server/review-shares/shareToken";
 import { deriveWorldTruthSummary, flattenWorldTruthSummary } from "@/server/world-truth";
@@ -365,6 +367,35 @@ async function resolveSavedVersionReviewShareArtifacts({
     };
 }
 
+async function resolveSavedVersionReviewShareReadiness({
+    session,
+    sceneId,
+    versionId,
+    sceneDocument,
+    sceneGraph,
+}: {
+    session: AuthSession;
+    sceneId: string;
+    versionId: string;
+    sceneDocument?: unknown;
+    sceneGraph?: unknown;
+}): Promise<ReviewShareReadiness> {
+    const truthSummary = await deriveReviewShareTruthSummary({
+        session,
+        sceneId,
+        versionId,
+        sceneDocument,
+        sceneGraph,
+    });
+
+    return deriveReviewShareReadiness({
+        sceneId,
+        versionId,
+        versionResolved: Boolean(sceneDocument || sceneGraph),
+        truthSummary,
+    });
+}
+
 function assertReviewShareConfigured() {
     const secret = getReviewShareSecret();
     if (!secret) {
@@ -680,6 +711,15 @@ export async function createReviewShareForSession({
               versionId: versionId ?? "",
           })
         : null;
+    const savedVersionReadiness = hasSavedVersionIdentity
+        ? await resolveSavedVersionReviewShareReadiness({
+              session,
+              sceneId: sceneId ?? "",
+              versionId: versionId ?? "",
+              sceneDocument: savedVersionArtifacts?.sceneDocument ?? null,
+              sceneGraph: savedVersionArtifacts?.sceneGraph ?? null,
+          })
+        : null;
 
     const sceneAccess = sceneId
         ? await ensureSessionSceneAccess({
@@ -708,6 +748,10 @@ export async function createReviewShareForSession({
 
     if (effectiveProjectId && sceneId && projectDetail && !projectDetail.worldLinks.some((entry) => entry.sceneId === sceneId)) {
         throw new ReviewShareServiceError("Project does not own the requested scene.", 403);
+    }
+
+    if (savedVersionReadiness && !savedVersionReadiness.canCreate) {
+        throw new ReviewShareServiceError(savedVersionReadiness.detail, 409);
     }
 
     const scope = buildReviewShareScope({
@@ -848,6 +892,45 @@ export async function createReviewShareForSession({
         shareToken: createSignedReviewShareToken(buildTokenPayloadFromRow(inserted), assertReviewShareConfigured()),
         expiresAt: inserted.expires_at,
     };
+}
+
+export async function getProjectReviewShareReadinessForSession({
+    session,
+    projectId,
+    sceneId,
+    versionId,
+}: {
+    session: AuthSession;
+    projectId: string;
+    sceneId: string;
+    versionId: string;
+}): Promise<ReviewShareReadiness | null> {
+    const detail = await getProjectDetailForSession(session, projectId);
+    if (!detail) {
+        return null;
+    }
+
+    if (!(await canSessionAccessMvp(session))) {
+        throw new ReviewShareServiceError("Current account is not entitled to inspect MVP version history.", 403);
+    }
+
+    if (!detail.worldLinks.some((entry) => entry.sceneId === sceneId)) {
+        throw new ReviewShareServiceError("Project does not own the requested scene.", 403);
+    }
+
+    const savedVersionArtifacts = await resolveSavedVersionReviewShareArtifacts({
+        session,
+        sceneId,
+        versionId,
+    });
+
+    return resolveSavedVersionReviewShareReadiness({
+        session,
+        sceneId,
+        versionId,
+        sceneDocument: savedVersionArtifacts?.sceneDocument ?? null,
+        sceneGraph: savedVersionArtifacts?.sceneGraph ?? null,
+    });
 }
 
 export async function getProjectReviewSharesForSession(

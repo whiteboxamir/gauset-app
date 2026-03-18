@@ -27,8 +27,9 @@ import {
     LOCAL_DRAFT_SESSION_KEY_PREFIX,
     normalizeStoredSceneSnapshot,
 } from "../src/app/mvp/_hooks/mvpWorkspaceSessionShared.ts";
+import { buildReviewPackageFromSavedVersion } from "../src/components/Editor/reviewExperienceShared.ts";
 import { projectWorldLinkSchema } from "../src/server/contracts/projects.ts";
-import { createReviewShareRequestSchema, reviewShareSummarySchema } from "../src/server/contracts/review-shares.ts";
+import { createReviewShareRequestSchema, reviewShareReadinessSchema, reviewShareSummarySchema } from "../src/server/contracts/review-shares.ts";
 import { deriveWorldTruthSummary, flattenWorldTruthSummary } from "../src/server/world-truth.ts";
 
 type JsonRecord = Record<string, unknown>;
@@ -902,6 +903,20 @@ function testReviewShareRequestShapeContracts() {
     assert.match(reviewShareService, /sceneDocument: hasSavedVersionIdentity \? savedVersionArtifacts\?\.sceneDocument \?\? null : resolved\.sceneDocument/);
     assert.match(reviewShareService, /sceneGraph: hasSavedVersionIdentity \? savedVersionArtifacts\?\.sceneGraph \?\? null : resolved\.sceneGraph/);
     assert.match(reviewShareService, /assetsList: hasSavedVersionIdentity \? savedVersionArtifacts\?\.assetsList \?\? \[\] : resolved\.assetsList/);
+    assert.match(reviewShareService, /savedVersionReadiness && !savedVersionReadiness\.canCreate/);
+    assert.match(reviewShareService, /resolveSavedVersionReviewShareReadiness/);
+
+    const blockedReadiness = reviewShareReadinessSchema.parse({
+        state: "blocked",
+        canCreate: false,
+        sceneId: "scene_missing",
+        versionId: "version_missing",
+        summary: "Saved version is unavailable.",
+        detail: "Secure review links stay blocked until this version exists in MVP history and the backend can load it.",
+        blockers: [],
+        truthSummary: null,
+    });
+    assert.equal(blockedReadiness.state, "blocked");
 }
 
 function testFlattenedWorldTruthContracts() {
@@ -960,6 +975,44 @@ function testFlattenedWorldTruthContracts() {
     assert.equal(parsedReviewShare.downstreamTargetSummary, "Approved reconstruction package is ready for Unreal blockout handoff.");
 }
 
+function testSavedReviewPackageTruthContracts() {
+    const reviewPackageFixture = readJsonFixture<JsonRecord>("contracts/schemas/review-package.inline.scene-document-first.json");
+    const savedVersionPackage = buildReviewPackageFromSavedVersion({
+        sceneId: String(reviewPackageFixture.sceneId),
+        versionId: String(reviewPackageFixture.versionId),
+        versionPayload: {
+            saved_at: reviewPackageFixture.exportedAt,
+            scene_document: reviewPackageFixture.sceneDocument,
+            scene_graph: reviewPackageFixture.sceneGraph,
+        },
+        previousPackage: null,
+        previousReview: reviewPackageFixture.review as any,
+        shareToken: null,
+    });
+
+    assert.equal(savedVersionPackage.truthSummary?.lane, "reconstruction");
+    assert.equal(savedVersionPackage.truthSummary?.deliveryStatus, "ready_for_downstream");
+    assert.deepEqual(savedVersionPackage.truthSummary?.blockers, []);
+    assert.equal(savedVersionPackage.truthSummary?.downstreamTargetLabel, "Unreal 5.4 backlot blockout");
+    assert.equal(savedVersionPackage.truthSummary?.downstreamTargetSummary, "Approved reconstruction package is ready for Unreal blockout handoff.");
+}
+
+function testVersionCommentUiContracts() {
+    const rightPanelVersionHistory = readTextFixture("src/components/Editor/RightPanelVersionHistorySection.tsx");
+    assert.match(rightPanelVersionHistory, /Version Comments/);
+    assert.match(rightPanelVersionHistory, /Pinned version note/);
+    assert.match(rightPanelVersionHistory, /Add pinned comment/);
+
+    const reviewPersistenceController = readTextFixture("src/app/mvp/_hooks/useMvpWorkspaceReviewPersistenceController.ts");
+    assert.match(reviewPersistenceController, /submitVersionComment/);
+    assert.match(reviewPersistenceController, /setVersionCommentDraftField/);
+    assert.match(reviewPersistenceController, /canSubmitComment/);
+
+    const publicPlaywrightSpec = readTextFixture("tests/mvp.public.spec.js");
+    assert.match(publicPlaywrightSpec, /async function addPinnedVersionComment/);
+    assert.doesNotMatch(publicPlaywrightSpec, /page\.request\.post\(`\$\{BASE\}\/api\/mvp\/scene\/\$\{sceneId\}\/versions\/\$\{versionId\}\/comments`/);
+}
+
 testNotificationSignalDedupe();
 testNotificationRoutingAndCounts();
 testSecurityAccessReasons();
@@ -977,5 +1030,7 @@ testDownstreamHandoffContracts();
 testSceneDocumentTruthSummaryContracts();
 testReviewShareRequestShapeContracts();
 testFlattenedWorldTruthContracts();
+testSavedReviewPackageTruthContracts();
+testVersionCommentUiContracts();
 
 console.log("Platform contract checks passed.");

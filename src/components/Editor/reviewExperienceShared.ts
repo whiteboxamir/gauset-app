@@ -2,12 +2,14 @@
 
 import { applyReviewShareToken, decodeReviewPackage, normalizeReviewPackage, type ReviewPackage } from "@/lib/mvp-review";
 import { createEmptySceneDocumentV2 } from "@/lib/scene-graph/document.ts";
+import { deriveWorldTruthSummary } from "@/lib/world-truth.ts";
 import type { SceneReviewRecord } from "@/lib/mvp-workspace";
 
 export interface ReviewComment {
     comment_id: string;
     author: string;
     body: string;
+    anchor?: string | null;
     created_at: string;
 }
 
@@ -62,6 +64,12 @@ export function buildReviewPackageFromSavedVersion({
             assetsList: previousPackage?.assetsList ?? [],
             review: previousPackage?.review ?? previousReview ?? undefined,
             exportedAt: versionRecord.saved_at ?? previousPackage?.exportedAt ?? new Date().toISOString(),
+            truthSummary: deriveWorldTruthSummary({
+                sceneId,
+                versionId,
+                sceneDocument: versionPayload.scene_document ?? previousPackage?.sceneDocument,
+                sceneGraph: versionPayload.scene_graph ?? previousPackage?.sceneGraph,
+            }),
         }),
         shareToken,
     );

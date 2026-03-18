@@ -47,6 +47,7 @@ WORLD_SOURCE_VERSION = "gauset.world_source.v1"
 LANE_METADATA_VERSION = "gauset.lane_truth.v1"
 HANDOFF_MANIFEST_VERSION = "gauset.handoff_manifest.v1"
 HANDOFF_TARGETS = ["scene_document_v2", "external_world_package", "unreal_handoff_manifest"]
+SCENE_DOCUMENT_GRAPH_MISMATCH_CODE = "SCENE_DOCUMENT_GRAPH_MISMATCH"
 
 
 def _utc_now() -> str:
@@ -765,6 +766,352 @@ class SceneReviewRequest(BaseModel):
     issues: List[Dict[str, Any]] = Field(default_factory=list)
 
 
+def _normalize_scene_graph(scene_graph: Any) -> Dict[str, Any]:
+    payload = scene_graph if isinstance(scene_graph, dict) else {}
+    viewer_input = payload.get("viewer") if isinstance(payload.get("viewer"), dict) else {}
+    normalized = {
+        "environment": payload.get("environment"),
+        "assets": payload.get("assets") if isinstance(payload.get("assets"), list) else [],
+        "camera_views": payload.get("camera_views") if isinstance(payload.get("camera_views"), list) else [],
+        "pins": payload.get("pins") if isinstance(payload.get("pins"), list) else [],
+        "director_path": payload.get("director_path") if isinstance(payload.get("director_path"), list) else [],
+        "director_brief": str(payload.get("director_brief") or ""),
+        "viewer": {
+            "fov": float(viewer_input.get("fov")) if isinstance(viewer_input.get("fov"), (int, float)) else 45.0,
+            "lens_mm": float(viewer_input.get("lens_mm")) if isinstance(viewer_input.get("lens_mm"), (int, float)) else 35.0,
+        },
+    }
+    embedded_document = payload.get("__scene_document_v2")
+    if isinstance(embedded_document, dict) and embedded_document.get("version") == 2:
+        normalized["__scene_document_v2"] = embedded_document
+    return normalized
+
+
+def _extract_embedded_scene_document(scene_graph: Dict[str, Any] | None) -> Dict[str, Any] | None:
+    if not isinstance(scene_graph, dict):
+        return None
+    embedded_document = scene_graph.get("__scene_document_v2")
+    if isinstance(embedded_document, dict) and embedded_document.get("version") == 2:
+        return embedded_document
+    return None
+
+
+def _document_node_order(scene_document: Dict[str, Any]) -> List[str]:
+    nodes = scene_document.get("nodes") if isinstance(scene_document.get("nodes"), dict) else {}
+    root_ids = scene_document.get("rootIds") if isinstance(scene_document.get("rootIds"), list) else []
+    ordered: List[str] = []
+    seen: set[str] = set()
+
+    def walk(node_id: Any) -> None:
+        if not isinstance(node_id, str) or not node_id or node_id in seen:
+            return
+        seen.add(node_id)
+        ordered.append(node_id)
+        node = nodes.get(node_id) if isinstance(nodes, dict) else None
+        child_ids = node.get("childIds") if isinstance(node, dict) and isinstance(node.get("childIds"), list) else []
+        for child_id in child_ids:
+            walk(child_id)
+
+    for root_id in root_ids:
+        walk(root_id)
+    for node_id in nodes:
+        walk(node_id)
+    return ordered
+
+
+def _normalize_position_tuple(value: Any, default: List[float] | None = None) -> List[float]:
+    fallback = default or [0.0, 0.0, 0.0]
+    if isinstance(value, list) and len(value) == 3 and all(isinstance(item, (int, float)) for item in value):
+        return [float(item) for item in value]
+    return list(fallback)
+
+
+def _normalize_rotation_tuple(value: Any, default: List[float] | None = None) -> List[float]:
+    fallback = default or [0.0, 0.0, 0.0, 1.0]
+    if isinstance(value, list):
+        if len(value) == 4 and all(isinstance(item, (int, float)) for item in value):
+            return [float(item) for item in value]
+        if len(value) == 3 and all(isinstance(item, (int, float)) for item in value):
+            return [float(value[0]), float(value[1]), float(value[2]), 1.0]
+    return list(fallback)
+
+
+def _empty_scene_document_v2() -> Dict[str, Any]:
+    return {
+        "version": 2,
+        "rootIds": [],
+        "nodes": {},
+        "groups": {},
+        "cameras": {},
+        "lights": {},
+        "meshes": {},
+        "splats": {},
+        "direction": {
+            "cameraViews": [],
+            "pins": [],
+            "directorPath": [],
+            "directorBrief": "",
+        },
+        "review": None,
+        "viewer": {
+            "fov": 45.0,
+            "lens_mm": 35.0,
+            "activeCameraNodeId": None,
+        },
+    }
+
+
+def _scene_graph_to_canonical_scene_document(scene_graph: Dict[str, Any] | None) -> Dict[str, Any]:
+    if not isinstance(scene_graph, dict):
+        return _empty_scene_document_v2()
+
+    embedded_scene_document = _extract_embedded_scene_document(scene_graph)
+    if embedded_scene_document is not None:
+        return embedded_scene_document
+
+    if scene_graph.get("version") == 2:
+        return scene_graph
+
+    normalized = _normalize_scene_graph(scene_graph)
+    document = _empty_scene_document_v2()
+    document["direction"] = {
+        "cameraViews": normalized.get("camera_views") if isinstance(normalized.get("camera_views"), list) else [],
+        "pins": normalized.get("pins") if isinstance(normalized.get("pins"), list) else [],
+        "directorPath": normalized.get("director_path") if isinstance(normalized.get("director_path"), list) else [],
+        "directorBrief": str(normalized.get("director_brief") or ""),
+    }
+    document["viewer"] = {
+        "fov": normalized["viewer"]["fov"],
+        "lens_mm": normalized["viewer"]["lens_mm"],
+        "activeCameraNodeId": "camera_viewer",
+    }
+
+    environment = normalized.get("environment") if isinstance(normalized.get("environment"), dict) else None
+    if environment is not None:
+        environment_id = str(environment.get("id") or "environment")
+        node_id = f"splat_{environment_id}"
+        urls = environment.get("urls") if isinstance(environment.get("urls"), dict) else {}
+        document["rootIds"].append(node_id)
+        document["nodes"][node_id] = {
+            "id": node_id,
+            "kind": "splat",
+            "parentId": None,
+            "childIds": [],
+            "name": str(environment.get("name") or environment.get("sourceLabel") or environment.get("label") or "Environment"),
+            "visible": bool(environment.get("visible", True)),
+            "locked": bool(environment.get("locked", False)),
+            "transform": {
+                "position": [0.0, 0.0, 0.0],
+                "rotation": [0.0, 0.0, 0.0, 1.0],
+                "scale": [1.0, 1.0, 1.0],
+            },
+        }
+        document["splats"][node_id] = {
+            "id": node_id,
+            "sceneId": environment.get("id"),
+            "viewerUrl": urls.get("viewer") if isinstance(urls.get("viewer"), str) else None,
+            "splatUrl": urls.get("splats") if isinstance(urls.get("splats"), str) else None,
+            "camerasUrl": urls.get("cameras") if isinstance(urls.get("cameras"), str) else None,
+            "metadataUrl": urls.get("metadata") if isinstance(urls.get("metadata"), str) else None,
+            "metadata": environment.get("metadata") if isinstance(environment.get("metadata"), dict) else {},
+        }
+
+    for index, asset in enumerate(normalized.get("assets") if isinstance(normalized.get("assets"), list) else []):
+        if not isinstance(asset, dict):
+            continue
+        node_id = str(asset.get("instanceId") or asset.get("instance_id") or asset.get("id") or f"mesh_{index + 1}")
+        asset_id = str(asset.get("asset_id") or asset.get("id") or node_id)
+        document["rootIds"].append(node_id)
+        document["nodes"][node_id] = {
+            "id": node_id,
+            "kind": "mesh",
+            "parentId": None,
+            "childIds": [],
+            "name": str(asset.get("name") or asset_id),
+            "visible": bool(asset.get("visible", True)),
+            "locked": bool(asset.get("locked", False)),
+            "transform": {
+                "position": _normalize_position_tuple(asset.get("position")),
+                "rotation": _normalize_rotation_tuple(asset.get("rotation")),
+                "scale": _normalize_position_tuple(asset.get("scale"), [1.0, 1.0, 1.0]),
+            },
+        }
+        document["meshes"][node_id] = {
+            "id": node_id,
+            "assetId": asset_id,
+            "meshUrl": asset.get("mesh") if isinstance(asset.get("mesh"), str) else None,
+            "textureUrl": asset.get("texture") if isinstance(asset.get("texture"), str) else None,
+            "previewUrl": asset.get("preview") if isinstance(asset.get("preview"), str) else None,
+            "metadata": {
+                **(asset.get("metadata") if isinstance(asset.get("metadata"), dict) else {}),
+                "id": asset.get("id") or asset_id,
+                "asset_id": asset.get("asset_id") or asset_id,
+                "instanceId": asset.get("instanceId") or asset.get("instance_id") or node_id,
+            },
+        }
+
+    document["rootIds"].append("camera_viewer")
+    document["nodes"]["camera_viewer"] = {
+        "id": "camera_viewer",
+        "kind": "camera",
+        "parentId": None,
+        "childIds": [],
+        "name": "Viewer Camera",
+        "visible": True,
+        "locked": False,
+        "transform": {
+            "position": [0.0, 0.0, 0.0],
+            "rotation": [0.0, 0.0, 0.0, 1.0],
+            "scale": [1.0, 1.0, 1.0],
+        },
+    }
+    document["cameras"]["camera_viewer"] = {
+        "id": "camera_viewer",
+        "fov": normalized["viewer"]["fov"],
+        "lens_mm": normalized["viewer"]["lens_mm"],
+        "near": 0.1,
+        "far": 1000.0,
+        "role": "viewer",
+    }
+    return document
+
+
+def _scene_document_to_compatibility_scene_graph(scene_document: Dict[str, Any]) -> Dict[str, Any]:
+    if scene_document.get("version") != 2:
+        return _normalize_scene_graph(scene_document)
+
+    nodes = scene_document.get("nodes") if isinstance(scene_document.get("nodes"), dict) else {}
+    meshes = scene_document.get("meshes") if isinstance(scene_document.get("meshes"), dict) else {}
+    splats = scene_document.get("splats") if isinstance(scene_document.get("splats"), dict) else {}
+    direction = scene_document.get("direction") if isinstance(scene_document.get("direction"), dict) else {}
+    viewer = scene_document.get("viewer") if isinstance(scene_document.get("viewer"), dict) else {}
+
+    environment = None
+    assets: List[Dict[str, Any]] = []
+
+    for node_id in _document_node_order(scene_document):
+        node = nodes.get(node_id) if isinstance(nodes, dict) else None
+        if not isinstance(node, dict):
+            continue
+
+        transform = node.get("transform") if isinstance(node.get("transform"), dict) else {}
+        kind = node.get("kind")
+        visible = node.get("visible")
+        is_visible = visible if isinstance(visible, bool) else True
+        locked = node.get("locked")
+        is_locked = locked if isinstance(locked, bool) else False
+        if kind == "splat" and environment is None and is_visible:
+            splat = splats.get(node_id) if isinstance(splats, dict) else None
+            if isinstance(splat, dict):
+                metadata = splat.get("metadata") if isinstance(splat.get("metadata"), dict) else {}
+                metadata_urls = metadata.get("urls") if isinstance(metadata.get("urls"), dict) else {}
+                environment = {
+                    **metadata,
+                    "id": splat.get("sceneId"),
+                    "name": node.get("name") or "Environment",
+                    "visible": is_visible,
+                    "locked": is_locked,
+                    "urls": {
+                        **metadata_urls,
+                        "viewer": splat.get("viewerUrl"),
+                        "splats": splat.get("splatUrl"),
+                        "cameras": splat.get("camerasUrl"),
+                        "metadata": splat.get("metadataUrl"),
+                    },
+                }
+        elif kind == "mesh" and is_visible:
+            mesh = meshes.get(node_id) if isinstance(meshes, dict) else None
+            if not isinstance(mesh, dict):
+                continue
+            metadata = mesh.get("metadata") if isinstance(mesh.get("metadata"), dict) else {}
+            asset_id = mesh.get("assetId") if isinstance(mesh.get("assetId"), str) and mesh.get("assetId") else node_id
+            assets.append(
+                {
+                    **metadata,
+                    "asset_id": metadata.get("asset_id") or asset_id,
+                    "id": metadata.get("id") or asset_id,
+                    "name": metadata.get("name") or node.get("name") or asset_id,
+                    "mesh": mesh.get("meshUrl"),
+                    "texture": mesh.get("textureUrl"),
+                    "preview": mesh.get("previewUrl"),
+                    "instanceId": metadata.get("instanceId") or metadata.get("instance_id"),
+                    "visible": is_visible,
+                    "locked": is_locked,
+                    "position": _normalize_position_tuple(transform.get("position")),
+                    "rotation": _normalize_rotation_tuple(transform.get("rotation")),
+                    "scale": _normalize_position_tuple(transform.get("scale"), [1.0, 1.0, 1.0]),
+                }
+            )
+
+    return {
+        "environment": environment,
+        "assets": assets,
+        "camera_views": direction.get("cameraViews") if isinstance(direction.get("cameraViews"), list) else [],
+        "pins": direction.get("pins") if isinstance(direction.get("pins"), list) else [],
+        "director_path": direction.get("directorPath") if isinstance(direction.get("directorPath"), list) else [],
+        "director_brief": str(direction.get("directorBrief") or ""),
+        "viewer": {
+            "fov": float(viewer.get("fov")) if isinstance(viewer.get("fov"), (int, float)) else 45.0,
+            "lens_mm": float(viewer.get("lens_mm")) if isinstance(viewer.get("lens_mm"), (int, float)) else 35.0,
+        },
+        "__scene_document_v2": scene_document,
+    }
+
+
+def _normalize_scene_graph_for_compare(scene_graph: Dict[str, Any]) -> Dict[str, Any]:
+    normalized = _normalize_scene_graph(scene_graph)
+    environment = normalized.get("environment") if isinstance(normalized.get("environment"), dict) else None
+    normalized_environment = None
+    if environment is not None:
+        normalized_environment = {
+            "id": environment.get("id"),
+            "lane": environment.get("lane"),
+            "urls": environment.get("urls") if isinstance(environment.get("urls"), dict) else {},
+            "metadata": environment.get("metadata") if isinstance(environment.get("metadata"), dict) else {},
+        }
+
+    normalized_assets: List[Dict[str, Any]] = []
+    for asset in normalized.get("assets") if isinstance(normalized.get("assets"), list) else []:
+        if not isinstance(asset, dict):
+            continue
+        normalized_assets.append(
+            {
+                "asset_id": asset.get("asset_id"),
+                "id": asset.get("id"),
+                "name": asset.get("name"),
+                "mesh": asset.get("mesh"),
+                "texture": asset.get("texture"),
+                "preview": asset.get("preview"),
+                "instanceId": asset.get("instanceId") or asset.get("instance_id"),
+                "position": _normalize_position_tuple(asset.get("position")),
+                "rotation": _normalize_rotation_tuple(asset.get("rotation")),
+                "scale": _normalize_position_tuple(asset.get("scale"), [1.0, 1.0, 1.0]),
+            }
+        )
+
+    normalized_assets.sort(key=lambda asset: json.dumps(asset, sort_keys=True))
+
+    return {
+        "environment": normalized_environment,
+        "assets": normalized_assets,
+        "camera_views": normalized.get("camera_views"),
+        "pins": normalized.get("pins"),
+        "director_path": normalized.get("director_path"),
+        "director_brief": normalized.get("director_brief"),
+        "viewer": normalized.get("viewer"),
+    }
+
+
+def _scene_graph_mismatch_error() -> HTTPException:
+    return HTTPException(
+        status_code=409,
+        detail={
+            "code": SCENE_DOCUMENT_GRAPH_MISMATCH_CODE,
+            "message": "scene_document and scene_graph do not match. Remove scene_graph or resend a compatibility graph derived from the scene_document.",
+        },
+    )
+
+
 def _normalize_scene_save_payload(
     *,
     scene_graph: Dict[str, Any] | None,
@@ -772,8 +1119,20 @@ def _normalize_scene_save_payload(
 ) -> tuple[Dict[str, Any], Dict[str, Any]]:
     raw_scene_document = scene_document if isinstance(scene_document, dict) else None
     raw_scene_graph = scene_graph if isinstance(scene_graph, dict) else None
-    canonical_scene = raw_scene_document or raw_scene_graph or {}
-    compatibility_scene_graph = raw_scene_graph if raw_scene_graph is not None else _normalize_scene_graph(canonical_scene)
+    embedded_scene_document = _extract_embedded_scene_document(raw_scene_graph)
+
+    if raw_scene_document is not None:
+        canonical_scene = raw_scene_document if raw_scene_document.get("version") == 2 else _scene_graph_to_canonical_scene_document(raw_scene_document)
+        compatibility_scene_graph = _scene_document_to_compatibility_scene_graph(canonical_scene)
+        if raw_scene_graph is not None:
+            if embedded_scene_document is not None and embedded_scene_document != canonical_scene:
+                raise _scene_graph_mismatch_error()
+            if _normalize_scene_graph_for_compare(raw_scene_graph) != _normalize_scene_graph_for_compare(compatibility_scene_graph):
+                raise _scene_graph_mismatch_error()
+        return canonical_scene, compatibility_scene_graph
+
+    canonical_scene = embedded_scene_document or _scene_graph_to_canonical_scene_document(raw_scene_graph)
+    compatibility_scene_graph = _scene_document_to_compatibility_scene_graph(canonical_scene)
     return canonical_scene, compatibility_scene_graph
 
 
@@ -1692,7 +2051,7 @@ async def scene_save(request: SceneSaveRequest):
         "version_id": version_id,
         "saved_at": saved_at,
         "source": request.source,
-        "summary": _scene_summary(scene_document),
+        "summary": _scene_summary(scene_graph),
         "scene_document": scene_document,
         "scene_graph": scene_graph,
     }

@@ -2,10 +2,9 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 const workspaceRoot = path.resolve(".");
-const publicRepoRoot = path.resolve(process.env.GAUSET_PUBLIC_REPO_ROOT ?? path.join(workspaceRoot, "..", "gauset"));
 
 const localBackendPath = path.join(workspaceRoot, "backend/api/routes.py");
-const publicBackendPath = path.join(publicRepoRoot, "api/_mvp_backend/vercel_backend/app.py");
+const publicBackendPath = path.join(workspaceRoot, "vercel-backend/app.py");
 const intakeSetupPath = path.join(workspaceRoot, "src/app/mvp/_hooks/useMvpWorkspaceIntakeSetupController.ts");
 const generationControllerPath = path.join(workspaceRoot, "src/app/mvp/_hooks/useMvpWorkspaceGenerationController.ts");
 const captureControllerPath = path.join(workspaceRoot, "src/app/mvp/_hooks/useMvpWorkspaceCaptureController.ts");
@@ -85,6 +84,30 @@ const checks = [
             publicBackendSource.includes("adapter = registry.get_image_adapter(") &&
             publicBackendSource.includes('"type": "generated_image"') &&
             publicBackendSource.includes('"reference_image_ids": request.reference_image_ids'),
+    },
+    {
+        label: "Public backend provenance never emits local_* origins",
+        pass:
+            !publicBackendSource.includes("local_upload") &&
+            !publicBackendSource.includes("local_provider_generation") &&
+            publicBackendSource.includes("public_upload") &&
+            publicBackendSource.includes("public_provider_generation"),
+    },
+    {
+        label: "Public upload, preview, and asset lanes keep downstream handoff blocked instead of claiming readiness",
+        pass:
+            !publicBackendSource.includes("ready for downstream handoff") &&
+            !publicBackendSource.includes("ready for downstream claimability") &&
+            publicBackendSource.includes("downstream handoff remains blocked") &&
+            publicBackendSource.includes("production-ready downstream handoff"),
+    },
+    {
+        label: "Public capture sessions stay worker-blocked when reconstruction is unavailable",
+        pass:
+            publicBackendSource.includes('"lane_truth": "gpu_worker_not_connected"') &&
+            publicBackendSource.includes('"reconstruction_available": False') &&
+            publicBackendSource.includes('"available": False') &&
+            !publicBackendSource.includes("Start reconstruction."),
     },
 ];
 

@@ -8,6 +8,7 @@ const reviewExperienceControllerPath = path.join(workspaceRoot, "src/components/
 const reviewExperienceInlinePath = path.join(workspaceRoot, "src/components/Editor/useReviewExperienceInlinePackageController.ts");
 const reviewExperienceSavedScenePath = path.join(workspaceRoot, "src/components/Editor/useReviewExperienceSavedSceneController.ts");
 const reviewExperienceSharedPath = path.join(workspaceRoot, "src/components/Editor/reviewExperienceShared.ts");
+const reviewExperienceSummarySectionPath = path.join(workspaceRoot, "src/components/Editor/ReviewExperienceSummarySection.tsx");
 
 const [
     reviewExperienceSource,
@@ -15,12 +16,14 @@ const [
     reviewExperienceInlineSource,
     reviewExperienceSavedSceneSource,
     reviewExperienceSharedSource,
+    reviewExperienceSummarySectionSource,
 ] = await Promise.all([
     fs.readFile(reviewExperiencePath, "utf8"),
     fs.readFile(reviewExperienceControllerPath, "utf8"),
     fs.readFile(reviewExperienceInlinePath, "utf8"),
     fs.readFile(reviewExperienceSavedScenePath, "utf8"),
     fs.readFile(reviewExperienceSharedPath, "utf8"),
+    fs.readFile(reviewExperienceSummarySectionPath, "utf8"),
 ]);
 
 const checks = [
@@ -81,6 +84,15 @@ const checks = [
             reviewExperienceSharedSource.includes("export function formatReviewTimestamp(value?: string | null) {") &&
             reviewExperienceSharedSource.includes("export function decodeInlineReviewPackagePayload(payload: string, shareToken?: string | null) {") &&
             reviewExperienceSharedSource.includes("export function buildReviewPackageFromSavedVersion({"),
+    },
+    {
+        label: "Recipient summary renders saved world truth without adding another fetch layer",
+        pass:
+            reviewExperienceSummarySectionSource.includes("World truth") &&
+            reviewExperienceSummarySectionSource.includes("truthSummary.lane") &&
+            reviewExperienceSummarySectionSource.includes("truthSummary.downstreamTargetSummary") &&
+            !reviewExperienceSummarySectionSource.includes("await fetch(") &&
+            reviewExperienceSharedSource.includes("truthSummary: deriveWorldTruthSummary({"),
     },
 ];
 

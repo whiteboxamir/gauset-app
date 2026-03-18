@@ -37,6 +37,121 @@ class MvpPersistenceContractTests(unittest.TestCase):
         routes.UPLOADS_DIR = self.original_uploads_dir
         self.temp_dir.cleanup()
 
+    def _load_scene_artifacts(self, scene_id: str, version_id: str) -> tuple[dict, dict]:
+        scene_path = routes.SCENES_DIR / scene_id / "scene.json"
+        version_path = routes.SCENES_DIR / scene_id / "versions" / f"{version_id}.json"
+        self.assertTrue(scene_path.exists())
+        self.assertTrue(version_path.exists())
+        return json.loads(scene_path.read_text()), json.loads(version_path.read_text())
+
+    def _build_scene_document_v2(self, scene_id: str) -> dict:
+        return {
+            "version": 2,
+            "rootIds": ["node_environment", "node_counter"],
+            "nodes": {
+                "node_environment": {
+                    "id": "node_environment",
+                    "kind": "splat",
+                    "parentId": None,
+                    "childIds": [],
+                    "name": "Stage Environment",
+                    "visible": True,
+                    "locked": False,
+                    "transform": {
+                        "position": [0, 0, 0],
+                        "rotation": [0, 0, 0, 1],
+                        "scale": [1, 1, 1],
+                    },
+                },
+                "node_counter": {
+                    "id": "node_counter",
+                    "kind": "mesh",
+                    "parentId": None,
+                    "childIds": [],
+                    "name": "Counter sign",
+                    "visible": True,
+                    "locked": False,
+                    "transform": {
+                        "position": [1, 2, 3],
+                        "rotation": [0, 0, 0, 1],
+                        "scale": [1, 1, 1],
+                    },
+                },
+            },
+            "groups": {},
+            "cameras": {},
+            "lights": {},
+            "meshes": {
+                "node_counter": {
+                    "id": "node_counter",
+                    "assetId": "asset_counter",
+                    "meshUrl": "/storage/assets/asset_counter/mesh.glb",
+                    "textureUrl": "/storage/assets/asset_counter/texture.png",
+                    "previewUrl": "/storage/assets/asset_counter/preview.png",
+                    "metadata": {
+                        "instanceId": "inst_counter",
+                        "material": "matte",
+                    },
+                }
+            },
+            "splats": {
+                "node_environment": {
+                    "id": "node_environment",
+                    "sceneId": scene_id,
+                    "viewerUrl": f"/storage/scenes/{scene_id}/viewer/index.html",
+                    "splatUrl": f"/storage/scenes/{scene_id}/environment/splats.ply",
+                    "camerasUrl": f"/storage/scenes/{scene_id}/environment/cameras.json",
+                    "metadataUrl": f"/storage/scenes/{scene_id}/environment/metadata.json",
+                    "metadata": {
+                        "lane": "preview",
+                        "truth_label": "Instant Preview",
+                        "quality_tier": "single_image_preview_ultra_dense",
+                        "urls": {
+                            "preview_projection": f"/storage/scenes/{scene_id}/environment/preview-projection.png",
+                        },
+                    },
+                }
+            },
+            "direction": {
+                "cameraViews": [
+                    {
+                        "id": "view_a",
+                        "label": "Wide",
+                        "position": [5, 4, 6],
+                        "target": [0, 0, 0],
+                        "fov": 27,
+                        "lens_mm": 50,
+                        "note": "Hold the doorway reveal.",
+                    }
+                ],
+                "pins": [
+                    {
+                        "id": "pin_egress",
+                        "label": "Left egress",
+                        "type": "egress",
+                        "position": [1.2, 0.1, -0.4],
+                        "created_at": "2026-03-11T09:00:00Z",
+                    }
+                ],
+                "directorPath": [
+                    {
+                        "time": 0.0,
+                        "position": [5, 4, 6],
+                        "target": [0, 0, 0],
+                        "rotation": [0, 0, 0, 1],
+                        "fov": 27,
+                    }
+                ],
+                "directorBrief": "50mm push with clear left egress.",
+            },
+            "review": None,
+            "viewer": {
+                "fov": 27,
+                "lens_mm": 50,
+                "activeCameraNodeId": None,
+            },
+        }
+
     def test_scene_save_round_trips_full_scene_graph(self) -> None:
         scene_id = "scene_phase1_contract"
         scene_graph = {
@@ -119,22 +234,22 @@ class MvpPersistenceContractTests(unittest.TestCase):
         payload = response.json()
         self.assertEqual(payload["summary"], {"asset_count": 1, "has_environment": True})
 
-        scene_path = routes.SCENES_DIR / scene_id / "scene.json"
-        version_path = routes.SCENES_DIR / scene_id / "versions" / f"{payload['version_id']}.json"
-        self.assertTrue(scene_path.exists())
-        self.assertTrue(version_path.exists())
-
-        scene_document = json.loads(scene_path.read_text())
-        version_document = json.loads(version_path.read_text())
-        self.assertEqual(scene_document["camera_views"][0]["lens_mm"], 50)
-        self.assertEqual(scene_document["pins"][0]["type"], "egress")
-        self.assertEqual(scene_document["director_brief"], scene_graph["director_brief"])
-        self.assertEqual(scene_document["viewer"]["lens_mm"], 50)
-        self.assertEqual(len(scene_document["director_path"]), 2)
-        self.assertEqual(version_document["scene_graph"], scene_document)
+        scene_document, version_document = self._load_scene_artifacts(scene_id, payload["version_id"])
+        self.assertEqual(scene_document["version"], 2)
+        self.assertEqual(scene_document["direction"]["cameraViews"][0]["lens_mm"], 50)
+        self.assertEqual(scene_document["direction"]["pins"][0]["type"], "egress")
+        self.assertEqual(scene_document["direction"]["directorBrief"], scene_graph["director_brief"])
+        self.assertEqual(scene_document["viewer"]["lens_mm"], 50.0)
+        self.assertEqual(len(scene_document["direction"]["directorPath"]), 2)
+        self.assertEqual(scene_document["meshes"]["inst_counter"]["assetId"], "asset_counter")
+        self.assertEqual(version_document["scene_document"], scene_document)
+        self.assertEqual(version_document["scene_graph"]["__scene_document_v2"], scene_document)
+        self.assertEqual(version_document["scene_graph"]["camera_views"][0]["lens_mm"], 50)
+        self.assertEqual(version_document["scene_graph"]["assets"][0]["instanceId"], "inst_counter")
 
     def test_scene_save_preserves_embedded_scene_document_v2_compat_field(self) -> None:
         scene_id = "scene_document_v2_contract"
+        scene_document = self._build_scene_document_v2(scene_id)
         scene_graph = {
             "environment": {
                 "id": scene_id,
@@ -163,28 +278,7 @@ class MvpPersistenceContractTests(unittest.TestCase):
                 "fov": 27,
                 "lens_mm": 50,
             },
-            "__scene_document_v2": {
-                "version": 2,
-                "rootIds": [],
-                "nodes": {},
-                "groups": {},
-                "cameras": {},
-                "lights": {},
-                "meshes": {},
-                "splats": {},
-                "direction": {
-                    "cameraViews": [],
-                    "pins": [],
-                    "directorPath": [],
-                    "directorBrief": "",
-                },
-                "review": None,
-                "viewer": {
-                    "fov": 27,
-                    "lens_mm": 50,
-                    "activeCameraNodeId": None,
-                },
-            },
+            "__scene_document_v2": scene_document,
         }
 
         response = self.client.post(
@@ -199,14 +293,115 @@ class MvpPersistenceContractTests(unittest.TestCase):
         payload = response.json()
         self.assertEqual(payload["summary"], {"asset_count": 1, "has_environment": True})
 
-        version_path = routes.SCENES_DIR / scene_id / "versions" / f"{payload['version_id']}.json"
-        version_document = json.loads(version_path.read_text())
+        saved_scene_document, version_document = self._load_scene_artifacts(scene_id, payload["version_id"])
+        self.assertEqual(saved_scene_document, scene_document)
+        self.assertEqual(version_document["scene_document"], scene_document)
         self.assertEqual(version_document["scene_graph"]["__scene_document_v2"]["version"], 2)
         self.assertEqual(
             version_document["scene_graph"]["environment"]["urls"]["preview_projection"],
             f"/storage/scenes/{scene_id}/environment/preview-projection.png",
         )
         self.assertEqual(version_document["scene_graph"]["assets"][0]["mesh"], "/storage/assets/asset_counter/mesh.glb")
+
+    def test_scene_save_derives_compatibility_graph_from_scene_document_only(self) -> None:
+        scene_id = "scene_document_only_contract"
+        scene_document = self._build_scene_document_v2(scene_id)
+
+        response = self.client.post(
+            "/scene/save",
+            json={
+                "scene_id": scene_id,
+                "scene_document": scene_document,
+                "source": "manual",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["summary"], {"asset_count": 1, "has_environment": True})
+
+        saved_scene_document, version_document = self._load_scene_artifacts(scene_id, payload["version_id"])
+        self.assertEqual(saved_scene_document, scene_document)
+        self.assertEqual(version_document["scene_document"], scene_document)
+
+        compatibility_scene_graph = version_document["scene_graph"]
+        self.assertEqual(compatibility_scene_graph["__scene_document_v2"], scene_document)
+        self.assertEqual(compatibility_scene_graph["environment"]["id"], scene_id)
+        self.assertEqual(compatibility_scene_graph["environment"]["lane"], "preview")
+        self.assertEqual(compatibility_scene_graph["environment"]["name"], "Stage Environment")
+        self.assertEqual(
+            compatibility_scene_graph["environment"]["urls"]["preview_projection"],
+            f"/storage/scenes/{scene_id}/environment/preview-projection.png",
+        )
+        self.assertEqual(compatibility_scene_graph["assets"][0]["mesh"], "/storage/assets/asset_counter/mesh.glb")
+        self.assertEqual(compatibility_scene_graph["assets"][0]["texture"], "/storage/assets/asset_counter/texture.png")
+        self.assertEqual(compatibility_scene_graph["assets"][0]["preview"], "/storage/assets/asset_counter/preview.png")
+        self.assertEqual(compatibility_scene_graph["assets"][0]["instanceId"], "inst_counter")
+        self.assertEqual(compatibility_scene_graph["assets"][0]["position"], [1.0, 2.0, 3.0])
+        self.assertEqual(compatibility_scene_graph["assets"][0]["rotation"], [0.0, 0.0, 0.0, 1.0])
+        self.assertEqual(compatibility_scene_graph["assets"][0]["scale"], [1.0, 1.0, 1.0])
+        self.assertEqual(compatibility_scene_graph["camera_views"][0]["lens_mm"], 50)
+        self.assertEqual(compatibility_scene_graph["pins"][0]["type"], "egress")
+        self.assertEqual(compatibility_scene_graph["director_brief"], "50mm push with clear left egress.")
+        self.assertEqual(compatibility_scene_graph["viewer"]["lens_mm"], 50.0)
+
+    def test_scene_save_rejects_mismatched_scene_document_and_scene_graph(self) -> None:
+        scene_id = "scene_document_graph_mismatch_contract"
+        scene_document = self._build_scene_document_v2(scene_id)
+        scene_graph = {
+            "environment": {
+                "id": scene_id,
+                "lane": "preview",
+                "urls": {
+                    "splats": f"/storage/scenes/{scene_id}/environment/splats.ply",
+                    "metadata": f"/storage/scenes/{scene_id}/environment/metadata.json",
+                    "preview_projection": f"/storage/scenes/{scene_id}/environment/preview-projection.png",
+                },
+            },
+            "assets": [
+                {
+                    "id": "asset_counter",
+                    "mesh": "/storage/assets/asset_counter/mesh.glb",
+                    "texture": "/storage/assets/asset_counter/texture.png",
+                    "preview": "/storage/assets/asset_counter/preview.png",
+                    "instanceId": "inst_counter",
+                    "position": [1, 2, 3],
+                    "rotation": [0, 0, 0, 1],
+                    "scale": [1, 1, 1],
+                }
+            ],
+            "camera_views": scene_document["direction"]["cameraViews"],
+            "pins": scene_document["direction"]["pins"],
+            "director_path": scene_document["direction"]["directorPath"],
+            "director_brief": "Mismatch on purpose.",
+            "viewer": {
+                "fov": 27,
+                "lens_mm": 50,
+            },
+            "__scene_document_v2": scene_document,
+        }
+
+        response = self.client.post(
+            "/scene/save",
+            json={
+                "scene_id": scene_id,
+                "scene_document": scene_document,
+                "scene_graph": scene_graph,
+                "source": "manual",
+            },
+        )
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(
+            response.json(),
+            {
+                "detail": {
+                    "code": "SCENE_DOCUMENT_GRAPH_MISMATCH",
+                    "message": "scene_document and scene_graph do not match. Remove scene_graph or resend a compatibility graph derived from the scene_document.",
+                }
+            },
+        )
+        self.assertFalse((routes.SCENES_DIR / scene_id / "scene.json").exists())
+        versions_dir = routes.SCENES_DIR / scene_id / "versions"
+        self.assertEqual(list(versions_dir.glob("*.json")), [])
 
     def test_review_round_trips_full_metadata_and_structured_issues(self) -> None:
         scene_id = "scene_review_contract"

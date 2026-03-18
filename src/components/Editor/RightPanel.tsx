@@ -86,21 +86,30 @@ export default function RightPanel({ clarityMode = false }: RightPanelProps) {
         reviewError,
         isSavingReview,
         legacyComments,
+        versionCommentDraft,
+        commentStatus,
+        commentError,
+        isSavingComment,
         issueDraft,
         selectedAnchorLabel,
+        selectedCommentAnchor,
         visibleIssues,
         canAddIssue,
+        canSubmitComment,
         selectVersion,
         copyReviewLink,
         exportScenePackage,
         saveReview,
         updateReviewField,
         updateApprovalNote,
+        setVersionCommentDraftField,
         setIssueDraftField,
+        submitVersionComment,
         addIssue,
         deleteIssue,
         updateIssueStatus,
         issueCountForVersion,
+        commentCountForVersion,
         focusWorkspace,
         focusView,
         focusPin,
@@ -239,11 +248,20 @@ export default function RightPanel({ clarityMode = false }: RightPanelProps) {
 
                     <RightPanelVersionHistorySection
                         activeScene={activeScene}
+                        canSubmitComment={canSubmitComment}
+                        commentCountForVersion={commentCountForVersion}
+                        commentError={commentError}
+                        commentStatus={commentStatus}
+                        isSavingComment={isSavingComment}
                         issueCountForVersion={issueCountForVersion}
                         legacyComments={legacyComments}
                         onRestoreVersion={handleRestoreVersion}
+                        setVersionCommentDraftField={setVersionCommentDraftField}
                         selectVersion={selectVersion}
+                        selectedCommentAnchor={selectedCommentAnchor}
                         selectedVersion={selectedVersion}
+                        submitVersionComment={submitVersionComment}
+                        versionCommentDraft={versionCommentDraft}
                         versions={versions}
                     />
 

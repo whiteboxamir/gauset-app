@@ -119,6 +119,7 @@ const blocked = [];
 const failed = [];
 
 steps.push(runStep("platform_contracts", ["npm", "run", "test:platform-contracts"]));
+steps.push(runStep("review_share_matrix", ["npm", "run", "test:review-share-matrix"]));
 steps.push(runStep("mvp_workspace_persistence", ["npm", "run", "test:mvp-workspace-persistence"]));
 steps.push(runStep("platform_scenarios", ["npm", "run", "test:platform-scenarios"]));
 steps.push(runStep("platform_route_smoke", ["npm", "run", "test:platform-routes"]));

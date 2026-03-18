@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import type {
     CreateReviewShareResponse,
     ReviewShareCollectionSummary,
+    ReviewShareReadiness,
     ReviewShareSummary,
 } from "@/server/contracts/review-shares";
 import type { ProjectWorldLink } from "@/server/contracts/projects";
@@ -90,13 +91,43 @@ function getContentModeSummary(contentMode: ReviewShareSummary["contentMode"]) {
 }
 
 function getDeliveryModeLabel(deliveryMode: ReviewShareSummary["deliveryMode"]) {
-    return deliveryMode === "secure_link" ? "Signed link" : "Manual handoff";
+    return deliveryMode === "secure_link" ? "Signed link" : "Imported manual record";
 }
 
 function getDeliveryModeSummary(deliveryMode: ReviewShareSummary["deliveryMode"]) {
     return deliveryMode === "secure_link"
         ? "Access stays revocable and audited through the persisted platform proxy path."
-        : "Delivery still stays explicit in history, but the operator is responsible for the actual handoff channel.";
+        : "This row is historical delivery bookkeeping only. This panel does not mint manual handoff channels.";
+}
+
+function humanizeToken(value: string) {
+    return value.replaceAll("_", " ").trim();
+}
+
+function getReadinessTone(state: ReviewShareReadiness["state"]) {
+    switch (state) {
+        case "ready":
+            return "success";
+        case "review_only":
+            return "warning";
+        case "blocked":
+            return "danger";
+        default:
+            return "neutral";
+    }
+}
+
+function getReadinessLabel(state: ReviewShareReadiness["state"]) {
+    switch (state) {
+        case "ready":
+            return "Ready for secure review";
+        case "review_only":
+            return "Review-only posture";
+        case "blocked":
+            return "Share blocked";
+        default:
+            return "Unknown posture";
+    }
 }
 
 export function ReviewSharePanel({
@@ -129,6 +160,9 @@ export function ReviewSharePanel({
     const [pendingShareId, setPendingShareId] = useState<string | null>(null);
     const [pendingAction, setPendingAction] = useState<"create" | "copy" | "revoke" | null>(null);
     const [isLoadingVersions, setIsLoadingVersions] = useState(false);
+    const [isLoadingReadiness, setIsLoadingReadiness] = useState(false);
+    const [selectedReadiness, setSelectedReadiness] = useState<ReviewShareReadiness | null>(null);
+    const [readinessError, setReadinessError] = useState("");
     const [isPending, startTransition] = useTransition();
     const createShareRequestRef = useRef<Promise<CreateReviewShareResponse> | null>(null);
 
@@ -142,6 +176,8 @@ export function ReviewSharePanel({
         if (!canAccessMvp || !selectedSceneId) {
             setVersions([]);
             setSelectedVersionId("");
+            setSelectedReadiness(null);
+            setReadinessError("");
             return;
         }
 
@@ -149,6 +185,8 @@ export function ReviewSharePanel({
         const loadVersions = async () => {
             setIsLoadingVersions(true);
             setError("");
+            setVersions([]);
+            setSelectedVersionId("");
             try {
                 const response = await fetch(`${MVP_API_BASE_URL}/scene/${selectedSceneId}/versions`, {
                     cache: "no-store",
@@ -183,6 +221,55 @@ export function ReviewSharePanel({
         };
     }, [canAccessMvp, selectedSceneId]);
 
+    useEffect(() => {
+        if (!canAccessMvp || !selectedSceneId || !selectedVersionId) {
+            setSelectedReadiness(null);
+            setReadinessError("");
+            setIsLoadingReadiness(false);
+            return;
+        }
+
+        let cancelled = false;
+        const controller = new AbortController();
+
+        const loadReadiness = async () => {
+            setIsLoadingReadiness(true);
+            setReadinessError("");
+            try {
+                const response = await fetch(
+                    `/api/projects/${projectId}/review-shares/readiness?sceneId=${encodeURIComponent(selectedSceneId)}&versionId=${encodeURIComponent(selectedVersionId)}`,
+                    {
+                        cache: "no-store",
+                        signal: controller.signal,
+                    },
+                );
+                if (!response.ok) {
+                    throw new Error(await extractApiError(response, `Version posture unavailable (${response.status})`));
+                }
+
+                const payload = (await response.json()) as ReviewShareReadiness;
+                if (!cancelled) {
+                    setSelectedReadiness(payload);
+                }
+            } catch (loadError) {
+                if (!cancelled && !controller.signal.aborted) {
+                    setSelectedReadiness(null);
+                    setReadinessError(loadError instanceof Error ? loadError.message : "Unable to inspect version posture.");
+                }
+            } finally {
+                if (!cancelled) {
+                    setIsLoadingReadiness(false);
+                }
+            }
+        };
+
+        void loadReadiness();
+        return () => {
+            cancelled = true;
+            controller.abort();
+        };
+    }, [canAccessMvp, projectId, selectedSceneId, selectedVersionId]);
+
     const selectedWorldLink = worldLinks.find((entry) => entry.sceneId === selectedSceneId) ?? primaryWorld;
     const selectedVersion = versions.find((entry) => entry.version_id === selectedVersionId) ?? versions[0] ?? null;
     const activeShares = reviewShares.filter((share) => share.status === "active");
@@ -196,6 +283,13 @@ export function ReviewSharePanel({
         : isLoadingVersions
           ? "Loading saved versions..."
           : "Save a version in /mvp before publishing a secure review link.";
+    const createActionLabel =
+        pendingAction === "create"
+            ? "Signing link..."
+            : selectedReadiness?.state === "review_only"
+              ? "Create review-only link"
+              : "Create secure review link";
+    const selectedReadinessBlockers = selectedReadiness?.blockers.map(humanizeToken) ?? [];
 
     const createShare = () => {
         if (!selectedSceneId || !selectedVersion?.version_id) {
@@ -434,7 +528,7 @@ export function ReviewSharePanel({
                                         <input
                                             value={shareLabel}
                                             onChange={(event) => setShareLabel(event.target.value)}
-                                            placeholder="Design-partner v2 handoff"
+                                            placeholder="Design-partner v2 review"
                                             disabled={isPending || !canManageReviewShares}
                                             className="w-full rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white outline-none transition-colors placeholder:text-neutral-600 focus:border-cyan-300/40 disabled:opacity-60"
                                         />
@@ -467,16 +561,68 @@ export function ReviewSharePanel({
                                         className="w-full rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white outline-none transition-colors placeholder:text-neutral-600 focus:border-cyan-300/40 disabled:opacity-60"
                                     />
                                 </label>
+
+                                {selectedVersion ? (
+                                    <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">
+                                        <div className="flex flex-wrap items-start justify-between gap-3">
+                                            <div>
+                                                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500">Selected version posture</p>
+                                                <p className="mt-2 text-sm font-medium text-white">
+                                                    {isLoadingReadiness
+                                                        ? "Inspecting saved world truth..."
+                                                        : selectedReadiness?.summary ?? "Saved version selected."}
+                                                </p>
+                                                <p className="mt-2 text-sm leading-6 text-neutral-400">
+                                                    {isLoadingReadiness
+                                                        ? "Checking whether this version is only safe for review or also clears downstream handoff blockers."
+                                                        : readinessError || selectedReadiness?.detail || "Truth posture is unavailable right now."}
+                                                </p>
+                                            </div>
+                                            <div className="flex flex-wrap gap-2">
+                                                {isLoadingReadiness ? <StatusBadge label="Inspecting truth" tone="neutral" /> : null}
+                                                {!isLoadingReadiness && selectedReadiness ? (
+                                                    <StatusBadge label={getReadinessLabel(selectedReadiness.state)} tone={getReadinessTone(selectedReadiness.state)} />
+                                                ) : null}
+                                                {!isLoadingReadiness && !selectedReadiness && readinessError ? (
+                                                    <StatusBadge label="Truth unavailable" tone="warning" />
+                                                ) : null}
+                                                {selectedReadiness?.truthSummary?.lane ? (
+                                                    <StatusBadge label={humanizeToken(selectedReadiness.truthSummary.lane)} tone="neutral" />
+                                                ) : null}
+                                                {selectedReadiness?.truthSummary?.deliveryStatus ? (
+                                                    <StatusBadge label={humanizeToken(selectedReadiness.truthSummary.deliveryStatus)} tone="neutral" />
+                                                ) : null}
+                                            </div>
+                                        </div>
+
+                                        {selectedReadinessBlockers.length > 0 ? (
+                                            <p className="mt-3 text-xs leading-5 text-amber-200/80">Blockers: {selectedReadinessBlockers.join(", ")}</p>
+                                        ) : null}
+                                        {selectedReadiness?.truthSummary?.truthLabel ? (
+                                            <p className="mt-2 text-xs leading-5 text-neutral-500">
+                                                Saved world truth: <span className="text-neutral-300">{selectedReadiness.truthSummary.truthLabel}</span>
+                                            </p>
+                                        ) : null}
+                                    </div>
+                                ) : null}
                             </div>
 
                             <div className="mt-5 flex flex-wrap gap-3">
                                 <button
                                     type="button"
                                     onClick={createShare}
-                                    disabled={isPending || isLoadingVersions || !selectedSceneId || !selectedVersion || !canManageReviewShares}
+                                    disabled={
+                                        isPending ||
+                                        isLoadingVersions ||
+                                        isLoadingReadiness ||
+                                        !selectedSceneId ||
+                                        !selectedVersion ||
+                                        !canManageReviewShares ||
+                                        selectedReadiness?.canCreate === false
+                                    }
                                     className="rounded-2xl bg-white px-5 py-3 text-sm font-semibold text-black transition-colors hover:bg-neutral-200 disabled:cursor-not-allowed disabled:opacity-60"
                                 >
-                                    {pendingAction === "create" ? "Signing link..." : "Create secure review link"}
+                                    {createActionLabel}
                                 </button>
                                 {shareUrl ? (
                                     <a
@@ -508,7 +654,7 @@ export function ReviewSharePanel({
                                     <p className="text-xs uppercase tracking-[0.18em] text-neutral-500">Latest persisted link</p>
                                     <p className="mt-3 text-sm font-medium text-white">{shareUrl ? "Ready" : "No new link this session"}</p>
                                     <p className="mt-1 text-sm text-neutral-500">
-                                        {expiresAt ? `Expires ${formatDate(expiresAt)}` : "Create a share to publish the next version-locked handoff."}
+                                        {expiresAt ? `Expires ${formatDate(expiresAt)}` : "Create a share to publish the next version-locked review link."}
                                     </p>
                                 </article>
                             </div>
@@ -525,13 +671,13 @@ export function ReviewSharePanel({
                                     </p>
                                 </article>
                                 <article className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                                    <p className="text-xs uppercase tracking-[0.18em] text-neutral-500">Delivery mode</p>
+                                    <p className="text-xs uppercase tracking-[0.18em] text-neutral-500">Delivery history</p>
                                     <p className="mt-3 text-sm font-medium text-white">
-                                        {signedDeliveryShareCount} signed / {manualDeliveryShareCount} manual
+                                        {signedDeliveryShareCount} signed / {manualDeliveryShareCount} imported manual
                                     </p>
                                     <p className="mt-1 text-sm text-neutral-500">
-                                        Signed links stay revocable and auditable through the platform proxy. Manual rows stay labeled so this panel never implies live external access that
-                                        is not actually being enforced.
+                                        Signed links stay revocable and auditable through the platform proxy. Manual rows remain labeled as historical records so this panel never implies
+                                        live external access that is not actually being enforced.
                                     </p>
                                 </article>
                             </div>
@@ -554,8 +700,13 @@ export function ReviewSharePanel({
                                             label={selectedVersion.summary?.has_environment ? "Environment included" : "No environment"}
                                             tone={selectedVersion.summary?.has_environment ? "success" : "warning"}
                                         />
-                                        <StatusBadge label="Version-locked output" tone="info" />
+                                        <StatusBadge
+                                            label={selectedReadiness ? getReadinessLabel(selectedReadiness.state) : "Version-locked output"}
+                                            tone={selectedReadiness ? getReadinessTone(selectedReadiness.state) : "info"}
+                                        />
                                     </div>
+                                    {selectedReadiness?.detail ? <p className="mt-3 text-xs leading-5 text-neutral-500">{selectedReadiness.detail}</p> : null}
+                                    {!selectedReadiness && readinessError ? <p className="mt-3 text-xs leading-5 text-amber-200/80">{readinessError}</p> : null}
                                 </div>
                             ) : null}
 

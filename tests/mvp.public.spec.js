@@ -341,6 +341,14 @@ async function fillReviewMetadata(page, scene, statusAction = "Save Review") {
     await page.getByRole("button", { name: statusAction }).click();
 }
 
+async function addPinnedVersionComment(page, author, body) {
+    await expect(page.getByPlaceholder("Reviewer name")).toBeVisible({ timeout: 15_000 });
+    await page.getByPlaceholder("Reviewer name").fill(author);
+    await page.getByPlaceholder("Pinned version note").fill(body);
+    await page.getByRole("button", { name: /Add pinned comment/i }).click();
+    await expect(page.getByText(/Version comment saved\./i)).toBeVisible({ timeout: 15_000 });
+}
+
 test.beforeAll(() => {
     persistManifest();
 });
@@ -482,14 +490,7 @@ test("wave2 island environment review metadata approval and comments", async ({ 
     expect(review.metadata.permit_status).toBe("approved");
     expect(review.issues).toHaveLength(1);
     expect(review.issues[0].title).toContain("power");
-    const commentUpsert = await page.request.post(`${BASE}/api/mvp/scene/${sceneId}/versions/${versionId}/comments`, {
-        data: {
-            author: ACTOR_LABEL,
-            body: `${scene} pinned review comment ${runLabel}`,
-            anchor: "scene",
-        },
-    });
-    expect(commentUpsert.ok()).toBeTruthy();
+    await addPinnedVersionComment(page, ACTOR_LABEL, `${scene} pinned review comment ${runLabel}`);
     const comments = await fetchComments(page, sceneId, versionId);
     expect(comments[0].body).toContain(scene);
     await assertStorage(page, `/storage/scenes/${sceneId}/environment/cameras.json`, "application/json", 1);
@@ -681,14 +682,7 @@ test("wave9 night environment in-review state and comment history", async ({ pag
     });
     expect(reviewUpsert.ok()).toBeTruthy();
 
-    const commentUpsert = await page.request.post(`${BASE}/api/mvp/scene/${sceneId}/versions/${versionId}/comments`, {
-        data: {
-            author: ACTOR_LABEL,
-            body: `${scene} pinned review comment ${runLabel}`,
-            anchor: "scene",
-        },
-    });
-    expect(commentUpsert.ok()).toBeTruthy();
+    await addPinnedVersionComment(page, ACTOR_LABEL, `${scene} pinned review comment ${runLabel}`);
 
     const review = await waitForReviewState(page, sceneId, "in_review");
     expect(review.metadata.scene_title).toContain(scene);

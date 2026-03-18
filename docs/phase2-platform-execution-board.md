@@ -1,12 +1,32 @@
 # Phase 2 + Platform Execution Board
 
-Updated: 2026-03-16
+Updated: 2026-03-17
 
 ## Objective
 
 Stabilize the current MVP/editor surface, activate the platform stack in staging, and connect billing/auth to Phase 2 only through explicit entitlement and ownership boundaries.
 
-## Current State
+## Current Operational Truth
+
+As of March 17, 2026:
+
+- `codex/editor-scene-document` is resumed and active. The earlier freeze reset is historical context, not a standing branch blocker.
+- The combined `npm run certify:mvp:local-stack` packet is not current green proof in this workspace. The 2026-03-16 rerun failed smoke and loaded-scene viewer steps, so older passing packets must not be treated as current release evidence.
+- The viewer 5M lane still is not certified on current infrastructure.
+- Platform auth and billing remain structurally present but operationally blocked here because Supabase and Stripe env/config are missing.
+- Platform browser E2E exists in repo but is not staging-certified until auth, billing, storage state, and staging env are active.
+- Public deployment parity between `gauset.com` and `gauset-app.vercel.app` remains unresolved.
+
+## Release Surface Truth
+
+- `gauset.com` is the canonical public production release path and must ship from `/Users/amirboz/gauset`.
+- `gauset-app.vercel.app` is the gated design-partner verification surface for this repo until parity is complete. It is not the public production source of truth.
+- `npm run test:platform-release-gates` is the first local gate for this repo before any public verification or rollout claim.
+- `npm run certify:public` verifies the gated-entry behavior of `gauset-app`. It is not a `gauset.com` production release certification command.
+
+## Historical Progress Already Landed
+
+The repo already contains these enabling changes:
 
 - Done: the local MVP backend now exposes `/providers`, `/generate/image`, and `/reconstruct/session/:id`, matching the internal editor controllers instead of leaving those routes missing in local development.
 - Done: provider-generated stills now materialize into the same upload store contract as imported stills in the local backend.
@@ -20,13 +40,9 @@ Stabilize the current MVP/editor surface, activate the platform stack in staging
 - Done: `/pro` is now explicitly labeled as an experimental mock surface in both UI and API contract instead of implying a live video provider.
 - Verified: targeted Playwright wave 9 passes against the fresh `3003` dev surface.
 - Verified: `npm run typecheck` passes after the scene-graph and dev-stack changes.
-- Verified: `npm run certify:mvp:local-stack` now passes with `hydrationMismatchDetected: false` in the viewer diagnostic packet.
+- Historical: a prior `npm run certify:mvp:local-stack` packet passed with `hydrationMismatchDetected: false` in the viewer diagnostic packet. Do not treat that earlier pass as current proof without a fresh green rerun.
 - Verified: the platform Playwright suite exists in repo under `tests/platform` with a dedicated config in `playwright.platform.config.ts`.
 - Verified: 2026-03-16 viewer-only reruns now have fresh truth packets in `/Users/amirboz/gauset-app/artifacts/local-viewer`, `/Users/amirboz/gauset-app/artifacts/viewer-benchmark-5m`, and `/Users/amirboz/gauset-app/artifacts/viewer-webgl2-probe`. Current matrix: default host preview certifies as interactive fallback, Chrome headless preview certifies as WebGL2 live, and the Chrome 5M lane still fails because the viewer loses WebGL context under load. See `/Users/amirboz/gauset-app/docs/viewer-certification-truth-2026-03-16.md`.
-- Open: the combined `npm run certify:mvp:local-stack` packet is currently not green in this workspace. The 2026-03-16 rerun failed its smoke and loaded-scene viewer steps, so that combined packet must not be treated as current viewer proof. See `/Users/amirboz/gauset-app/artifacts/mvp-local-stack/viewer-cert-host-2026-03-16/certification-summary.json`.
-- Open: platform auth and billing are still structurally present but not operational in this workspace because Supabase and Stripe env/config are missing.
-- Open: platform browser E2E is present in code but cannot be honestly claimed as staging-certified until auth, billing, storage state, and staging env are activated.
-- Open: public deployment parity between `gauset.com` and `gauset-app.vercel.app` is still unresolved.
 
 ## Delivery Rule
 
@@ -126,15 +142,15 @@ Exit gate:
 
 Target window: after staging certification is green
 
-- Make `gauset.com` the canonical hardened surface until parity is complete.
-- Bring `gauset-app.vercel.app` to parity or explicitly demote it to internal-use-only status.
+- Keep `gauset.com` as the canonical public production surface until parity is complete.
+- Treat `gauset-app.vercel.app` as the gated design-partner verification surface for this repo until parity is complete, then either bring it to parity or explicitly demote it to internal-use-only status.
 - Align public truth surfaces for setup status, deployment fingerprinting, and lane availability reporting.
 
 Exit gate:
 
 - public MVP surfaces agree on deployment/status contracts
-- release surface is truthful about storage mode and lane coverage
-- no uncertified public surface is implicitly treated as production truth
+- `gauset-app` verification surfaces are truthful about storage mode and lane coverage
+- no uncertified `gauset-app` surface is implicitly treated as production truth
 
 ## Merge Order
 

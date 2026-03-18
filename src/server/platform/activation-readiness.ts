@@ -621,7 +621,7 @@ function buildCapabilityAssessments({
             operational: authOperational,
             requiresLiveCertification: true,
             summary: authOperational
-                ? "Supabase login, registration, OAuth redirect, invitation acceptance, and session bootstrap are wired and locally verified."
+                ? "Supabase login, registration, OAuth redirect, invitation acceptance, and session bootstrap are wired, with local structural and gate coverage. Live auth proof still depends on authenticated runtime certification."
                 : "Auth routes and session bootstrap code are landed, but env/config still prevents operational activation.",
             blockers: auth.missingEnv,
             evidence: [
@@ -630,7 +630,7 @@ function buildCapabilityAssessments({
                 "src/app/api/auth/session/route.ts",
                 "src/server/auth/session.ts",
             ],
-            verification: ["npm run test:platform-routes", "npm run test:platform-readiness", "npm run typecheck"],
+            verification: ["npm run test:platform-release-gates", "npm run test:platform-readiness", "npm run typecheck"],
         }),
         createCapabilityAssessment({
             capability: "sessions",
@@ -662,7 +662,7 @@ function buildCapabilityAssessments({
             requiresLiveCertification: true,
             summary:
                 billingOperational
-                    ? "Stripe checkout, portal, summary, reconciliation, usage, and webhook ingestion are landed and locally verified."
+                    ? "Stripe checkout, portal, summary, reconciliation, usage, and webhook ingestion are landed, with local structural and gate coverage. Live Stripe delivery proof still depends on webhook/runtime certification."
                     : "Billing and Stripe server routes are landed, but Stripe env/config or live delivery verification is still incomplete.",
             blockers: dedupeStrings([...billing.missingEnv, ...(billing.probe?.status === "blocked" ? ["Stripe API connectivity is still failing."] : [])]),
             evidence: [
@@ -673,7 +673,7 @@ function buildCapabilityAssessments({
                 "supabase/migrations/20260315170500_billing_completion.sql",
                 "supabase/migrations/20260315193000_billing_usage_events.sql",
             ],
-            verification: ["npm run test:platform-contracts", "npm run test:platform-readiness", "npm run typecheck"],
+            verification: ["npm run test:platform-release-gates", "npm run test:platform-readiness", "npm run typecheck"],
         }),
         createCapabilityAssessment({
             capability: "entitlements_and_gated_mvp_access",

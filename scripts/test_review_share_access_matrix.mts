@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 
 import { buildProjectReviewShareCreateRequest } from "../src/components/worlds/reviewShareRequest.ts";
+import { reviewShareReadinessSchema } from "../src/server/contracts/review-shares.ts";
 import { canUseLocalhostMvpBypass, normalizeRequestHostname, resolveRequestHostname } from "../src/server/mvp/hostPolicy.ts";
 import { canManageProjectReviewShares, getReviewShareRolePermissions } from "../src/server/review-shares/permissions.ts";
+import { deriveReviewShareReadiness } from "../src/server/review-shares/readiness.ts";
 import { REVIEW_SHARE_DUPLICATE_WINDOW_MS, findReusableActiveReviewShare } from "../src/server/review-shares/reuse.ts";
 import {
     buildReviewPath,
@@ -384,6 +386,65 @@ function testSavedVersionReuseIgnoresDirtyEditorState() {
     assert.equal(dirtyEditorStateReuse, null);
 }
 
+function testReviewShareReadinessTruthStates() {
+    const ready = reviewShareReadinessSchema.parse(
+        deriveReviewShareReadiness({
+            sceneId: "scene_matrix",
+            versionId: "version_ready",
+            versionResolved: true,
+            truthSummary: {
+                sourceKind: "reconstruction_scene",
+                sourceLabel: "Backlot reconstruction",
+                ingestRecordId: "ingest_123",
+                latestVersionId: "version_ready",
+                lane: "reconstruction",
+                truthLabel: "Approved reconstruction",
+                deliveryStatus: "ready_for_downstream",
+                blockers: [],
+                downstreamTargetLabel: "Unreal handoff manifest",
+                downstreamTargetSummary: "Approved reconstruction package is ready for Unreal blockout handoff.",
+            },
+        }),
+    );
+    assert.equal(ready.state, "ready");
+    assert.equal(ready.canCreate, true);
+
+    const reviewOnly = reviewShareReadinessSchema.parse(
+        deriveReviewShareReadiness({
+            sceneId: "scene_matrix",
+            versionId: "version_preview",
+            versionResolved: true,
+            truthSummary: {
+                sourceKind: "single_image_preview",
+                sourceLabel: "Scout preview",
+                ingestRecordId: "ingest_preview",
+                latestVersionId: "version_preview",
+                lane: "preview",
+                truthLabel: "Single-image preview",
+                deliveryStatus: "preview_only",
+                blockers: ["preview_not_reconstruction", "review_not_approved"],
+                downstreamTargetLabel: null,
+                downstreamTargetSummary: null,
+            },
+        }),
+    );
+    assert.equal(reviewOnly.state, "review_only");
+    assert.equal(reviewOnly.canCreate, true);
+    assert.match(reviewOnly.detail, /preview not reconstruction/i);
+
+    const blocked = reviewShareReadinessSchema.parse(
+        deriveReviewShareReadiness({
+            sceneId: "scene_matrix",
+            versionId: "version_missing",
+            versionResolved: false,
+            truthSummary: null,
+        }),
+    );
+    assert.equal(blocked.state, "blocked");
+    assert.equal(blocked.canCreate, false);
+    assert.match(blocked.detail, /backend can load it/i);
+}
+
 testLocalhostHostPolicy();
 testReviewPathBuilder();
 testSecureReviewShareAccessMatrix();
@@ -391,5 +452,6 @@ testProjectReviewShareRoleMatrix();
 testSavedVersionShareRequestIsIdentityOnly();
 testDuplicateShareReuseWindow();
 testSavedVersionReuseIgnoresDirtyEditorState();
+testReviewShareReadinessTruthStates();
 
 console.log("Review share access matrix checks passed.");

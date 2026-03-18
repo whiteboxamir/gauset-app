@@ -1,10 +1,17 @@
 # Release Sanity
 
-This runbook is for `/Users/amirboz/gauset-app` and the `gauset-app` Vercel project only. Do not use it as the release path for `gauset.com`; that site must ship from `/Users/amirboz/gauset`.
+This runbook is for `/Users/amirboz/gauset-app` and the `gauset-app` Vercel project only. It verifies the gated design-partner surface for this repo. It is not the production release path for `gauset.com`; that site must ship from `/Users/amirboz/gauset`.
+
+## Surface Truth
+
+- `gauset.com` is the canonical public production release path.
+- `gauset-app.vercel.app` is the gated design-partner verification surface for this repo until parity is complete.
+- `npm run test:platform-release-gates` is the first local gate for touched platform and gated-entry changes in this repo.
+- `npm run certify:public` is the gated-entry verification runner for `gauset-app`. It is not a `gauset.com` production release certification command.
 
 ## Scope
 
-This runbook checks the deployed design-partner entry on `gauset-app`: the gated `/mvp` shell, the auth-protected frontend proxy under `/api/mvp/*`, and the public deployment fingerprint and health endpoints.
+This runbook checks the deployed gated entry on `gauset-app`: the authenticated `/mvp` shell, the frontend proxy under `/api/mvp/*`, and the deployment fingerprint and health endpoints for that verification surface.
 
 This runbook does not certify platform billing, live Stripe webhook delivery, or Supabase schema freshness. Those proofs must come from the platform rollout and billing-completion certification lanes in `/Users/amirboz/gauset-app`.
 
@@ -19,9 +26,9 @@ This runbook does not certify platform billing, live Stripe webhook delivery, or
 
 ## Required Guardrails
 
-Public certification is allowed only against the `gauset-app` deployment surface, never `gauset.com`.
+Verification from this runbook is allowed only against the `gauset-app` deployment surface, never `gauset.com`.
 
-Before any mutating public run, set:
+Before any mutating `gauset-app` verification run, set:
 
 ```bash
 export GAUSET_MVP_BASE_URL=https://<deployment-host>
@@ -40,11 +47,11 @@ Rules:
 - `GAUSET_MVP_BASE_URL` must not be `gauset.com`, `www.gauset.com`, `gnosika.com`, or a local host.
 - `GAUSET_MVP_BASE_URL` must resolve to `gauset-app.vercel.app` unless `GAUSET_PUBLIC_CERT_ALLOWED_HOSTS` explicitly allowlists another public certification host.
 - `GAUSET_PUBLIC_CERT_RUN_LABEL` is required and is used to namespace artifacts and review metadata.
-- The gated-entry verification entrypoint is `npm run certify:public`.
+- The gated-entry verification entrypoint in this repo is `npm run certify:public`.
 
 ## Step 0: Boundary And Target Lock
 
-Run the repo/project boundary check before any public certification work:
+Run the repo/project boundary check before any `gauset-app` verification work:
 
 ```bash
 npm run verify:boundary
@@ -56,7 +63,7 @@ Pass criteria:
 - linked Vercel project matches `gauset-app`
 - chosen public base URL is explicitly locked through the env vars above
 
-Before the rollout cert, run the local release-gate bundle:
+Before any rollout or gated-entry verification claim, run the local release-gate bundle:
 
 ```bash
 npm run test:platform-release-gates
@@ -122,7 +129,7 @@ Pass criteria:
 
 Do not run the old public Playwright or hostile audit suites against `gauset-app` once the platform gate is active.
 
-Those mutation lanes now belong to `gauset.com`, which must be certified from `/Users/amirboz/gauset` with:
+Those mutation lanes belong to `gauset.com`, which must be certified from `/Users/amirboz/gauset` with:
 
 ```bash
 node scripts/mvp_release_preflight.mjs
@@ -135,7 +142,7 @@ node scripts/mvp_public_canary.mjs
 - `/api/mvp/setup/status` is anonymously accessible or does not return `AUTH_REQUIRED`
 - public proxy errors are present on `/api/mvp/health` or `/api/mvp/deployment`
 
-## Canonical Command
+## Verification Command
 
 Use the gated-entry verification runner:
 

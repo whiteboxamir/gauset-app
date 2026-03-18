@@ -86,6 +86,22 @@ class VercelSingleImagePreviewFallbackTests(unittest.TestCase):
         )
         self.assertEqual(metadata["point_count"], density["source_count"] * density["multiplier"])
 
+    def test_fallback_preview_metadata_stays_truthful_about_preview_only_delivery(self) -> None:
+        fixture_path = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "public-scenes" / "03-neon-streets.png"
+        payloads = self.app._binary_splat_payload(fixture_path.read_bytes(), fixture_path.name)
+        metadata = json.loads(payloads["metadata.json"].decode("utf-8"))
+        delivery = metadata["delivery"]
+        release_gates = metadata["release_gates"]
+
+        self.assertEqual(metadata["lane_truth"], "preview_only_single_image")
+        self.assertEqual(metadata["reconstruction_status"], "preview_only")
+        self.assertEqual(delivery["readiness"], "preview_only")
+        self.assertIn("not a faithful reconstruction", delivery["summary"].lower())
+        self.assertIn("single photo", delivery["blocking_issues"][0].lower())
+        self.assertEqual(release_gates["status"], "blocked")
+        self.assertFalse(release_gates["hero_ready"])
+        self.assertFalse(release_gates["world_class_ready"])
+
 
 if __name__ == "__main__":
     unittest.main()

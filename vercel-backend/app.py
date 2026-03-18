@@ -55,6 +55,7 @@ WORLD_SOURCE_VERSION = "gauset.world_source.v1"
 LANE_METADATA_VERSION = "gauset.lane_truth.v1"
 HANDOFF_MANIFEST_VERSION = "gauset.handoff_manifest.v1"
 HANDOFF_TARGETS = ["scene_document_v2", "external_world_package", "unreal_handoff_manifest"]
+SCENE_DOCUMENT_GRAPH_MISMATCH_CODE = "SCENE_DOCUMENT_GRAPH_MISMATCH"
 
 
 def _response_field(payload: Any, key: str) -> Optional[str]:
@@ -70,7 +71,7 @@ def _source_kind_for_type(source_type: str) -> str:
 
 
 def _source_origin_for_type(source_type: str) -> str:
-    return "local_provider_generation" if source_type == "generated" else "local_upload"
+    return "public_provider_generation" if source_type == "generated" else "public_upload"
 
 
 def _source_ingest_channel_for_type(source_type: str) -> str:
@@ -187,6 +188,81 @@ def _build_handoff_manifest(
         "source_kind": str(world_source.get("kind") or "").strip() or None,
         "blockers": _list_of_text(blockers or [], limit=8),
     }
+
+
+def _upload_lane_metadata() -> Dict[str, Any]:
+    return _build_lane_metadata(
+        lane="upload",
+        lane_truth="single_image_upload",
+        available=True,
+        readiness="source_only",
+        summary=(
+            "Source image uploaded. It can seed preview or asset generation, but it is not a downstream-ready "
+            "world handoff."
+        ),
+        blockers=["Single uploaded image is only a source input, not a packaged downstream handoff."],
+    )
+
+
+def _upload_handoff_manifest(world_source: Dict[str, Any]) -> Dict[str, Any]:
+    return _build_handoff_manifest(
+        lane="upload",
+        world_source=world_source,
+        ready=False,
+        summary=(
+            "Uploaded source image carries provenance only; downstream handoff remains blocked until a real "
+            "deliverable is packaged."
+        ),
+        blockers=["Uploaded source image is not a downstream-ready world handoff."],
+    )
+
+
+def _preview_lane_metadata() -> Dict[str, Any]:
+    return _build_lane_metadata(
+        lane="preview",
+        lane_truth="single_image_lrm_preview",
+        available=True,
+        readiness="preview_only",
+        summary=(
+            "Single-image preview generation completed. Output is suitable for look review, not production-ready "
+            "downstream handoff."
+        ),
+        blockers=["Single-image preview remains an approximate single-photo result, not a production-ready handoff."],
+    )
+
+
+def _preview_handoff_manifest(world_source: Dict[str, Any]) -> Dict[str, Any]:
+    return _build_handoff_manifest(
+        lane="preview",
+        world_source=world_source,
+        ready=False,
+        summary="Preview metadata is explicit, but downstream handoff remains blocked for this single-image lane.",
+        blockers=["Single-image preview does not satisfy production-ready downstream handoff gates."],
+    )
+
+
+def _asset_lane_metadata() -> Dict[str, Any]:
+    return _build_lane_metadata(
+        lane="asset",
+        lane_truth="single_image_asset",
+        available=True,
+        readiness="editorial_object",
+        summary=(
+            "Single-image asset generation completed. Output is suitable for editor blocking and look review, "
+            "not production-ready downstream handoff."
+        ),
+        blockers=["Single-image asset extraction is not benchmarked for production-ready downstream delivery."],
+    )
+
+
+def _asset_handoff_manifest(world_source: Dict[str, Any]) -> Dict[str, Any]:
+    return _build_handoff_manifest(
+        lane="asset",
+        world_source=world_source,
+        ready=False,
+        summary="Asset metadata is explicit, but downstream handoff remains blocked for this single-image asset lane.",
+        blockers=["Single-image asset does not satisfy production-ready downstream handoff gates."],
+    )
 
 
 class StorageBackend:
@@ -1023,7 +1099,10 @@ def _binary_splat_payload(image_bytes: bytes, filename: str) -> Dict[str, bytes]
             "score": 38.0,
             "readiness": "preview_only",
             "label": "Preview only",
-            "summary": "This lane is still a synthesized preview, but the fallback is now densified for stronger framing and look scouting.",
+            "summary": (
+                "This output is a truthful single-still preview, densified for stronger framing and look scouting, "
+                "not a faithful reconstruction or production-ready handoff."
+            ),
             "recommended_viewer_mode": "editor",
             "blocking_issues": [
                 "A single photo cannot resolve hidden geometry or full scene coverage.",
@@ -1283,26 +1362,8 @@ def _build_upload_response(record: Dict[str, Any]) -> Dict[str, Any]:
             upstream_sources=[source_provenance],
         )
 
-    lane_metadata = record.get("lane_metadata")
-    if not isinstance(lane_metadata, dict):
-        lane_metadata = _build_lane_metadata(
-            lane="upload",
-            lane_truth="single_image_upload",
-            available=True,
-            readiness="ready",
-            summary="Source image is ready for downstream generation and asset creation.",
-            blockers=[],
-        )
-
-    handoff_manifest = record.get("handoff_manifest")
-    if not isinstance(handoff_manifest, dict):
-        handoff_manifest = _build_handoff_manifest(
-            lane="upload",
-            world_source=world_source,
-            ready=True,
-            summary="Uploaded source image is ready for downstream claimability.",
-            blockers=[],
-        )
+    lane_metadata = _upload_lane_metadata()
+    handoff_manifest = _upload_handoff_manifest(world_source)
 
     payload: Dict[str, Any] = {
         "image_id": record["image_id"],
@@ -1354,21 +1415,8 @@ def _write_upload_record(
         primary_source=payload["source_provenance"],
         upstream_sources=[payload["source_provenance"]],
     )
-    payload["lane_metadata"] = _build_lane_metadata(
-        lane="upload",
-        lane_truth="single_image_upload",
-        available=True,
-        readiness="ready",
-        summary="Source image is ready for downstream generation and asset creation.",
-        blockers=[],
-    )
-    payload["handoff_manifest"] = _build_handoff_manifest(
-        lane="upload",
-        world_source=payload["world_source"],
-        ready=True,
-        summary="Uploaded source image is ready for downstream claimability.",
-        blockers=[],
-    )
+    payload["lane_metadata"] = _upload_lane_metadata()
+    payload["handoff_manifest"] = _upload_handoff_manifest(payload["world_source"])
     _write_json(_upload_meta_path(image_id), payload)
     return payload
 
@@ -1499,6 +1547,331 @@ def _normalize_scene_graph(scene_graph: Any) -> Dict[str, Any]:
             "lens_mm": float(viewer_input.get("lens_mm")) if isinstance(viewer_input.get("lens_mm"), (int, float)) else 35.0,
         },
     }
+
+
+def _extract_embedded_scene_document(scene_graph: Dict[str, Any] | None) -> Dict[str, Any] | None:
+    if not isinstance(scene_graph, dict):
+        return None
+    embedded_document = scene_graph.get("__scene_document_v2")
+    if isinstance(embedded_document, dict) and embedded_document.get("version") == 2:
+        return embedded_document
+    return None
+
+
+def _document_node_order(scene_document: Dict[str, Any]) -> List[str]:
+    nodes = scene_document.get("nodes") if isinstance(scene_document.get("nodes"), dict) else {}
+    root_ids = scene_document.get("rootIds") if isinstance(scene_document.get("rootIds"), list) else []
+    ordered: List[str] = []
+    seen: set[str] = set()
+
+    def walk(node_id: Any) -> None:
+        if not isinstance(node_id, str) or not node_id or node_id in seen:
+            return
+        seen.add(node_id)
+        ordered.append(node_id)
+        node = nodes.get(node_id) if isinstance(nodes, dict) else None
+        child_ids = node.get("childIds") if isinstance(node, dict) and isinstance(node.get("childIds"), list) else []
+        for child_id in child_ids:
+            walk(child_id)
+
+    for root_id in root_ids:
+        walk(root_id)
+    for node_id in nodes:
+        walk(node_id)
+    return ordered
+
+
+def _normalize_position_tuple(value: Any, default: List[float] | None = None) -> List[float]:
+    fallback = default or [0.0, 0.0, 0.0]
+    if isinstance(value, list) and len(value) == 3 and all(isinstance(item, (int, float)) for item in value):
+        return [float(item) for item in value]
+    return list(fallback)
+
+
+def _normalize_rotation_tuple(value: Any, default: List[float] | None = None) -> List[float]:
+    fallback = default or [0.0, 0.0, 0.0, 1.0]
+    if isinstance(value, list):
+        if len(value) == 4 and all(isinstance(item, (int, float)) for item in value):
+            return [float(item) for item in value]
+        if len(value) == 3 and all(isinstance(item, (int, float)) for item in value):
+            return [float(value[0]), float(value[1]), float(value[2]), 1.0]
+    return list(fallback)
+
+
+def _empty_scene_document_v2() -> Dict[str, Any]:
+    return {
+        "version": 2,
+        "rootIds": [],
+        "nodes": {},
+        "groups": {},
+        "cameras": {},
+        "lights": {},
+        "meshes": {},
+        "splats": {},
+        "direction": {
+            "cameraViews": [],
+            "pins": [],
+            "directorPath": [],
+            "directorBrief": "",
+        },
+        "review": None,
+        "viewer": {
+            "fov": 45.0,
+            "lens_mm": 35.0,
+            "activeCameraNodeId": None,
+        },
+    }
+
+
+def _scene_graph_to_canonical_scene_document(scene_graph: Dict[str, Any] | None) -> Dict[str, Any]:
+    if not isinstance(scene_graph, dict):
+        return _empty_scene_document_v2()
+
+    embedded_scene_document = _extract_embedded_scene_document(scene_graph)
+    if embedded_scene_document is not None:
+        return embedded_scene_document
+
+    if scene_graph.get("version") == 2:
+        return scene_graph
+
+    normalized = _normalize_scene_graph(scene_graph)
+    document = _empty_scene_document_v2()
+    document["direction"] = {
+        "cameraViews": normalized.get("camera_views") if isinstance(normalized.get("camera_views"), list) else [],
+        "pins": normalized.get("pins") if isinstance(normalized.get("pins"), list) else [],
+        "directorPath": normalized.get("director_path") if isinstance(normalized.get("director_path"), list) else [],
+        "directorBrief": str(normalized.get("director_brief") or ""),
+    }
+    document["viewer"] = {
+        "fov": normalized["viewer"]["fov"],
+        "lens_mm": normalized["viewer"]["lens_mm"],
+        "activeCameraNodeId": "camera_viewer",
+    }
+
+    environment = normalized.get("environment") if isinstance(normalized.get("environment"), dict) else None
+    if environment is not None:
+        environment_id = str(environment.get("id") or "environment")
+        node_id = f"splat_{environment_id}"
+        urls = environment.get("urls") if isinstance(environment.get("urls"), dict) else {}
+        document["rootIds"].append(node_id)
+        document["nodes"][node_id] = {
+            "id": node_id,
+            "kind": "splat",
+            "parentId": None,
+            "childIds": [],
+            "name": str(environment.get("name") or environment.get("sourceLabel") or environment.get("label") or "Environment"),
+            "visible": bool(environment.get("visible", True)),
+            "locked": bool(environment.get("locked", False)),
+            "transform": {
+                "position": [0.0, 0.0, 0.0],
+                "rotation": [0.0, 0.0, 0.0, 1.0],
+                "scale": [1.0, 1.0, 1.0],
+            },
+        }
+        document["splats"][node_id] = {
+            "id": node_id,
+            "sceneId": environment.get("id"),
+            "viewerUrl": urls.get("viewer") if isinstance(urls.get("viewer"), str) else None,
+            "splatUrl": urls.get("splats") if isinstance(urls.get("splats"), str) else None,
+            "camerasUrl": urls.get("cameras") if isinstance(urls.get("cameras"), str) else None,
+            "metadataUrl": urls.get("metadata") if isinstance(urls.get("metadata"), str) else None,
+            "metadata": environment.get("metadata") if isinstance(environment.get("metadata"), dict) else {},
+        }
+
+    for index, asset in enumerate(normalized.get("assets") if isinstance(normalized.get("assets"), list) else []):
+        if not isinstance(asset, dict):
+            continue
+        node_id = str(asset.get("instanceId") or asset.get("instance_id") or asset.get("id") or f"mesh_{index + 1}")
+        asset_id = str(asset.get("asset_id") or asset.get("id") or node_id)
+        document["rootIds"].append(node_id)
+        document["nodes"][node_id] = {
+            "id": node_id,
+            "kind": "mesh",
+            "parentId": None,
+            "childIds": [],
+            "name": str(asset.get("name") or asset_id),
+            "visible": bool(asset.get("visible", True)),
+            "locked": bool(asset.get("locked", False)),
+            "transform": {
+                "position": _normalize_position_tuple(asset.get("position")),
+                "rotation": _normalize_rotation_tuple(asset.get("rotation")),
+                "scale": _normalize_position_tuple(asset.get("scale"), [1.0, 1.0, 1.0]),
+            },
+        }
+        document["meshes"][node_id] = {
+            "id": node_id,
+            "assetId": asset_id,
+            "meshUrl": asset.get("mesh") if isinstance(asset.get("mesh"), str) else None,
+            "textureUrl": asset.get("texture") if isinstance(asset.get("texture"), str) else None,
+            "previewUrl": asset.get("preview") if isinstance(asset.get("preview"), str) else None,
+            "metadata": {
+                **(asset.get("metadata") if isinstance(asset.get("metadata"), dict) else {}),
+                "id": asset.get("id") or asset_id,
+                "asset_id": asset.get("asset_id") or asset_id,
+                "instanceId": asset.get("instanceId") or asset.get("instance_id") or node_id,
+            },
+        }
+
+    document["rootIds"].append("camera_viewer")
+    document["nodes"]["camera_viewer"] = {
+        "id": "camera_viewer",
+        "kind": "camera",
+        "parentId": None,
+        "childIds": [],
+        "name": "Viewer Camera",
+        "visible": True,
+        "locked": False,
+        "transform": {
+            "position": [0.0, 0.0, 0.0],
+            "rotation": [0.0, 0.0, 0.0, 1.0],
+            "scale": [1.0, 1.0, 1.0],
+        },
+    }
+    document["cameras"]["camera_viewer"] = {
+        "id": "camera_viewer",
+        "fov": normalized["viewer"]["fov"],
+        "lens_mm": normalized["viewer"]["lens_mm"],
+        "near": 0.1,
+        "far": 1000.0,
+        "role": "viewer",
+    }
+    return document
+
+
+def _scene_document_to_compatibility_scene_graph(scene_document: Dict[str, Any]) -> Dict[str, Any]:
+    if scene_document.get("version") != 2:
+        return _normalize_scene_graph(scene_document)
+
+    nodes = scene_document.get("nodes") if isinstance(scene_document.get("nodes"), dict) else {}
+    meshes = scene_document.get("meshes") if isinstance(scene_document.get("meshes"), dict) else {}
+    splats = scene_document.get("splats") if isinstance(scene_document.get("splats"), dict) else {}
+    direction = scene_document.get("direction") if isinstance(scene_document.get("direction"), dict) else {}
+    viewer = scene_document.get("viewer") if isinstance(scene_document.get("viewer"), dict) else {}
+
+    environment = None
+    assets: List[Dict[str, Any]] = []
+
+    for node_id in _document_node_order(scene_document):
+        node = nodes.get(node_id) if isinstance(nodes, dict) else None
+        if not isinstance(node, dict):
+            continue
+
+        transform = node.get("transform") if isinstance(node.get("transform"), dict) else {}
+        kind = node.get("kind")
+        visible = node.get("visible")
+        is_visible = visible if isinstance(visible, bool) else True
+        locked = node.get("locked")
+        is_locked = locked if isinstance(locked, bool) else False
+        if kind == "splat" and environment is None and is_visible:
+            splat = splats.get(node_id) if isinstance(splats, dict) else None
+            if isinstance(splat, dict):
+                metadata = splat.get("metadata") if isinstance(splat.get("metadata"), dict) else {}
+                metadata_urls = metadata.get("urls") if isinstance(metadata.get("urls"), dict) else {}
+                environment = {
+                    **metadata,
+                    "id": splat.get("sceneId"),
+                    "name": node.get("name") or "Environment",
+                    "visible": is_visible,
+                    "locked": is_locked,
+                    "urls": {
+                        **metadata_urls,
+                        "viewer": splat.get("viewerUrl"),
+                        "splats": splat.get("splatUrl"),
+                        "cameras": splat.get("camerasUrl"),
+                        "metadata": splat.get("metadataUrl"),
+                    },
+                }
+        elif kind == "mesh" and is_visible:
+            mesh = meshes.get(node_id) if isinstance(meshes, dict) else None
+            if not isinstance(mesh, dict):
+                continue
+            metadata = mesh.get("metadata") if isinstance(mesh.get("metadata"), dict) else {}
+            asset_id = mesh.get("assetId") if isinstance(mesh.get("assetId"), str) and mesh.get("assetId") else node_id
+            assets.append(
+                {
+                    **metadata,
+                    "asset_id": metadata.get("asset_id") or asset_id,
+                    "id": metadata.get("id") or asset_id,
+                    "name": metadata.get("name") or node.get("name") or asset_id,
+                    "mesh": mesh.get("meshUrl"),
+                    "texture": mesh.get("textureUrl"),
+                    "preview": mesh.get("previewUrl"),
+                    "instanceId": metadata.get("instanceId") or metadata.get("instance_id"),
+                    "visible": is_visible,
+                    "locked": is_locked,
+                    "position": _normalize_position_tuple(transform.get("position")),
+                    "rotation": _normalize_rotation_tuple(transform.get("rotation")),
+                    "scale": _normalize_position_tuple(transform.get("scale"), [1.0, 1.0, 1.0]),
+                }
+            )
+
+    return {
+        "environment": environment,
+        "assets": assets,
+        "camera_views": direction.get("cameraViews") if isinstance(direction.get("cameraViews"), list) else [],
+        "pins": direction.get("pins") if isinstance(direction.get("pins"), list) else [],
+        "director_path": direction.get("directorPath") if isinstance(direction.get("directorPath"), list) else [],
+        "director_brief": str(direction.get("directorBrief") or ""),
+        "viewer": {
+            "fov": float(viewer.get("fov")) if isinstance(viewer.get("fov"), (int, float)) else 45.0,
+            "lens_mm": float(viewer.get("lens_mm")) if isinstance(viewer.get("lens_mm"), (int, float)) else 35.0,
+        },
+        "__scene_document_v2": scene_document,
+    }
+
+
+def _normalize_scene_graph_for_compare(scene_graph: Dict[str, Any]) -> Dict[str, Any]:
+    normalized = _normalize_scene_graph(scene_graph)
+    environment = normalized.get("environment") if isinstance(normalized.get("environment"), dict) else None
+    normalized_environment = None
+    if environment is not None:
+        normalized_environment = {
+            "id": environment.get("id"),
+            "lane": environment.get("lane"),
+            "urls": environment.get("urls") if isinstance(environment.get("urls"), dict) else {},
+            "metadata": environment.get("metadata") if isinstance(environment.get("metadata"), dict) else {},
+        }
+
+    normalized_assets: List[Dict[str, Any]] = []
+    for asset in normalized.get("assets") if isinstance(normalized.get("assets"), list) else []:
+        if not isinstance(asset, dict):
+            continue
+        normalized_assets.append(
+            {
+                "asset_id": asset.get("asset_id"),
+                "id": asset.get("id"),
+                "name": asset.get("name"),
+                "mesh": asset.get("mesh"),
+                "texture": asset.get("texture"),
+                "preview": asset.get("preview"),
+                "instanceId": asset.get("instanceId") or asset.get("instance_id"),
+                "position": _normalize_position_tuple(asset.get("position")),
+                "rotation": _normalize_rotation_tuple(asset.get("rotation")),
+                "scale": _normalize_position_tuple(asset.get("scale"), [1.0, 1.0, 1.0]),
+            }
+        )
+
+    normalized_assets.sort(key=lambda asset: json.dumps(asset, sort_keys=True))
+
+    return {
+        "environment": normalized_environment,
+        "assets": normalized_assets,
+        "camera_views": normalized.get("camera_views"),
+        "pins": normalized.get("pins"),
+        "director_path": normalized.get("director_path"),
+        "director_brief": normalized.get("director_brief"),
+        "viewer": normalized.get("viewer"),
+    }
+
+
+def _scene_graph_mismatch_error() -> HTTPException:
+    return HTTPException(
+        status_code=409,
+        detail={
+            "code": SCENE_DOCUMENT_GRAPH_MISMATCH_CODE,
+            "message": "scene_document and scene_graph do not match. Remove scene_graph or resend a compatibility graph derived from the scene_document.",
+        },
+    )
 
 
 def _default_review_payload(scene_id: str) -> Dict[str, Any]:
@@ -1840,26 +2213,15 @@ def _finalize_environment_job(job_payload: Dict[str, Any], provider_job: Any) ->
 
     lane_metadata = job_payload.get("lane_metadata")
     if not isinstance(lane_metadata, dict):
-        lane_metadata = _build_lane_metadata(
-            lane="preview",
-            lane_truth="single_image_lrm_preview",
-            available=True,
-            readiness="ready",
-            summary="Single-image environment generation has completed.",
-            blockers=[],
-        )
+        lane_metadata = _preview_lane_metadata()
     else:
-        lane_metadata = {**lane_metadata, "readiness": "ready", "summary": "Single-image environment generation has completed."}
+        lane_metadata = _preview_lane_metadata()
 
     handoff_manifest = job_payload.get("handoff_manifest")
     if not isinstance(handoff_manifest, dict):
-        handoff_manifest = _build_handoff_manifest(
-            lane="preview",
-            world_source=world_source,
-            ready=True,
-            summary="Single-image environment generation ready for downstream handoff.",
-            blockers=[],
-        )
+        handoff_manifest = _preview_handoff_manifest(world_source)
+    else:
+        handoff_manifest = _preview_handoff_manifest(world_source)
 
     job_payload["source_type"] = str(job_payload.get("source_type") or source_provenance.get("source_type") or "upload")
     job_payload["source_provenance"] = source_provenance
@@ -1974,8 +2336,20 @@ def _normalize_scene_save_payload(
 ) -> tuple[Dict[str, Any], Dict[str, Any]]:
     raw_scene_document = scene_document if isinstance(scene_document, dict) else None
     raw_scene_graph = scene_graph if isinstance(scene_graph, dict) else None
-    canonical_scene = raw_scene_document or raw_scene_graph or {}
-    compatibility_scene_graph = raw_scene_graph if raw_scene_graph is not None else _normalize_scene_graph(canonical_scene)
+    embedded_scene_document = _extract_embedded_scene_document(raw_scene_graph)
+
+    if raw_scene_document is not None:
+        canonical_scene = raw_scene_document if raw_scene_document.get("version") == 2 else _scene_graph_to_canonical_scene_document(raw_scene_document)
+        compatibility_scene_graph = _scene_document_to_compatibility_scene_graph(canonical_scene)
+        if raw_scene_graph is not None:
+            if embedded_scene_document is not None and embedded_scene_document != canonical_scene:
+                raise _scene_graph_mismatch_error()
+            if _normalize_scene_graph_for_compare(raw_scene_graph) != _normalize_scene_graph_for_compare(compatibility_scene_graph):
+                raise _scene_graph_mismatch_error()
+        return canonical_scene, compatibility_scene_graph
+
+    canonical_scene = embedded_scene_document or _scene_graph_to_canonical_scene_document(raw_scene_graph)
+    compatibility_scene_graph = _scene_document_to_compatibility_scene_graph(canonical_scene)
     return canonical_scene, compatibility_scene_graph
 
 
@@ -2135,18 +2509,17 @@ def _capture_session_payload(session: Dict[str, Any]) -> Dict[str, Any]:
     else:
         world_source = world_source if world_source else None
 
-    readiness = "collecting"
-    if blockers:
-        readiness = "blocked"
-    if ready:
-        readiness = "ready"
     lane_metadata = _build_lane_metadata(
         lane="reconstruction",
-        lane_truth="single_image_preview_reconstruction_session",
-        available=True,
-        readiness=readiness,
-        summary="Capture reconstruction session is collecting frames." if not ready else "Capture session is ready for reconstruction.",
-        blockers=blockers,
+        lane_truth="gpu_worker_not_connected",
+        available=False,
+        readiness="capture_ready_waiting_worker" if ready else "capture_blocked" if blockers else "capture_collecting",
+        summary=(
+            "Capture set passes local QC, but the dedicated multi-view reconstruction worker is not connected in this backend."
+            if ready
+            else "Capture quality is still being assembled for a future reconstruction lane."
+        ),
+        blockers=[] if not ready else ["Dedicated multi-view reconstruction worker is not connected."],
     )
     handoff_manifest = _build_handoff_manifest(
         lane="reconstruction",
@@ -2160,14 +2533,15 @@ def _capture_session_payload(session: Dict[str, Any]) -> Dict[str, Any]:
             session_id=session_id,
             frame_count=frame_count,
         ),
-        ready=ready,
-        summary="Capture handoff remains blocked until a reconstruction lane output can be produced.",
-        blockers=blockers,
+        ready=False,
+        summary="Capture session truth is explicit, but downstream handoff remains blocked until the dedicated reconstruction worker exists.",
+        blockers=list(lane_metadata.get("blockers") or []),
     )
 
     payload = {
         "session_id": session_id,
         "lane": "reconstruction",
+        "lane_truth": "gpu_worker_not_connected",
         "status": status,
         "created_at": str(session.get("created_at") or _utc_now()),
         "updated_at": _utc_now(),
@@ -2177,6 +2551,7 @@ def _capture_session_payload(session: Dict[str, Any]) -> Dict[str, Any]:
         "frame_count": frame_count,
         "coverage_percent": coverage_percent,
         "ready_for_reconstruction": ready,
+        "reconstruction_available": False,
         "frames": frames,
         "guidance": _capture_guidance(),
         "reconstruction_blockers": blockers,
@@ -2196,7 +2571,12 @@ def _capture_session_payload(session: Dict[str, Any]) -> Dict[str, Any]:
             "duplicate_frames": duplicate_frames,
             "warnings": blockers,
             "recommended_next_actions": (
-                ["Start reconstruction."] if ready else ["Collect more overlapping views."]
+                [
+                    "Capture set passes local QC, but the dedicated multi-view worker is not connected yet.",
+                    "Keep collecting stronger overlap for a future reconstruction pass.",
+                ]
+                if ready
+                else ["Collect more overlapping views."]
             ),
             "reconstruction_gate": {
                 "allowed": ready,
@@ -2204,6 +2584,9 @@ def _capture_session_payload(session: Dict[str, Any]) -> Dict[str, Any]:
                 "unique_frame_count": unique_frame_count,
                 "minimum_sharp_frames": CAPTURE_MIN_IMAGES,
                 "blockers": blockers,
+                "available": False,
+                "lane_truth": "gpu_worker_not_connected",
+                "worker_connected": False,
             },
         },
     }
@@ -2640,31 +3023,14 @@ async def generate_environment(request: GenerateRequest, http_request: Request) 
                 )
             lane_metadata = job_payload.get("lane_metadata")
             if not isinstance(lane_metadata, dict):
-                lane_metadata = _build_lane_metadata(
-                    lane="preview",
-                    lane_truth="single_image_lrm_preview",
-                    available=True,
-                    readiness="ready",
-                    summary="Single-image environment generation has completed.",
-                    blockers=[],
-                )
+                lane_metadata = _preview_lane_metadata()
             else:
-                lane_metadata = {
-                    **lane_metadata,
-                    "readiness": "ready",
-                    "summary": "Single-image environment generation has completed.",
-                }
+                lane_metadata = _preview_lane_metadata()
             handoff_manifest = job_payload.get("handoff_manifest")
             if not isinstance(handoff_manifest, dict):
-                handoff_manifest = _build_handoff_manifest(
-                    lane="preview",
-                    world_source=world_source,
-                    ready=True,
-                    summary="Single-image environment generation is ready for downstream handoff.",
-                    blockers=[],
-                )
+                handoff_manifest = _preview_handoff_manifest(world_source)
             else:
-                handoff_manifest = {**handoff_manifest, "ready": True, "blockers": []}
+                handoff_manifest = _preview_handoff_manifest(world_source)
 
             result = {
                 "scene_id": scene_id,
@@ -2779,17 +3145,18 @@ async def generate_asset(request: GenerateRequest, http_request: Request) -> Dic
         }
         job_payload["status"] = "completed"
         job_payload["updated_at"] = _utc_now()
-        job_payload["lane_metadata"] = {
-            **(job_payload.get("lane_metadata") if isinstance(job_payload.get("lane_metadata"), dict) else {}),
-            "readiness": "ready",
-            "summary": "Single-image asset generation is complete.",
-        }
-        job_payload["handoff_manifest"] = {
-            **(job_payload.get("handoff_manifest") if isinstance(job_payload.get("handoff_manifest"), dict) else {}),
-            "ready": True,
-            "summary": "Single-image asset ready for downstream handoff.",
-            "blockers": [],
-        }
+        world_source = job_payload.get("world_source")
+        if not isinstance(world_source, dict):
+            world_source = _build_world_source(
+                lane="asset",
+                ingest_channel="generate_asset",
+                input_strategy="1 photo",
+                primary_source=job_payload.get("source_provenance") or {"source_type": "upload", "source_id": "", "filename": ""},
+                upstream_sources=[job_payload.get("source_provenance")] if isinstance(job_payload.get("source_provenance"), dict) else [],
+            )
+            job_payload["world_source"] = world_source
+        job_payload["lane_metadata"] = _asset_lane_metadata()
+        job_payload["handoff_manifest"] = _asset_handoff_manifest(world_source)
         job_payload["result"] = {
             **result,
             "source_type": job_payload.get("source_type"),
@@ -2966,7 +3333,7 @@ async def save_scene(request: SceneSaveRequest) -> Dict[str, Any]:
         "version_id": version_id,
         "saved_at": saved_at,
         "source": request.source,
-        "summary": _scene_summary(scene_document),
+        "summary": _scene_summary(scene_graph),
         "scene_document": scene_document,
         "scene_graph": scene_graph,
     }

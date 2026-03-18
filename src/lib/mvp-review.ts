@@ -5,6 +5,8 @@ import {
     serializeSceneDocumentToNormalizedPersistedSceneGraph,
     type PersistedWorkspaceSceneGraphV2,
 } from "@/lib/scene-graph/workspaceAdapter.ts";
+import { deriveWorldTruthSummary } from "@/lib/world-truth.ts";
+import type { WorldTruthSummary } from "@/server/contracts/world-truth";
 
 import type { SceneReviewRecord } from "@/lib/mvp-workspace";
 
@@ -17,6 +19,7 @@ export interface ReviewPackage {
     assetsList: any[];
     review?: SceneReviewRecord;
     exportedAt: string;
+    truthSummary: WorldTruthSummary | null;
     summary: {
         assetCount: number;
         hasEnvironment: boolean;
@@ -56,21 +59,54 @@ function normalizeSceneDocumentForReviewPackage(
     };
 }
 
+function normalizeWorldTruthSummary(value: unknown): WorldTruthSummary | null {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return null;
+    }
+
+    const record = value as Record<string, unknown>;
+    return {
+        sourceKind: typeof record.sourceKind === "string" ? record.sourceKind : null,
+        sourceLabel: typeof record.sourceLabel === "string" ? record.sourceLabel : null,
+        ingestRecordId: typeof record.ingestRecordId === "string" ? record.ingestRecordId : null,
+        latestVersionId: typeof record.latestVersionId === "string" ? record.latestVersionId : null,
+        lane: typeof record.lane === "string" ? record.lane : null,
+        truthLabel: typeof record.truthLabel === "string" ? record.truthLabel : null,
+        deliveryStatus: typeof record.deliveryStatus === "string" ? record.deliveryStatus : null,
+        blockers: Array.isArray(record.blockers)
+            ? record.blockers.map((entry) => (typeof entry === "string" ? entry.trim() : "")).filter(Boolean)
+            : [],
+        downstreamTargetLabel: typeof record.downstreamTargetLabel === "string" ? record.downstreamTargetLabel : null,
+        downstreamTargetSummary: typeof record.downstreamTargetSummary === "string" ? record.downstreamTargetSummary : null,
+    };
+}
+
 export function normalizeReviewPackage(reviewPackage: ReviewPackageInput): ReviewPackage {
     const review = reviewPackage.review;
     const normalizedSceneSnapshot = normalizeSceneDocumentForReviewPackage(
         reviewPackage.sceneDocument ?? reviewPackage.sceneGraph ?? {},
         review,
     );
+    const sceneId = typeof reviewPackage.sceneId === "string" ? reviewPackage.sceneId : null;
+    const versionId = typeof reviewPackage.versionId === "string" ? reviewPackage.versionId : null;
+    const truthSummary =
+        normalizeWorldTruthSummary((reviewPackage as { truthSummary?: unknown }).truthSummary) ??
+        deriveWorldTruthSummary({
+            sceneId,
+            versionId,
+            sceneDocument: normalizedSceneSnapshot.sceneDocument,
+            sceneGraph: normalizedSceneSnapshot.sceneGraph,
+        });
 
     return {
-        sceneId: typeof reviewPackage.sceneId === "string" ? reviewPackage.sceneId : null,
-        versionId: typeof reviewPackage.versionId === "string" ? reviewPackage.versionId : null,
+        sceneId,
+        versionId,
         sceneDocument: normalizedSceneSnapshot.sceneDocument,
         sceneGraph: normalizedSceneSnapshot.sceneGraph,
         assetsList: Array.isArray(reviewPackage.assetsList) ? reviewPackage.assetsList : [],
         review: normalizedSceneSnapshot.sceneDocument.review ?? review,
         exportedAt: typeof reviewPackage.exportedAt === "string" ? reviewPackage.exportedAt : new Date().toISOString(),
+        truthSummary,
         summary: {
             assetCount: normalizedSceneSnapshot.sceneGraph.assets.length,
             hasEnvironment: Boolean(normalizedSceneSnapshot.sceneGraph.environment),
@@ -136,5 +172,6 @@ export function applyReviewShareToken(reviewPackage: ReviewPackage, shareToken?:
         sceneGraph: attachShareTokenToValue(reviewPackage.sceneGraph, shareToken),
         assetsList: attachShareTokenToValue(reviewPackage.assetsList, shareToken) as any[],
         review: attachShareTokenToValue(reviewPackage.review, shareToken) as SceneReviewRecord | undefined,
+        truthSummary: reviewPackage.truthSummary,
     });
 }

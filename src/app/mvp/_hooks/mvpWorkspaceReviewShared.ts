@@ -16,7 +16,13 @@ export interface LegacyComment {
     comment_id: string;
     author: string;
     body: string;
+    anchor?: string | null;
     created_at: string;
+}
+
+export interface VersionCommentDraft {
+    author: string;
+    body: string;
 }
 
 export interface IssueDraft {
@@ -37,6 +43,11 @@ export const DEFAULT_ISSUE_DRAFT: IssueDraft = {
     status: "open",
     assignee: "",
     author: "Reviewer",
+};
+
+export const DEFAULT_VERSION_COMMENT_DRAFT: VersionCommentDraft = {
+    author: "Reviewer",
+    body: "",
 };
 
 export function resolveSelectedAnchorLabel({
@@ -69,4 +80,8 @@ export function resolveSelectedVersion(versions: SceneVersion[], selectedVersion
     }
 
     return versions.find((version) => version.version_id === selectedVersionId) ?? null;
+}
+
+export function resolveVersionCommentAnchor(selectedAnchorLabel: string) {
+    return selectedAnchorLabel.startsWith("select a pin or saved view") ? "scene" : selectedAnchorLabel;
 }
