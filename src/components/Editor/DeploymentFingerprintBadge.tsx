@@ -9,7 +9,7 @@ export default function DeploymentFingerprintBadge({
 }) {
     return (
         <div
-            className="pointer-events-none fixed bottom-4 left-4 z-[80] max-w-[calc(100vw-2rem)] rounded-2xl border border-white/12 bg-black/70 px-3 py-2 shadow-[0_18px_40px_rgba(0,0,0,0.3)] backdrop-blur-md"
+            className="pointer-events-none fixed bottom-4 left-4 z-[80] hidden max-w-[calc(100vw-2rem)] rounded-2xl border border-white/12 bg-black/70 px-3 py-2 shadow-[0_18px_40px_rgba(0,0,0,0.3)] backdrop-blur-md lg:block"
             data-testid={testId}
         >
             <p className="text-[9px] uppercase tracking-[0.24em] text-cyan-200/70">Frontend build</p>

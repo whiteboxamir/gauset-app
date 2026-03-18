@@ -1,55 +1,31 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo } from "react";
-import { Camera, Focus, MapPin, Maximize2, Minimize2, ScanLine, Video } from "lucide-react";
+import { Camera, Focus, MapPin, Maximize2, Minimize2, Video } from "lucide-react";
 import ThreeOverlay, { ThreeOverlayConnected } from "./ThreeOverlay";
 import {
     FocusRequest,
     ViewerOverlaySceneSlices,
     ViewerPanelSceneSlices,
-    normalizeViewerPanelSceneSlices,
     pickViewerOverlaySceneSlices,
+    selectViewerPanelSceneSlicesFromDocument,
     useViewerPanelInteractionController,
 } from "./useViewerPanelController";
+import { useMvpWorkspaceViewerController } from "@/app/mvp/_hooks/useMvpWorkspaceViewerController";
 import { describeEnvironment, resolveEnvironmentRenderState } from "@/lib/mvp-product";
-import { sceneDocumentToWorkspaceSceneGraph } from "@/lib/scene-graph/document.ts";
-import type { SceneToolMode } from "@/lib/scene-graph/types.ts";
+import {
+    getTransformSnapValueForMode,
+    isTransformToolMode,
+    type SceneTransformSnapSettings,
+    type SceneTransformSpace,
+} from "@/lib/render/transformSessions.ts";
+import type { SceneDocumentV2, SceneToolMode } from "@/lib/scene-graph/types.ts";
 import {
     CameraPathFrame,
-    CameraPose,
     CameraView,
     SpatialPin,
     SpatialPinType,
-    WorkspaceSceneGraph,
 } from "@/lib/mvp-workspace";
-import {
-    useSceneActiveTool,
-    useSceneSelectedPinId,
-    useSceneSelectedViewId,
-} from "@/state/mvpSceneEditorSelectors.ts";
-import {
-    useSceneAssetsSlice,
-    useSceneCameraViewsSlice,
-    useSceneDirectorBriefSlice,
-    useSceneDirectorPathSlice,
-    useSceneEnvironmentSlice,
-    useScenePinsSlice,
-    useSceneViewerSlice,
-} from "@/state/mvpSceneWorkspaceSelectors.ts";
-import {
-    useMvpSceneStoreActions,
-    useRenderableSceneDocumentSelector,
-    useRenderableSceneDocumentSnapshotGetter,
-} from "@/state/mvpSceneStoreContext.tsx";
-import {
-    useEditorSessionCaptureRequestKey,
-    useEditorSessionFocusRequest,
-    useEditorSessionPinPlacementEnabled,
-    useEditorSessionPinType,
-    useEditorSessionRecordingPath,
-    useEditorSessionViewerReady,
-} from "@/state/mvpEditorSessionSelectors.ts";
-import { useMvpEditorSessionStoreActions } from "@/state/mvpEditorSessionStoreContext.tsx";
 
 const LENS_PRESETS = [18, 24, 35, 50, 85];
 const SCENE_TOOL_MODES: SceneToolMode[] = ["select", "translate", "rotate", "scale"];
@@ -60,13 +36,34 @@ const SCENE_TOOL_LABELS: Record<SceneToolMode, string> = {
     scale: "Scale",
 };
 
+function formatTransformSnapValue(activeTool: SceneToolMode, transformSnap: SceneTransformSnapSettings) {
+    if (!isTransformToolMode(activeTool)) {
+        return "Snap";
+    }
+
+    const value = getTransformSnapValueForMode(transformSnap, activeTool);
+    if (activeTool === "rotate") {
+        return `${((value * 180) / Math.PI).toFixed(0)}deg`;
+    }
+    if (activeTool === "scale") {
+        return `${value.toFixed(2)}x`;
+    }
+    return `${value.toFixed(value < 1 ? 2 : 1)}u`;
+}
+
 function formatPathDuration(path: CameraPathFrame[]) {
     if (path.length < 2) return "0.0s";
     const duration = path[path.length - 1].time - path[0].time;
     return `${duration.toFixed(1)}s`;
 }
 
-function EmptyViewerState({ clarityMode }: { clarityMode: boolean }) {
+function resolveNearestLensPreset(activeLensMm: number) {
+    return LENS_PRESETS.reduce((closest, candidate) =>
+        Math.abs(candidate - activeLensMm) < Math.abs(closest - activeLensMm) ? candidate : closest,
+    );
+}
+
+function EmptyViewerState() {
     return (
         <div
             className="absolute inset-0 z-20 overflow-hidden bg-[radial-gradient(circle_at_top,rgba(56,189,248,0.1),transparent_24%),linear-gradient(180deg,#06080c_0%,#040507_100%)]"
@@ -74,23 +71,13 @@ function EmptyViewerState({ clarityMode }: { clarityMode: boolean }) {
         >
             <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(135deg,rgba(8,14,22,0.2),transparent_38%,rgba(34,197,94,0.08)_100%)]" />
             <div className="relative flex h-full items-center justify-center p-6">
-                <div className="w-full max-w-xl rounded-[30px] border border-white/10 bg-[linear-gradient(180deg,rgba(9,12,18,0.9),rgba(7,9,13,0.86))] p-6 text-center shadow-[0_30px_80px_rgba(0,0,0,0.42)] backdrop-blur-xl">
-                    <p className="text-[10px] uppercase tracking-[0.28em] text-cyan-100/75">Viewer standby</p>
-                    <p className="mt-3 text-2xl font-medium text-white">No world loaded yet</p>
-                    <p className="mt-3 text-sm leading-6 text-neutral-300">
-                        Import a scout still, generate a preview world, or reopen a real saved draft before the live viewer boots.
-                    </p>
-                    <div className="mt-5 grid gap-3 text-left sm:grid-cols-2">
-                        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                            <p className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">World state</p>
-                            <p className="mt-2 text-sm text-white">The viewer now stays in a dark standby state until it has renderable scene content.</p>
-                        </div>
-                        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                            <p className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">Next move</p>
-                            <p className="mt-2 text-sm text-white">
-                                {clarityMode ? "Open the demo world or upload a still to build the first persistent scene." : "Upload one still or resume a saved scene with a real world output."}
-                            </p>
-                        </div>
+                <div className="w-full max-w-3xl rounded-[30px] border border-white/10 bg-[linear-gradient(180deg,rgba(9,12,18,0.9),rgba(7,9,13,0.86))] p-6 shadow-[0_30px_80px_rgba(0,0,0,0.42)] backdrop-blur-xl">
+                    <div className="text-center">
+                        <p className="text-[10px] uppercase tracking-[0.28em] text-cyan-100/75">Viewer standby</p>
+                        <p className="mt-3 text-2xl font-medium text-white">No world loaded yet</p>
+                        <p className="mt-3 text-sm leading-6 text-neutral-300">
+                            The workspace keeps the viewer dark until it has real world content to direct, review, or restore.
+                        </p>
                     </div>
                 </div>
             </div>
@@ -128,18 +115,87 @@ function StaticReferenceViewer({
     );
 }
 
+type ViewerSurfaceMode = "empty" | "static_reference" | "interactive_requested";
+type ViewerSurfaceCoverage = "shell_only" | "image_only" | "interactive_requested";
+
+type ViewerSurfaceDiagnostics = {
+    surfaceMode: ViewerSurfaceMode;
+    coverage: ViewerSurfaceCoverage;
+    hasEnvironmentSplat: boolean;
+    hasReferenceImage: boolean;
+    isReferenceOnlyDemo: boolean;
+    isLegacyDemoWorld: boolean;
+    shouldUseStaticReferenceViewer: boolean;
+    shouldRenderInteractiveViewer: boolean;
+    referenceImage: string | null;
+    viewerReady: boolean;
+};
+
+function resolveViewerSurfaceDiagnostics(
+    overlaySceneSlices: ViewerOverlaySceneSlices,
+    viewerReady: boolean,
+): ViewerSurfaceDiagnostics {
+    const environmentRenderState = resolveEnvironmentRenderState(overlaySceneSlices.environment);
+    const hasEnvironmentSplat = environmentRenderState.hasRenderableOutput;
+    const isReferenceOnlyDemo = environmentRenderState.isReferenceOnlyDemo;
+    const isLegacyDemoWorld = environmentRenderState.isLegacyDemoWorld;
+    const referenceImage = environmentRenderState.referenceImage;
+    const shouldUseStaticReferenceViewer = Boolean(referenceImage) && !hasEnvironmentSplat && (isReferenceOnlyDemo || isLegacyDemoWorld);
+    const shouldRenderInteractiveViewer =
+        !shouldUseStaticReferenceViewer &&
+        (hasEnvironmentSplat || Boolean(referenceImage) || overlaySceneSlices.assets.length > 0 || overlaySceneSlices.pins.length > 0);
+
+    return {
+        surfaceMode: shouldUseStaticReferenceViewer ? "static_reference" : shouldRenderInteractiveViewer ? "interactive_requested" : "empty",
+        coverage: shouldRenderInteractiveViewer ? "interactive_requested" : shouldUseStaticReferenceViewer ? "image_only" : "shell_only",
+        hasEnvironmentSplat,
+        hasReferenceImage: Boolean(referenceImage),
+        isReferenceOnlyDemo,
+        isLegacyDemoWorld,
+        shouldUseStaticReferenceViewer,
+        shouldRenderInteractiveViewer,
+        referenceImage,
+        viewerReady,
+    };
+}
+
 const ViewerLensPresetControls = React.memo(function ViewerLensPresetControls({
     activeLensMm,
     onSetLens,
+    compact = false,
 }: {
     activeLensMm: number;
     onSetLens: (lensMm: number) => void;
+    compact?: boolean;
 }) {
+    if (compact) {
+        const selectedLensPreset = resolveNearestLensPreset(activeLensMm);
+
+        return (
+            <label className="flex shrink-0 items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-2 text-neutral-300">
+                <Camera className="h-3.5 w-3.5 text-neutral-500" />
+                <span className="text-[10px] uppercase tracking-[0.22em] text-neutral-500">Optics</span>
+                <select
+                    value={String(selectedLensPreset)}
+                    onChange={(event) => onSetLens(Number(event.target.value))}
+                    className="rounded-full border border-white/10 bg-black/35 px-3 py-1.5 text-[11px] text-white outline-none transition-colors focus:border-white/20"
+                    aria-label="Lens preset"
+                >
+                    {LENS_PRESETS.map((lensMm) => (
+                        <option key={lensMm} value={lensMm}>
+                            {lensMm}mm
+                        </option>
+                    ))}
+                </select>
+            </label>
+        );
+    }
+
     return (
         <div className="flex items-center gap-2 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            <div className="flex shrink-0 items-center gap-2 rounded-full border border-neutral-800 bg-black/30 px-3 py-2">
-                <Camera className="h-3.5 w-3.5 text-neutral-400" />
-                <span className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">Lens</span>
+            <div className="flex shrink-0 items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-2 text-neutral-300">
+                <Camera className="h-3.5 w-3.5 text-neutral-500" />
+                <span className="text-[10px] uppercase tracking-[0.22em] text-neutral-500">Lens</span>
             </div>
             {LENS_PRESETS.map((lensMm) => {
                 const active = Math.round(activeLensMm) === lensMm;
@@ -150,14 +206,100 @@ const ViewerLensPresetControls = React.memo(function ViewerLensPresetControls({
                         onClick={() => onSetLens(lensMm)}
                         className={`shrink-0 rounded-full border px-3 py-2 text-[11px] transition-colors ${
                             active
-                                ? "border-white/20 bg-white text-black"
-                                : "border-neutral-800 bg-neutral-900 text-neutral-300 hover:border-neutral-700 hover:text-white"
+                                ? "border-white/15 bg-white text-black shadow-[0_10px_30px_rgba(255,255,255,0.08)]"
+                                : "border-white/10 bg-black/35 text-neutral-300 hover:border-white/20 hover:text-white"
                         }`}
                     >
                         {lensMm}mm
                     </button>
                 );
             })}
+        </div>
+    );
+});
+
+const ViewerStandbyHud = React.memo(function ViewerStandbyHud({
+    compact,
+    environmentLabel,
+    isPreviewRoute,
+    leftHudCollapsed,
+    onToggleLeftHud,
+}: {
+    compact: boolean;
+    environmentLabel: string;
+    isPreviewRoute: boolean;
+    leftHudCollapsed: boolean;
+    onToggleLeftHud?: () => void;
+}) {
+    const intakeActionLabel = "Open intake";
+
+    if (compact) {
+        return (
+            <div className="pointer-events-auto relative overflow-hidden rounded-[28px] border border-white/10 bg-[linear-gradient(180deg,rgba(11,14,20,0.84),rgba(7,9,13,0.76))] px-4 py-3 shadow-[0_20px_50px_rgba(0,0,0,0.34)] backdrop-blur-xl">
+                <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-sky-200/25 via-white/10 to-transparent" />
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                            <div className="flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-2 text-neutral-300">
+                                <div className="h-2.5 w-2.5 rounded-full bg-neutral-600" />
+                                <span className="text-[10px] uppercase tracking-[0.22em] text-neutral-500">Standby</span>
+                            </div>
+                            {isPreviewRoute ? (
+                                <span className="rounded-full border border-amber-400/20 bg-amber-500/10 px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] text-amber-100/85">
+                                    Preview safe
+                                </span>
+                            ) : null}
+                        </div>
+                        <p className="mt-2 text-sm font-medium text-white">{environmentLabel}</p>
+                        <p className="mt-1 text-[11px] leading-5 text-neutral-400">Directing tools stay dormant until a world is loaded.</p>
+                    </div>
+                    {leftHudCollapsed && onToggleLeftHud ? (
+                        <div className="flex flex-wrap items-center gap-2">
+                            <button
+                                type="button"
+                                onClick={onToggleLeftHud}
+                                className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-2 text-[11px] font-medium text-white transition-colors hover:border-white/20 hover:bg-white/[0.08]"
+                            >
+                                {intakeActionLabel}
+                            </button>
+                        </div>
+                    ) : null}
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <div className="relative overflow-hidden rounded-[30px] border border-white/10 bg-[linear-gradient(180deg,rgba(11,14,20,0.88),rgba(7,9,13,0.8))] p-5 shadow-[0_24px_60px_rgba(0,0,0,0.38)] backdrop-blur-xl">
+            <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-sky-200/25 via-white/10 to-transparent" />
+            <div className="flex flex-wrap items-start justify-between gap-4">
+                <div className="max-w-xl">
+                    <div className="flex flex-wrap items-center gap-2">
+                        <div className="flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-2 text-neutral-300">
+                            <div className="h-2.5 w-2.5 rounded-full bg-neutral-600" />
+                            <span className="text-[10px] uppercase tracking-[0.22em] text-neutral-500">Viewer standby</span>
+                        </div>
+                        {isPreviewRoute ? (
+                            <span className="rounded-full border border-amber-400/20 bg-amber-500/10 px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] text-amber-100/85">
+                                Preview safe
+                            </span>
+                        ) : null}
+                    </div>
+                    <p className="mt-3 text-base font-medium text-white">{environmentLabel}</p>
+                    <p className="mt-2 text-sm leading-6 text-neutral-300">The viewer is in standby until a world is loaded.</p>
+                </div>
+                {leftHudCollapsed && onToggleLeftHud ? (
+                    <div className="flex flex-wrap items-center gap-2">
+                        <button
+                            type="button"
+                            onClick={onToggleLeftHud}
+                            className="rounded-full bg-white px-4 py-2 text-[11px] font-medium text-black transition-colors hover:bg-neutral-200"
+                        >
+                            {intakeActionLabel}
+                        </button>
+                    </div>
+                ) : null}
+            </div>
         </div>
     );
 });
@@ -174,7 +316,7 @@ const ViewerTransformToolControls = React.memo(function ViewerTransformToolContr
     }
 
     return (
-        <div className="flex items-center gap-1 rounded-full border border-neutral-800 bg-black/30 p-1">
+        <div className="flex items-center gap-1 rounded-full border border-white/10 bg-white/[0.04] p-1">
             {SCENE_TOOL_MODES.map((tool) => {
                 const active = tool === activeTool;
                 return (
@@ -184,14 +326,84 @@ const ViewerTransformToolControls = React.memo(function ViewerTransformToolContr
                         onClick={() => onSetActiveTool(tool)}
                         className={`rounded-full px-3 py-2 text-[11px] transition-colors ${
                             active
-                                ? "bg-white text-black"
-                                : "text-neutral-300 hover:bg-neutral-900 hover:text-white"
+                                ? "bg-white text-black shadow-[0_10px_30px_rgba(255,255,255,0.08)]"
+                                : "text-neutral-300 hover:bg-white/[0.06] hover:text-white"
                         }`}
                     >
                         {SCENE_TOOL_LABELS[tool]}
                     </button>
                 );
             })}
+        </div>
+    );
+});
+
+const ViewerTransformSessionControls = React.memo(function ViewerTransformSessionControls({
+    activeTool,
+    transformSpace,
+    transformSnap,
+    onSetTransformSpace,
+    onToggleTransformSnap,
+    onCycleTransformSnap,
+}: {
+    activeTool: SceneToolMode;
+    transformSpace?: SceneTransformSpace;
+    transformSnap?: SceneTransformSnapSettings;
+    onSetTransformSpace?: (space: SceneTransformSpace) => void;
+    onToggleTransformSnap?: () => void;
+    onCycleTransformSnap?: () => void;
+}) {
+    if (
+        !isTransformToolMode(activeTool) ||
+        !transformSpace ||
+        !transformSnap ||
+        !onSetTransformSpace ||
+        !onToggleTransformSnap ||
+        !onCycleTransformSnap
+    ) {
+        return null;
+    }
+
+    return (
+        <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1 rounded-full border border-white/10 bg-white/[0.04] p-1">
+                {(["world", "local"] as const).map((space) => {
+                    const active = space === transformSpace;
+                    return (
+                        <button
+                            key={space}
+                            type="button"
+                            onClick={() => onSetTransformSpace(space)}
+                            className={`rounded-full px-3 py-2 text-[11px] transition-colors ${
+                                active
+                                    ? "bg-white text-black shadow-[0_10px_30px_rgba(255,255,255,0.08)]"
+                                    : "text-neutral-300 hover:bg-white/[0.06] hover:text-white"
+                            }`}
+                        >
+                            {space === "world" ? "World" : "Local"}
+                        </button>
+                    );
+                })}
+            </div>
+            <button
+                type="button"
+                onClick={onToggleTransformSnap}
+                className={`rounded-full border px-3 py-2 text-[11px] transition-colors ${
+                    transformSnap.enabled
+                        ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200"
+                        : "border-white/10 bg-black/35 text-neutral-300 hover:border-white/20 hover:text-white"
+                }`}
+            >
+                {transformSnap.enabled ? "Snap on" : "Snap off"}
+            </button>
+            <button
+                type="button"
+                onClick={onCycleTransformSnap}
+                disabled={!transformSnap.enabled}
+                className="rounded-full border border-white/10 bg-black/35 px-3 py-2 text-[11px] text-white transition-colors hover:border-white/20 hover:text-neutral-100 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+                {formatTransformSnapValue(activeTool, transformSnap)}
+            </button>
         </div>
     );
 });
@@ -232,7 +444,7 @@ const ViewerOverlaySurface = React.memo(function ViewerOverlaySurface({
             ) : shouldRenderInteractiveViewer ? (
                 interactiveViewer
             ) : (
-                <EmptyViewerState clarityMode={clarityMode} />
+                <EmptyViewerState />
             )}
 
             {viewerReady && !shouldUseStaticReferenceViewer && !hasEnvironmentSplat && referenceImage ? (
@@ -297,23 +509,23 @@ const ViewerSelectionTray = React.memo(function ViewerSelectionTray({
     onClearDirectorPath: () => void;
     onUpdateDirectorBrief?: (directorBrief: string) => void;
 }) {
-    const hasSceneDirection = selectedPin || selectedView || directorPath.length > 0 || viewCount > 0 || pinCount > 0 || Boolean(directorBrief.trim());
+    const hasContextualTray = selectedPin || selectedView || directorPath.length > 0 || Boolean(directorBrief.trim());
 
-    if (!hasSceneDirection) {
+    if (!hasContextualTray) {
         return null;
     }
 
     return (
         <div
-            className={`${isPinPlacementEnabled ? "pointer-events-none " : ""}absolute bottom-6 left-6 right-6 z-30`}
+            className={`${isPinPlacementEnabled ? "pointer-events-none " : ""}absolute bottom-4 left-4 right-4 z-30 md:bottom-5 md:left-5 md:right-5`}
             data-testid="mvp-viewer-selection-tray"
         >
-            <div className="rounded-[28px] border border-neutral-800/80 bg-neutral-950/80 p-4 shadow-2xl backdrop-blur-xl">
+            <div className="rounded-[24px] border border-white/10 bg-[linear-gradient(180deg,rgba(10,12,17,0.82),rgba(7,9,13,0.74))] p-4 shadow-[0_18px_44px_rgba(0,0,0,0.34)] backdrop-blur-xl">
                 <div className="flex flex-wrap items-start justify-between gap-4">
                     <div className="space-y-2">
                         {selectedPin ? (
                             <div>
-                                <p className="text-[10px] uppercase tracking-[0.2em] text-neutral-500">Selected Pin</p>
+                                <p className="text-[10px] uppercase tracking-[0.16em] text-neutral-500">Selected pin</p>
                                 <p className="text-sm text-white">{selectedPin.label}</p>
                                 <p className="text-[11px] text-neutral-500">
                                     {selectedPin.type} · [{selectedPin.position.map((value) => value.toFixed(2)).join(", ")}]
@@ -322,7 +534,7 @@ const ViewerSelectionTray = React.memo(function ViewerSelectionTray({
                         ) : null}
                         {selectedView ? (
                             <div>
-                                <p className="text-[10px] uppercase tracking-[0.2em] text-neutral-500">Selected View</p>
+                                <p className="text-[10px] uppercase tracking-[0.16em] text-neutral-500">Selected view</p>
                                 <p className="text-sm text-white">{selectedView.label}</p>
                                 <p className="text-[11px] text-neutral-500">
                                     {selectedView.lens_mm.toFixed(0)}mm · FOV {selectedView.fov.toFixed(1)}
@@ -331,7 +543,7 @@ const ViewerSelectionTray = React.memo(function ViewerSelectionTray({
                         ) : null}
                         {!selectedPin && !selectedView ? (
                             <div>
-                                <p className="text-[10px] uppercase tracking-[0.2em] text-neutral-500">Scene Direction</p>
+                                <p className="text-[10px] uppercase tracking-[0.16em] text-neutral-500">Scene direction</p>
                                 <p className="text-sm text-white">
                                     {viewCount} saved view{viewCount === 1 ? "" : "s"} · {pinCount} note{pinCount === 1 ? "" : "s"}
                                 </p>
@@ -342,7 +554,7 @@ const ViewerSelectionTray = React.memo(function ViewerSelectionTray({
                         ) : null}
                         {directorPath.length > 0 ? (
                             <div>
-                                <p className="text-[10px] uppercase tracking-[0.2em] text-neutral-500">Recorded Path</p>
+                                <p className="text-[10px] uppercase tracking-[0.16em] text-neutral-500">Recorded path</p>
                                 <p className="text-sm text-white">
                                     {directorPath.length} frames · {formatPathDuration(directorPath)}
                                 </p>
@@ -377,11 +589,11 @@ const ViewerSelectionTray = React.memo(function ViewerSelectionTray({
                     <textarea
                         value={directorBrief}
                         onChange={(event) => onUpdateDirectorBrief?.(event.target.value)}
-                        className="mt-4 w-full rounded-2xl border border-neutral-800 bg-black/30 px-4 py-3 text-sm text-white outline-none focus:border-blue-500/50"
+                        className="mt-3 w-full rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none focus:border-blue-500/50"
                         placeholder="Director brief: lens intent, blocking concerns, safety notes, or move direction."
                     />
                 ) : directorBrief ? (
-                    <p className="mt-4 rounded-2xl border border-neutral-800 bg-black/30 px-4 py-3 text-sm text-neutral-300">
+                    <p className="mt-3 rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-neutral-300">
                         {directorBrief}
                     </p>
                 ) : null}
@@ -403,80 +615,27 @@ const ViewerOverlaySurfaceForSceneSlices = React.memo(function ViewerOverlaySurf
     onViewerReadyUnavailable?: () => void;
     viewerReady: boolean;
 }) {
-    const environmentRenderState = resolveEnvironmentRenderState(overlaySceneSlices.environment);
-    const hasEnvironmentSplat = environmentRenderState.hasRenderableOutput;
-    const isReferenceOnlyDemo = environmentRenderState.isReferenceOnlyDemo;
-    const isLegacyDemoWorld = environmentRenderState.isLegacyDemoWorld;
-    const referenceImage = environmentRenderState.referenceImage;
-    const shouldUseStaticReferenceViewer = Boolean(referenceImage) && !hasEnvironmentSplat && (isReferenceOnlyDemo || isLegacyDemoWorld);
-    const shouldRenderInteractiveViewer =
-        !shouldUseStaticReferenceViewer &&
-        (hasEnvironmentSplat || Boolean(referenceImage) || overlaySceneSlices.assets.length > 0 || overlaySceneSlices.pins.length > 0);
+    const surfaceDiagnostics = useMemo(
+        () => resolveViewerSurfaceDiagnostics(overlaySceneSlices, viewerReady),
+        [overlaySceneSlices, viewerReady],
+    );
 
     useEffect(() => {
-        if (shouldUseStaticReferenceViewer || !shouldRenderInteractiveViewer) {
+        if (surfaceDiagnostics.shouldUseStaticReferenceViewer || !surfaceDiagnostics.shouldRenderInteractiveViewer) {
             onViewerReadyUnavailable?.();
         }
-    }, [onViewerReadyUnavailable, shouldRenderInteractiveViewer, shouldUseStaticReferenceViewer]);
+    }, [onViewerReadyUnavailable, surfaceDiagnostics.shouldRenderInteractiveViewer, surfaceDiagnostics.shouldUseStaticReferenceViewer]);
 
     return (
         <ViewerOverlaySurface
             clarityMode={clarityMode}
-            referenceImage={referenceImage}
-            isReferenceOnlyDemo={isReferenceOnlyDemo}
-            isLegacyDemoWorld={isLegacyDemoWorld}
-            shouldUseStaticReferenceViewer={shouldUseStaticReferenceViewer}
-            shouldRenderInteractiveViewer={shouldRenderInteractiveViewer}
-            hasEnvironmentSplat={hasEnvironmentSplat}
+            referenceImage={surfaceDiagnostics.referenceImage}
+            isReferenceOnlyDemo={surfaceDiagnostics.isReferenceOnlyDemo}
+            isLegacyDemoWorld={surfaceDiagnostics.isLegacyDemoWorld}
+            shouldUseStaticReferenceViewer={surfaceDiagnostics.shouldUseStaticReferenceViewer}
+            shouldRenderInteractiveViewer={surfaceDiagnostics.shouldRenderInteractiveViewer}
+            hasEnvironmentSplat={surfaceDiagnostics.hasEnvironmentSplat}
             interactiveViewer={interactiveViewer}
-            viewerReady={viewerReady}
-        />
-    );
-});
-
-const ViewerOverlaySurfaceConnected = React.memo(function ViewerOverlaySurfaceConnected({
-    clarityMode,
-    readOnly,
-    isPreviewRoute,
-    onCapturePose,
-    onPathRecorded,
-    viewerReady,
-}: {
-    clarityMode: boolean;
-    readOnly: boolean;
-    isPreviewRoute: boolean;
-    onCapturePose: (pose: CameraPose) => void;
-    onPathRecorded: (path: CameraPathFrame[]) => void;
-    viewerReady: boolean;
-}) {
-    const editorSessionActions = useMvpEditorSessionStoreActions();
-    const connectedEnvironment = useSceneEnvironmentSlice();
-    const connectedAssets = useSceneAssetsSlice();
-    const connectedPins = useScenePinsSlice();
-    const connectedViewer = useSceneViewerSlice();
-    const overlaySceneSlices = useMemo<ViewerOverlaySceneSlices>(
-        () => ({
-            environment: connectedEnvironment,
-            assets: connectedAssets,
-            pins: connectedPins,
-            viewer: connectedViewer,
-        }),
-        [connectedAssets, connectedEnvironment, connectedPins, connectedViewer],
-    );
-
-    return (
-        <ViewerOverlaySurfaceForSceneSlices
-            overlaySceneSlices={overlaySceneSlices}
-            clarityMode={clarityMode}
-            interactiveViewer={
-                <ThreeOverlayConnected
-                    readOnly={readOnly}
-                    backgroundColor={isPreviewRoute ? "#040507" : undefined}
-                    onCapturePose={onCapturePose}
-                    onPathRecorded={onPathRecorded}
-                />
-            }
-            onViewerReadyUnavailable={() => editorSessionActions.setViewerReady(false)}
             viewerReady={viewerReady}
         />
     );
@@ -484,7 +643,6 @@ const ViewerOverlaySurfaceConnected = React.memo(function ViewerOverlaySurfaceCo
 
 const ViewerDirectorHud = React.memo(function ViewerDirectorHud({
     sceneSlices,
-    clarityMode,
     isPreviewRoute,
     readOnly,
     directorHudCompact,
@@ -497,12 +655,12 @@ const ViewerDirectorHud = React.memo(function ViewerDirectorHud({
     isRecordingPath,
     isFullscreen,
     activeTool,
-    selectedPinId,
-    selectedViewId,
-    onSelectPin,
-    onSelectView,
+    transformSpace,
+    transformSnap,
     onSetActiveTool,
-    onFocusView,
+    onSetTransformSpace,
+    onToggleTransformSnap,
+    onCycleTransformSnap,
     onSetLens,
     onRequestViewCapture,
     onTogglePinPlacement,
@@ -531,11 +689,16 @@ const ViewerDirectorHud = React.memo(function ViewerDirectorHud({
     isRecordingPath: boolean;
     isFullscreen: boolean;
     activeTool: SceneToolMode;
+    transformSpace?: SceneTransformSpace;
+    transformSnap?: SceneTransformSnapSettings;
     selectedPinId?: string | null;
     selectedViewId?: string | null;
     onSelectPin?: (pinId: string | null) => void;
     onSelectView?: (viewId: string | null) => void;
     onSetActiveTool?: (tool: SceneToolMode) => void;
+    onSetTransformSpace?: (space: SceneTransformSpace) => void;
+    onToggleTransformSnap?: () => void;
+    onCycleTransformSnap?: () => void;
     onFocusView: (view: CameraView) => void;
     onSetLens: (lensMm: number) => void;
     onRequestViewCapture: () => void;
@@ -549,7 +712,6 @@ const ViewerDirectorHud = React.memo(function ViewerDirectorHud({
 }) {
     const hasEnvironment = Boolean(sceneSlices.environment);
     const environmentState = describeEnvironment(sceneSlices.environment);
-    const qualityScore = sceneSlices.environment?.metadata?.quality?.score;
     const environmentRenderState = resolveEnvironmentRenderState(sceneSlices.environment);
     const hasEnvironmentSplat = environmentRenderState.hasRenderableOutput;
     const isReferenceOnlyDemo = environmentRenderState.isReferenceOnlyDemo;
@@ -559,393 +721,209 @@ const ViewerDirectorHud = React.memo(function ViewerDirectorHud({
     const shouldRenderInteractiveViewer =
         !shouldUseStaticReferenceViewer &&
         (hasEnvironmentSplat || Boolean(referenceImage) || sceneSlices.assets.length > 0 || sceneSlices.pins.length > 0);
+    const hasOperableViewer = viewerReady && shouldRenderInteractiveViewer && !shouldUseStaticReferenceViewer;
+    const isStandbyHud = !hasOperableViewer;
     const viewerActionDisabled = readOnly || !viewerReady;
     const cameraViewActionDisabled =
         readOnly || !(viewerReady || shouldRenderInteractiveViewer || shouldUseStaticReferenceViewer || hasEnvironment);
-    const cameraViewActionClassName = cameraViewActionDisabled ? "cursor-not-allowed opacity-50" : "";
-    const viewerActionClassName = viewerActionDisabled ? "cursor-not-allowed opacity-50" : "";
-    const directorHudToggleLabel = directorHudCompact ? "Expand HUD" : "Minimize HUD";
-    const leftHudToggleLabel = leftHudCollapsed ? "Show left HUD" : "Hide left HUD";
-    const rightHudToggleLabel = rightHudCollapsed ? "Show right HUD" : "Hide right HUD";
-    const previewRouteLabel = isPreviewRoute ? "/mvp/preview safe demo lane" : "";
+    const canCaptureView = !cameraViewActionDisabled && hasOperableViewer;
+    const canAnnotate = !viewerActionDisabled && hasOperableViewer;
+    const canRecordPath = !viewerActionDisabled && hasOperableViewer;
+    const directorHudToggleLabel = directorHudCompact ? "Open full controls" : "Return to dock";
+    const environmentIndicatorClassName =
+        hasEnvironment && !isReferenceOnlyDemo && !isLegacyDemoWorld
+            ? "bg-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.8)]"
+            : "bg-neutral-600";
+    const utilityButtonClassName =
+        "rounded-full border border-white/10 bg-white/[0.05] px-3 py-2 text-[11px] text-neutral-100 transition-colors hover:border-white/20 hover:bg-white/[0.08] hover:text-white";
+
+    if (isStandbyHud) {
+        return (
+            <ViewerStandbyHud
+                compact
+                environmentLabel={environmentState.label}
+                isPreviewRoute={isPreviewRoute}
+                leftHudCollapsed={leftHudCollapsed}
+                onToggleLeftHud={onToggleLeftHud}
+            />
+        );
+    }
 
     if (directorHudCompact) {
         return (
-            <div className="pointer-events-auto relative overflow-hidden rounded-full border border-white/12 bg-[linear-gradient(180deg,rgba(9,12,18,0.76),rgba(7,9,13,0.7))] px-3 py-3 shadow-[0_20px_50px_rgba(0,0,0,0.3)] backdrop-blur-xl">
-                <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-cyan-200/40 via-white/10 to-transparent" />
-                <div className="flex flex-wrap items-center justify-center gap-3">
-                    <div className="flex shrink-0 items-center gap-3 rounded-full border border-white/10 bg-black/20 px-3 py-2">
-                        <div
-                            className={`h-2.5 w-2.5 rounded-full ${
-                                hasEnvironment && !isReferenceOnlyDemo && !isLegacyDemoWorld
-                                    ? "bg-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.8)]"
-                                    : "bg-neutral-600"
-                            }`}
-                        />
+            <div className="pointer-events-auto relative overflow-hidden rounded-[28px] border border-white/10 bg-[linear-gradient(180deg,rgba(11,14,20,0.84),rgba(7,9,13,0.76))] px-3 py-3 shadow-[0_20px_50px_rgba(0,0,0,0.34)] backdrop-blur-xl">
+                <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-sky-200/25 via-white/10 to-transparent" />
+                <div className="grid gap-2.5 md:grid-cols-[auto_1fr_auto] md:items-center">
+                    <div className="flex shrink-0 items-center gap-3 rounded-full border border-white/10 bg-white/[0.04] px-3 py-2">
+                        <div className={`h-2.5 w-2.5 rounded-full ${environmentIndicatorClassName}`} />
                         <div className="min-w-0">
-                            <p className="text-[10px] uppercase tracking-[0.3em] text-cyan-200/65">GAUSET Director</p>
+                            <p className="text-[10px] uppercase tracking-[0.22em] text-neutral-500">Environment</p>
                             <p className="truncate text-xs font-medium text-neutral-100">{environmentState.label}</p>
-                            {isPreviewRoute ? (
-                                <p className="mt-1 text-[10px] uppercase tracking-[0.16em] text-amber-200/80" data-testid="mvp-preview-route-badge">
-                                    {previewRouteLabel}
-                                </p>
-                            ) : null}
                         </div>
                     </div>
-                    <div className="min-w-0 flex-1 overflow-hidden">
-                        <ViewerLensPresetControls activeLensMm={sceneSlices.viewer.lens_mm} onSetLens={onSetLens} />
-                    </div>
-                    <div className="shrink-0">
+                    <div className="flex flex-wrap items-center justify-center gap-2 md:justify-start">
                         <ViewerTransformToolControls activeTool={activeTool} onSetActiveTool={onSetActiveTool} />
+                        <ViewerLensPresetControls activeLensMm={sceneSlices.viewer.lens_mm} onSetLens={onSetLens} compact />
                     </div>
-                    <button
-                        type="button"
-                        onClick={onToggleDirectorHud}
-                        className="shrink-0 rounded-full border border-neutral-800 bg-neutral-900 px-3 py-2 text-[11px] text-white transition-colors hover:border-neutral-700 hover:text-neutral-100"
-                        aria-label={directorHudToggleLabel}
-                    >
-                        <Maximize2 className="mr-1 inline h-3.5 w-3.5" />
-                        {directorHudToggleLabel}
-                    </button>
+                    <div className="flex flex-wrap items-center justify-center gap-2 md:justify-end">
+                        {canCaptureView ? (
+                            <button
+                                type="button"
+                                onClick={onRequestViewCapture}
+                                className={`${utilityButtonClassName} shrink-0`}
+                            >
+                                Capture view
+                            </button>
+                        ) : null}
+                        {canAnnotate ? (
+                            <button
+                                type="button"
+                                onClick={onTogglePinPlacement}
+                                className={`shrink-0 rounded-full border px-3 py-2 text-[11px] transition-colors ${
+                                    isPinPlacementEnabled
+                                        ? "border-sky-500/60 bg-sky-500/15 text-sky-200"
+                                        : "border-white/10 bg-black/35 text-neutral-100 hover:border-sky-500/40 hover:text-sky-200"
+                                }`}
+                            >
+                                <MapPin className="mr-1 inline h-3.5 w-3.5" />
+                                {isPinPlacementEnabled ? "Placing note" : "Annotate"}
+                            </button>
+                        ) : null}
+                        <button
+                            type="button"
+                            onClick={() => void onToggleFullscreen()}
+                            className={`${utilityButtonClassName} shrink-0`}
+                        >
+                            {isFullscreen ? <Minimize2 className="mr-1 inline h-3.5 w-3.5" /> : <Maximize2 className="mr-1 inline h-3.5 w-3.5" />}
+                            {isFullscreen ? "Exit full" : "Focus"}
+                        </button>
+                        <button
+                            type="button"
+                            onClick={onToggleDirectorHud}
+                            className={`${utilityButtonClassName} shrink-0`}
+                            aria-label={directorHudToggleLabel}
+                        >
+                            <Maximize2 className="mr-1 inline h-3.5 w-3.5" />
+                            Controls
+                        </button>
+                    </div>
                 </div>
             </div>
         );
     }
 
     return (
-        <div className="relative overflow-hidden rounded-[30px] border border-white/10 bg-[linear-gradient(180deg,rgba(9,12,18,0.84),rgba(7,9,13,0.74))] p-4 shadow-[0_24px_60px_rgba(0,0,0,0.38)] backdrop-blur-xl">
-            <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-cyan-200/40 via-white/10 to-transparent" />
-            <div className="flex flex-wrap items-start justify-between gap-4">
-                <div className="min-w-[220px] max-w-sm">
-                    <div className="flex items-center gap-3">
-                        <div
-                            className={`h-2.5 w-2.5 rounded-full ${
-                                hasEnvironment && !isReferenceOnlyDemo && !isLegacyDemoWorld
-                                    ? "bg-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.8)]"
-                                    : "bg-neutral-600"
-                            }`}
-                        />
-                        <div>
-                            <p className="text-[10px] uppercase tracking-[0.3em] text-cyan-200/65">GAUSET Director</p>
-                            <span className="text-sm font-medium text-neutral-100">{environmentState.label}</span>
-                            {isPreviewRoute ? (
-                                <p className="mt-1 text-[10px] uppercase tracking-[0.16em] text-amber-200/80" data-testid="mvp-preview-route-badge">
-                                    {previewRouteLabel}
-                                </p>
-                            ) : null}
-                        </div>
+        <div className="relative overflow-hidden rounded-[26px] border border-white/10 bg-[linear-gradient(180deg,rgba(11,14,20,0.84),rgba(7,9,13,0.76))] p-3.5 shadow-[0_20px_48px_rgba(0,0,0,0.34)] backdrop-blur-xl">
+            <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-sky-200/25 via-white/10 to-transparent" />
+            <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex min-w-[180px] items-center gap-3 rounded-full border border-white/10 bg-white/[0.04] px-3 py-2">
+                    <div className={`h-2.5 w-2.5 rounded-full ${environmentIndicatorClassName}`} />
+                    <div className="min-w-0">
+                        <p className="text-[10px] uppercase tracking-[0.22em] text-neutral-500">Environment</p>
+                        <span className="truncate text-sm font-medium text-neutral-100">{environmentState.label}</span>
                     </div>
-                    <p className="mt-2 text-[11px] text-neutral-400">{environmentState.note}</p>
-                    {environmentState.detail ? <p className="mt-1 text-[11px] text-neutral-500">{environmentState.detail}</p> : null}
                     {isPreviewRoute ? (
-                        <p className="mt-2 text-[11px] leading-5 text-amber-100/70">
-                            Demo and reference-only worlds stay in this preview-safe route and should not be confused with the main /mvp operator shell.
-                        </p>
-                    ) : null}
-                    {clarityMode ? (
-                        <div className="mt-3 grid gap-2">
-                            <div className="rounded-2xl border border-emerald-500/15 bg-emerald-950/20 px-3 py-2">
-                                <p className="text-[10px] uppercase tracking-[0.16em] text-emerald-200/80">Persistent world</p>
-                                <p className="mt-1 text-[11px] leading-5 text-emerald-50/90">
-                                    Environment and placed assets stay fixed until you rebuild or replace the world.
-                                </p>
-                            </div>
-                            <div className="rounded-2xl border border-sky-500/15 bg-sky-950/20 px-3 py-2">
-                                <p className="text-[10px] uppercase tracking-[0.16em] text-sky-200/80">Scene direction</p>
-                                <p className="mt-1 text-[11px] leading-5 text-sky-50/90">
-                                    Views, notes, pins, and lens choices change only the shot you are directing.
-                                </p>
-                            </div>
-                        </div>
+                        <span
+                            className="rounded-full border border-amber-400/20 bg-amber-500/10 px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] text-amber-100/85"
+                            data-testid="mvp-preview-route-badge"
+                        >
+                            Preview safe
+                        </span>
                     ) : null}
                 </div>
 
-                <div className="flex max-w-[32rem] flex-wrap items-center justify-end gap-2">
-                    {typeof qualityScore === "number" ? (
-                        <div className="rounded-2xl border border-neutral-800 bg-black/30 px-3 py-2 text-right">
-                            <p className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">Quality</p>
-                            <p className="text-sm text-white">{qualityScore.toFixed(1)}</p>
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                    {processingStatus ? (
+                        <div className="rounded-full border border-sky-300/15 bg-sky-400/10 px-3 py-2 text-[11px] text-sky-100">
+                            {processingStatus.busy ? "Rendering" : "Status"}: {processingStatus.label}
                         </div>
                     ) : null}
-                    {!readOnly ? (
+                    {canCaptureView ? (
+                        <button
+                            type="button"
+                            onClick={onRequestViewCapture}
+                            className={utilityButtonClassName}
+                        >
+                            Capture view
+                        </button>
+                    ) : null}
+                    {canAnnotate ? (
                         <>
                             <button
                                 type="button"
-                                onClick={onRequestViewCapture}
-                                disabled={cameraViewActionDisabled}
-                                className={`rounded-full border border-neutral-800 bg-neutral-900 px-3 py-2 text-[11px] text-white transition-colors hover:border-blue-500/50 hover:text-blue-200 disabled:hover:border-neutral-800 disabled:hover:text-white ${cameraViewActionClassName}`}
-                            >
-                                Save camera view
-                            </button>
-                            <button
-                                type="button"
                                 onClick={onTogglePinPlacement}
-                                disabled={viewerActionDisabled}
                                 className={`rounded-full border px-3 py-2 text-[11px] transition-colors ${
                                     isPinPlacementEnabled
                                         ? "border-sky-500/60 bg-sky-500/15 text-sky-200"
-                                        : "border-neutral-800 bg-neutral-900 text-white hover:border-sky-500/40 hover:text-sky-200"
-                                } disabled:hover:border-neutral-800 disabled:hover:text-white ${viewerActionClassName}`}
+                                        : "border-white/10 bg-black/35 text-neutral-100 hover:border-sky-500/40 hover:text-sky-200"
+                                }`}
                             >
                                 <MapPin className="mr-1 inline h-3.5 w-3.5" />
-                                {isPinPlacementEnabled ? "Drop scene note" : "Scene notes"}
+                                {isPinPlacementEnabled ? "Placing note" : "Annotate"}
                             </button>
                             <select
                                 value={pinType}
                                 onChange={(event) => onChangePinType(event.target.value as SpatialPinType)}
-                                disabled={viewerActionDisabled}
-                                className={`rounded-full border border-neutral-800 bg-neutral-900 px-3 py-2 text-[11px] text-white outline-none focus:border-sky-500/50 ${viewerActionClassName}`}
-                                aria-label="Pin type"
+                                className="rounded-full border border-white/10 bg-black/35 px-3 py-2 text-[11px] text-white outline-none transition-colors focus:border-sky-500/40"
+                                aria-label="Annotation type"
                             >
                                 <option value="general">General</option>
                                 <option value="egress">Egress</option>
                                 <option value="lighting">Lighting</option>
                                 <option value="hazard">Hazard</option>
                             </select>
+                        </>
+                    ) : null}
+                    {canRecordPath ? (
+                        <>
                             <button
                                 type="button"
                                 onClick={onToggleRecordingPath}
-                                disabled={viewerActionDisabled}
                                 className={`rounded-full border px-3 py-2 text-[11px] transition-colors ${
                                     isRecordingPath
                                         ? "border-amber-500/60 bg-amber-500/15 text-amber-200"
-                                        : "border-neutral-800 bg-neutral-900 text-white hover:border-amber-500/40 hover:text-amber-200"
-                                } disabled:hover:border-neutral-800 disabled:hover:text-white ${viewerActionClassName}`}
+                                        : "border-white/10 bg-black/35 text-neutral-100 hover:border-amber-500/40 hover:text-amber-200"
+                                }`}
                             >
                                 <Video className="mr-1 inline h-3.5 w-3.5" />
-                                {isRecordingPath ? "Stop path" : "Record camera path"}
+                                {isRecordingPath ? "Stop move" : "Record move"}
                             </button>
                         </>
                     ) : null}
-                    {onToggleLeftHud ? (
-                        <button
-                            type="button"
-                            onClick={onToggleLeftHud}
-                            className="rounded-full border border-neutral-800 bg-neutral-900 px-3 py-2 text-[11px] text-white transition-colors hover:border-neutral-700 hover:text-neutral-100"
-                            aria-label={leftHudToggleLabel}
-                        >
-                            {leftHudToggleLabel}
-                        </button>
-                    ) : null}
-                    {onToggleRightHud ? (
-                        <button
-                            type="button"
-                            onClick={onToggleRightHud}
-                            className="rounded-full border border-neutral-800 bg-neutral-900 px-3 py-2 text-[11px] text-white transition-colors hover:border-neutral-700 hover:text-neutral-100"
-                            aria-label={rightHudToggleLabel}
-                        >
-                            {rightHudToggleLabel}
-                        </button>
-                    ) : null}
-                    {onToggleDirectorHud ? (
-                        <button
-                            type="button"
-                            onClick={onToggleDirectorHud}
-                            className="rounded-full border border-neutral-800 bg-neutral-900 px-3 py-2 text-[11px] text-white transition-colors hover:border-neutral-700 hover:text-neutral-100"
-                            aria-label={directorHudToggleLabel}
-                        >
-                            <Minimize2 className="mr-1 inline h-3.5 w-3.5" />
-                            {directorHudToggleLabel}
-                        </button>
-                    ) : null}
-                    <button
-                        type="button"
-                        onClick={() => void onToggleFullscreen()}
-                        className="rounded-full border border-neutral-800 bg-neutral-900 px-3 py-2 text-[11px] text-white transition-colors hover:border-neutral-700 hover:text-neutral-100"
-                    >
+                    <button type="button" onClick={() => void onToggleFullscreen()} className={utilityButtonClassName}>
                         {isFullscreen ? <Minimize2 className="mr-1 inline h-3.5 w-3.5" /> : <Maximize2 className="mr-1 inline h-3.5 w-3.5" />}
-                        {isFullscreen ? "Exit" : "Expand"}
+                        {isFullscreen ? "Exit full screen" : "Focus"}
                     </button>
+                    {onToggleDirectorHud ? (
+                        <button type="button" onClick={onToggleDirectorHud} className={utilityButtonClassName} aria-label={directorHudToggleLabel}>
+                            <Minimize2 className="mr-1 inline h-3.5 w-3.5" />
+                            Compact HUD
+                        </button>
+                    ) : null}
                 </div>
             </div>
 
-            {processingStatus ? (
-                <div className="mt-4 rounded-2xl border border-cyan-300/15 bg-cyan-400/10 px-3 py-3">
-                    <p className="text-xs font-medium text-white">{processingStatus.label}</p>
-                    {processingStatus.detail ? <p className="mt-1 text-[11px] leading-5 text-neutral-300">{processingStatus.detail}</p> : null}
-                    {processingStatus.busy ? (
-                        <p className="mt-2 text-[10px] uppercase tracking-[0.16em] text-cyan-100/80">
-                            Current output stays visible until the new result finishes.
-                        </p>
-                    ) : null}
-                </div>
-            ) : null}
-
-            <div className="mt-4">
-                <div className="flex flex-wrap items-center gap-3">
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+                <div className="min-w-0 flex-1">
                     <ViewerLensPresetControls activeLensMm={sceneSlices.viewer.lens_mm} onSetLens={onSetLens} />
+                </div>
+                <div className="shrink-0">
                     <ViewerTransformToolControls activeTool={activeTool} onSetActiveTool={onSetActiveTool} />
                 </div>
+                {isTransformToolMode(activeTool) ? (
+                    <div className="shrink-0">
+                        <ViewerTransformSessionControls
+                            activeTool={activeTool}
+                            transformSpace={transformSpace}
+                            transformSnap={transformSnap}
+                            onSetTransformSpace={onSetTransformSpace}
+                            onToggleTransformSnap={onToggleTransformSnap}
+                            onCycleTransformSnap={onCycleTransformSnap}
+                        />
+                    </div>
+                ) : null}
             </div>
-
-            {(sceneSlices.camera_views.length > 0 || sceneSlices.pins.length > 0) && (
-                <div className="mt-4 grid gap-3 lg:grid-cols-2">
-                    <div className="rounded-2xl border border-neutral-800 bg-black/25 p-3">
-                        <div className="mb-2 flex items-center gap-2 text-[10px] uppercase tracking-[0.18em] text-neutral-500">
-                            <ScanLine className="h-3.5 w-3.5" />
-                            Saved Camera Views
-                        </div>
-                        {sceneSlices.camera_views.length > 0 ? (
-                            <div className="flex flex-wrap gap-2">
-                                {sceneSlices.camera_views.map((view) => (
-                                    <button
-                                        key={view.id}
-                                        type="button"
-                                        onClick={() => onFocusView(view)}
-                                        className={`rounded-full border px-3 py-1.5 text-xs transition-colors ${
-                                            view.id === selectedViewId
-                                                ? "border-white/20 bg-white text-black"
-                                                : "border-neutral-800 bg-neutral-900 text-neutral-300 hover:border-blue-500/40 hover:text-blue-200"
-                                        }`}
-                                    >
-                                        {view.label}
-                                    </button>
-                                ))}
-                            </div>
-                        ) : (
-                            <p className="text-xs text-neutral-500">Save a camera view for scout angles, director setups, and review handoff.</p>
-                        )}
-                    </div>
-                    <div className="rounded-2xl border border-neutral-800 bg-black/25 p-3">
-                        <div className="mb-2 flex items-center gap-2 text-[10px] uppercase tracking-[0.18em] text-neutral-500">
-                            <MapPin className="h-3.5 w-3.5" />
-                            Scene Notes
-                        </div>
-                        {sceneSlices.pins.length > 0 ? (
-                            <div className="flex flex-wrap gap-2">
-                                {sceneSlices.pins.map((pin) => (
-                                    <button
-                                        key={pin.id}
-                                        type="button"
-                                        onClick={() => {
-                                            onSelectPin?.(pin.id);
-                                            onSelectView?.(null);
-                                        }}
-                                        className={`rounded-full border px-3 py-1.5 text-xs transition-colors ${
-                                            pin.id === selectedPinId
-                                                ? "border-white/20 bg-white text-black"
-                                                : "border-neutral-800 bg-neutral-900 text-neutral-300 hover:border-sky-500/40 hover:text-sky-200"
-                                        }`}
-                                    >
-                                        {pin.label}
-                                    </button>
-                                ))}
-                            </div>
-                        ) : (
-                            <p className="text-xs text-neutral-500">Add typed pins for access, lighting, hazards, and handoff notes.</p>
-                        )}
-                    </div>
-                </div>
-            )}
         </div>
-    );
-});
-
-const ViewerDirectorHudConnected = React.memo(function ViewerDirectorHudConnected({
-    clarityMode,
-    isPreviewRoute,
-    readOnly,
-    directorHudCompact,
-    leftHudCollapsed,
-    rightHudCollapsed,
-    processingStatus,
-    viewerReady,
-    isPinPlacementEnabled,
-    pinType,
-    isRecordingPath,
-    isFullscreen,
-    onFocusView,
-    onSetLens,
-    onRequestViewCapture,
-    onTogglePinPlacement,
-    onChangePinType,
-    onToggleRecordingPath,
-    onToggleLeftHud,
-    onToggleRightHud,
-    onToggleDirectorHud,
-    onToggleFullscreen,
-}: {
-    clarityMode: boolean;
-    isPreviewRoute: boolean;
-    readOnly: boolean;
-    directorHudCompact: boolean;
-    leftHudCollapsed: boolean;
-    rightHudCollapsed: boolean;
-    processingStatus?: {
-        busy: boolean;
-        label: string;
-        detail?: string;
-    } | null;
-    viewerReady: boolean;
-    isPinPlacementEnabled: boolean;
-    pinType: SpatialPinType;
-    isRecordingPath: boolean;
-    isFullscreen: boolean;
-    onFocusView: (view: CameraView) => void;
-    onSetLens: (lensMm: number) => void;
-    onRequestViewCapture: () => void;
-    onTogglePinPlacement: () => void;
-    onChangePinType: (pinType: SpatialPinType) => void;
-    onToggleRecordingPath: () => void;
-    onToggleLeftHud?: () => void;
-    onToggleRightHud?: () => void;
-    onToggleDirectorHud?: () => void;
-    onToggleFullscreen: () => void | Promise<void>;
-}) {
-    const connectedEnvironment = useSceneEnvironmentSlice();
-    const connectedAssets = useSceneAssetsSlice();
-    const connectedCameraViews = useSceneCameraViewsSlice();
-    const connectedPins = useScenePinsSlice();
-    const connectedViewer = useSceneViewerSlice();
-    const selectedPinId = useSceneSelectedPinId();
-    const selectedViewId = useSceneSelectedViewId();
-    const activeTool = useSceneActiveTool();
-    const sceneStoreActions = useMvpSceneStoreActions();
-    const sceneSlices = useMemo<ViewerPanelSceneSlices>(
-        () => ({
-            environment: connectedEnvironment,
-            assets: connectedAssets,
-            camera_views: connectedCameraViews,
-            pins: connectedPins,
-            director_path: [],
-            director_brief: "",
-            viewer: connectedViewer,
-        }),
-        [connectedAssets, connectedCameraViews, connectedEnvironment, connectedPins, connectedViewer],
-    );
-
-    return (
-        <ViewerDirectorHud
-            sceneSlices={sceneSlices}
-            clarityMode={clarityMode}
-            isPreviewRoute={isPreviewRoute}
-            readOnly={readOnly}
-            directorHudCompact={directorHudCompact}
-            leftHudCollapsed={leftHudCollapsed}
-            rightHudCollapsed={rightHudCollapsed}
-            processingStatus={processingStatus}
-            viewerReady={viewerReady}
-            isPinPlacementEnabled={isPinPlacementEnabled}
-            pinType={pinType}
-            isRecordingPath={isRecordingPath}
-            isFullscreen={isFullscreen}
-            activeTool={activeTool}
-            selectedPinId={selectedPinId}
-            selectedViewId={selectedViewId}
-            onSelectPin={sceneStoreActions.selectPin}
-            onSelectView={sceneStoreActions.selectView}
-            onSetActiveTool={readOnly ? undefined : sceneStoreActions.setActiveTool}
-            onFocusView={onFocusView}
-            onSetLens={onSetLens}
-            onRequestViewCapture={onRequestViewCapture}
-            onTogglePinPlacement={onTogglePinPlacement}
-            onChangePinType={onChangePinType}
-            onToggleRecordingPath={onToggleRecordingPath}
-            onToggleLeftHud={onToggleLeftHud}
-            onToggleRightHud={onToggleRightHud}
-            onToggleDirectorHud={onToggleDirectorHud}
-            onToggleFullscreen={onToggleFullscreen}
-        />
     );
 });
 
@@ -988,53 +966,6 @@ const ViewerSelectionTrayForSceneSlices = React.memo(function ViewerSelectionTra
     );
 });
 
-const ViewerSelectionTrayConnected = React.memo(function ViewerSelectionTrayConnected({
-    readOnly,
-    isPinPlacementEnabled,
-    onFocusSelectedPin,
-    onClearDirectorPath,
-    onUpdateDirectorBrief,
-}: {
-    readOnly: boolean;
-    isPinPlacementEnabled: boolean;
-    onFocusSelectedPin: () => void;
-    onClearDirectorPath: () => void;
-    onUpdateDirectorBrief?: (directorBrief: string) => void;
-}) {
-    const connectedCameraViews = useSceneCameraViewsSlice();
-    const connectedPins = useScenePinsSlice();
-    const connectedDirectorPath = useSceneDirectorPathSlice();
-    const connectedDirectorBrief = useSceneDirectorBriefSlice();
-    const connectedViewer = useSceneViewerSlice();
-    const selectedPinId = useSceneSelectedPinId();
-    const selectedViewId = useSceneSelectedViewId();
-    const sceneSlices = useMemo<ViewerPanelSceneSlices>(
-        () => ({
-            environment: null,
-            assets: [],
-            camera_views: connectedCameraViews,
-            pins: connectedPins,
-            director_path: connectedDirectorPath,
-            director_brief: connectedDirectorBrief,
-            viewer: connectedViewer,
-        }),
-        [connectedCameraViews, connectedDirectorBrief, connectedDirectorPath, connectedPins, connectedViewer],
-    );
-
-    return (
-        <ViewerSelectionTrayForSceneSlices
-            sceneSlices={sceneSlices}
-            selectedPinId={selectedPinId}
-            selectedViewId={selectedViewId}
-            readOnly={readOnly}
-            isPinPlacementEnabled={isPinPlacementEnabled}
-            onFocusSelectedPin={onFocusSelectedPin}
-            onClearDirectorPath={onClearDirectorPath}
-            onUpdateDirectorBrief={onUpdateDirectorBrief}
-        />
-    );
-});
-
 type ViewerPanelProps = {
     clarityMode?: boolean;
     routeVariant?: "workspace" | "preview";
@@ -1049,7 +980,7 @@ type ViewerPanelProps = {
         label: string;
         detail?: string;
     } | null;
-    sceneGraph?: WorkspaceSceneGraph | any;
+    sceneDocument?: SceneDocumentV2;
     readOnly?: boolean;
     selectedPinId?: string | null;
     onSelectPin?: (pinId: string | null) => void;
@@ -1067,6 +998,7 @@ const ViewerPanelFrame = React.memo(function ViewerPanelFrame({
     directorHud,
     overlaySurface,
     selectionTray,
+    surfaceDiagnostics,
 }: {
     directorHudCompact: boolean;
     isPinPlacementEnabled: boolean;
@@ -1076,6 +1008,7 @@ const ViewerPanelFrame = React.memo(function ViewerPanelFrame({
     directorHud: React.ReactNode;
     overlaySurface: React.ReactNode;
     selectionTray: React.ReactNode;
+    surfaceDiagnostics: ViewerSurfaceDiagnostics;
 }) {
     return (
         <div
@@ -1085,19 +1018,35 @@ const ViewerPanelFrame = React.memo(function ViewerPanelFrame({
             <div
                 className={
                     directorHudCompact
-                        ? "pointer-events-none absolute left-1/2 top-5 z-30 w-[min(92vw,56rem)] -translate-x-1/2"
-                        : `${isPinPlacementEnabled ? "pointer-events-none " : ""}absolute top-0 left-0 right-0 p-5 shrink-0 z-30`
+                        ? "pointer-events-none absolute inset-x-4 top-4 z-30 md:inset-x-5"
+                        : `${isPinPlacementEnabled ? "pointer-events-none " : ""}absolute inset-x-0 top-0 z-30 shrink-0 p-4 md:p-5`
                 }
             >
                 {directorHud}
             </div>
 
             <div
-                className="relative m-6 flex-1 overflow-hidden rounded-[32px] border border-neutral-800/50 bg-[radial-gradient(circle_at_top,rgba(56,189,248,0.08),transparent_24%),linear-gradient(180deg,#050608_0%,#040507_100%)] shadow-2xl"
+                className="relative m-4 flex-1 overflow-hidden rounded-[28px] border border-neutral-800/50 bg-[radial-gradient(circle_at_top,rgba(56,189,248,0.08),transparent_24%),linear-gradient(180deg,#050608_0%,#040507_100%)] shadow-2xl md:m-5 xl:m-4 2xl:m-5"
                 data-testid="mvp-viewer-surface"
+                data-surface-mode={surfaceDiagnostics.surfaceMode}
+                data-coverage={surfaceDiagnostics.coverage}
+                data-viewer-ready={surfaceDiagnostics.viewerReady ? "true" : "false"}
+                data-has-renderable-environment={surfaceDiagnostics.hasEnvironmentSplat ? "true" : "false"}
+                data-has-reference-image={surfaceDiagnostics.hasReferenceImage ? "true" : "false"}
                 onDrop={onDrop}
                 onDragOver={onDragOver}
             >
+                <div
+                    data-testid="mvp-viewer-surface-diagnostics"
+                    data-surface-mode={surfaceDiagnostics.surfaceMode}
+                    data-coverage={surfaceDiagnostics.coverage}
+                    data-viewer-ready={surfaceDiagnostics.viewerReady ? "true" : "false"}
+                    data-has-renderable-environment={surfaceDiagnostics.hasEnvironmentSplat ? "true" : "false"}
+                    data-has-reference-image={surfaceDiagnostics.hasReferenceImage ? "true" : "false"}
+                    data-is-reference-only-demo={surfaceDiagnostics.isReferenceOnlyDemo ? "true" : "false"}
+                    data-is-legacy-demo-world={surfaceDiagnostics.isLegacyDemoWorld ? "true" : "false"}
+                    hidden
+                />
                 {overlaySurface}
             </div>
 
@@ -1109,125 +1058,89 @@ const ViewerPanelFrame = React.memo(function ViewerPanelFrame({
 const ViewerPanelWorkspaceMode = React.memo(function ViewerPanelWorkspaceMode({
     clarityMode = false,
     routeVariant = "workspace",
-    leftHudCollapsed = false,
-    rightHudCollapsed = false,
-    directorHudCompact = false,
-    onToggleLeftHud,
-    onToggleRightHud,
-    onToggleDirectorHud,
-    processingStatus,
     readOnly = false,
 }: ViewerPanelProps) {
-    const getRenderableSceneDocumentSnapshot = useRenderableSceneDocumentSnapshotGetter();
-    const sceneStoreActions = useMvpSceneStoreActions();
-    const editorSessionActions = useMvpEditorSessionStoreActions();
-    const selectedPinId = useSceneSelectedPinId();
-    const selectedViewId = useSceneSelectedViewId();
-    const connectedPinCount = useRenderableSceneDocumentSelector((document) => document.direction.pins.length, Object.is);
-    const editorSessionFocusRequest = useEditorSessionFocusRequest();
-    const editorSessionCaptureRequestKey = useEditorSessionCaptureRequestKey();
-    const editorSessionPinPlacementEnabled = useEditorSessionPinPlacementEnabled();
-    const editorSessionPinType = useEditorSessionPinType();
-    const editorSessionRecordingPath = useEditorSessionRecordingPath();
-    const editorSessionViewerReady = useEditorSessionViewerReady();
-    const getCurrentSceneGraph = useCallback(
-        () => sceneDocumentToWorkspaceSceneGraph(getRenderableSceneDocumentSnapshot()),
-        [getRenderableSceneDocumentSnapshot],
-    );
-    const {
-        isPreviewRoute,
-        isPinPlacementEnabled,
-        pinType,
-        isRecordingPath,
-        isFullscreen,
-        viewerReady,
-        containerRef,
-        handleDrop,
-        handleDragOver,
-        focusView,
-        focusPin,
-        requestViewCapture,
-        handleCapturePose,
-        handlePathRecorded,
-        clearDirectorPath,
-        toggleFullscreen,
-        setLens,
-        togglePinPlacement,
-        changePinType,
-        toggleRecordingPath,
-    } = useViewerPanelInteractionController({
+    const workspaceViewer = useMvpWorkspaceViewerController({
         routeVariant,
         readOnly,
-        pinCount: connectedPinCount,
-        getCurrentSceneGraph,
-        selectedPinId,
-        selectedViewId,
-        onAppendAsset: sceneStoreActions.appendAsset,
-        onUpdateViewerState: sceneStoreActions.patchViewer,
-        onAppendCameraView: sceneStoreActions.appendCameraView,
-        onSetDirectorPath: sceneStoreActions.setDirectorPath,
-        onSelectPin: sceneStoreActions.selectPin,
-        onSelectView: sceneStoreActions.selectView,
-        sessionState: {
-            focusRequest: editorSessionFocusRequest,
-            captureRequestKey: editorSessionCaptureRequestKey,
-            isPinPlacementEnabled: editorSessionPinPlacementEnabled,
-            pinType: editorSessionPinType,
-            isRecordingPath: editorSessionRecordingPath,
-            viewerReady: editorSessionViewerReady,
-        },
-        sessionActions: editorSessionActions,
     });
+    const viewerSurfaceDiagnostics = useMemo(
+        () => resolveViewerSurfaceDiagnostics(workspaceViewer.overlaySceneSlices, workspaceViewer.viewerReady),
+        [workspaceViewer.overlaySceneSlices, workspaceViewer.viewerReady],
+    );
+
     return (
         <ViewerPanelFrame
-            directorHudCompact={directorHudCompact}
-            isPinPlacementEnabled={isPinPlacementEnabled}
-            containerRef={containerRef}
-            onDrop={handleDrop}
-            onDragOver={handleDragOver}
+            directorHudCompact={workspaceViewer.hudState.directorHudCompact}
+            isPinPlacementEnabled={workspaceViewer.isPinPlacementEnabled}
+            containerRef={workspaceViewer.containerRef}
+            onDrop={workspaceViewer.handleDrop}
+            onDragOver={workspaceViewer.handleDragOver}
+            surfaceDiagnostics={viewerSurfaceDiagnostics}
             directorHud={
-                <ViewerDirectorHudConnected
+                <ViewerDirectorHud
+                    sceneSlices={workspaceViewer.sceneSlices}
                     clarityMode={clarityMode}
-                    isPreviewRoute={isPreviewRoute}
+                    isPreviewRoute={workspaceViewer.isPreviewRoute}
                     readOnly={readOnly}
-                    directorHudCompact={directorHudCompact}
-                    leftHudCollapsed={leftHudCollapsed}
-                    rightHudCollapsed={rightHudCollapsed}
-                    processingStatus={processingStatus}
-                    viewerReady={viewerReady}
-                    isPinPlacementEnabled={isPinPlacementEnabled}
-                    pinType={pinType}
-                    isRecordingPath={isRecordingPath}
-                    isFullscreen={isFullscreen}
-                    onFocusView={focusView}
-                    onSetLens={setLens}
-                    onRequestViewCapture={requestViewCapture}
-                    onTogglePinPlacement={togglePinPlacement}
-                    onChangePinType={changePinType}
-                    onToggleRecordingPath={toggleRecordingPath}
-                    onToggleLeftHud={onToggleLeftHud}
-                    onToggleRightHud={onToggleRightHud}
-                    onToggleDirectorHud={onToggleDirectorHud}
-                    onToggleFullscreen={toggleFullscreen}
+                    directorHudCompact={workspaceViewer.hudState.directorHudCompact}
+                    leftHudCollapsed={workspaceViewer.hudState.leftRailCollapsed}
+                    rightHudCollapsed={workspaceViewer.hudState.rightRailCollapsed}
+                    processingStatus={workspaceViewer.processingStatus}
+                    viewerReady={workspaceViewer.viewerReady}
+                    isPinPlacementEnabled={workspaceViewer.isPinPlacementEnabled}
+                    pinType={workspaceViewer.pinType}
+                    isRecordingPath={workspaceViewer.isRecordingPath}
+                    isFullscreen={workspaceViewer.isFullscreen}
+                    activeTool={workspaceViewer.activeTool}
+                    transformSpace={workspaceViewer.transformSpace}
+                    transformSnap={workspaceViewer.transformSnap}
+                    selectedPinId={workspaceViewer.selectedPinId}
+                    selectedViewId={workspaceViewer.selectedViewId}
+                    onSelectPin={workspaceViewer.selectPin}
+                    onSelectView={workspaceViewer.selectView}
+                    onSetActiveTool={readOnly ? undefined : workspaceViewer.setActiveTool}
+                    onSetTransformSpace={readOnly ? undefined : workspaceViewer.setTransformSpace}
+                    onToggleTransformSnap={readOnly ? undefined : workspaceViewer.toggleTransformSnap}
+                    onCycleTransformSnap={readOnly ? undefined : workspaceViewer.cycleActiveToolSnap}
+                    onFocusView={workspaceViewer.focusView}
+                    onSetLens={workspaceViewer.setLens}
+                    onRequestViewCapture={workspaceViewer.requestViewCapture}
+                    onTogglePinPlacement={workspaceViewer.togglePinPlacement}
+                    onChangePinType={workspaceViewer.changePinType}
+                    onToggleRecordingPath={workspaceViewer.toggleRecordingPath}
+                    onToggleLeftHud={workspaceViewer.toggleLeftHud}
+                    onToggleRightHud={workspaceViewer.toggleRightHud}
+                    onToggleDirectorHud={workspaceViewer.toggleDirectorHud}
+                    onToggleFullscreen={workspaceViewer.toggleFullscreen}
                 />
             }
             overlaySurface={
-                <ViewerOverlaySurfaceConnected
+                <ViewerOverlaySurfaceForSceneSlices
+                    overlaySceneSlices={workspaceViewer.overlaySceneSlices}
                     clarityMode={clarityMode}
-                    readOnly={readOnly}
-                    isPreviewRoute={isPreviewRoute}
-                    onCapturePose={handleCapturePose}
-                    onPathRecorded={handlePathRecorded}
-                    viewerReady={viewerReady}
+                    interactiveViewer={
+                        <ThreeOverlayConnected
+                            readOnly={readOnly}
+                            backgroundColor={workspaceViewer.isPreviewRoute ? "#040507" : undefined}
+                            onCapturePose={workspaceViewer.handleCapturePose}
+                            onPathRecorded={workspaceViewer.handlePathRecorded}
+                        />
+                    }
+                    onViewerReadyUnavailable={() => workspaceViewer.setViewerReady(false)}
+                    viewerReady={workspaceViewer.viewerReady}
                 />
             }
             selectionTray={
-                <ViewerSelectionTrayConnected
+                <ViewerSelectionTrayForSceneSlices
+                    sceneSlices={workspaceViewer.sceneSlices}
+                    selectedPinId={workspaceViewer.selectedPinId}
+                    selectedViewId={workspaceViewer.selectedViewId}
                     readOnly={readOnly}
-                    isPinPlacementEnabled={isPinPlacementEnabled}
-                    onFocusSelectedPin={focusPin}
-                    onClearDirectorPath={clearDirectorPath}
-                    onUpdateDirectorBrief={sceneStoreActions.setDirectorBrief}
+                    isPinPlacementEnabled={workspaceViewer.isPinPlacementEnabled}
+                    onFocusSelectedPin={workspaceViewer.focusPin}
+                    onClearDirectorPath={workspaceViewer.clearDirectorPath}
+                    onUpdateDirectorBrief={workspaceViewer.setDirectorBrief}
                 />
             }
         />
@@ -1244,20 +1157,20 @@ const ViewerPanelOverrideMode = React.memo(function ViewerPanelOverrideMode({
     onToggleRightHud,
     onToggleDirectorHud,
     processingStatus,
-    sceneGraph,
+    sceneDocument,
     readOnly = false,
     selectedPinId,
     onSelectPin,
     selectedViewId,
     onSelectView,
     focusRequest,
-}: ViewerPanelProps & { sceneGraph: WorkspaceSceneGraph | any }) {
-    const overrideSceneSlices = useMemo(() => normalizeViewerPanelSceneSlices(sceneGraph), [sceneGraph]);
+}: ViewerPanelProps & { sceneDocument: SceneDocumentV2 }) {
+    const overrideSceneSlices = useMemo(() => selectViewerPanelSceneSlicesFromDocument(sceneDocument), [sceneDocument]);
     const overrideOverlaySceneSlices = useMemo(
         () => pickViewerOverlaySceneSlices(overrideSceneSlices),
         [overrideSceneSlices],
     );
-    const getCurrentSceneGraph = useCallback(() => overrideSceneSlices, [overrideSceneSlices]);
+    const getCurrentSceneSlices = useCallback(() => overrideSceneSlices, [overrideSceneSlices]);
     const {
         isPreviewRoute,
         combinedFocusRequest,
@@ -1286,13 +1199,17 @@ const ViewerPanelOverrideMode = React.memo(function ViewerPanelOverrideMode({
         routeVariant,
         readOnly,
         pinCount: overrideSceneSlices.pins.length,
-        getCurrentSceneGraph,
+        getCurrentSceneSlices,
         selectedPinId,
         selectedViewId,
         focusRequest,
         onSelectPin,
         onSelectView,
     });
+    const viewerSurfaceDiagnostics = useMemo(
+        () => resolveViewerSurfaceDiagnostics(overrideOverlaySceneSlices, viewerReady),
+        [overrideOverlaySceneSlices, viewerReady],
+    );
     return (
         <ViewerPanelFrame
             directorHudCompact={directorHudCompact}
@@ -1300,6 +1217,7 @@ const ViewerPanelOverrideMode = React.memo(function ViewerPanelOverrideMode({
             containerRef={containerRef}
             onDrop={handleDrop}
             onDragOver={handleDragOver}
+            surfaceDiagnostics={viewerSurfaceDiagnostics}
             directorHud={
                 <ViewerDirectorHud
                     sceneSlices={overrideSceneSlices}
@@ -1340,6 +1258,7 @@ const ViewerPanelOverrideMode = React.memo(function ViewerPanelOverrideMode({
                         <ThreeOverlay
                             environment={overrideOverlaySceneSlices.environment}
                             assets={overrideOverlaySceneSlices.assets}
+                            sceneDocument={sceneDocument}
                             pins={overrideOverlaySceneSlices.pins}
                             viewer={overrideOverlaySceneSlices.viewer}
                             focusRequest={combinedFocusRequest}
@@ -1376,8 +1295,8 @@ const ViewerPanelOverrideMode = React.memo(function ViewerPanelOverrideMode({
 });
 
 export default function ViewerPanel(props: ViewerPanelProps) {
-    if (props.sceneGraph) {
-        return <ViewerPanelOverrideMode {...props} sceneGraph={props.sceneGraph} />;
+    if (props.sceneDocument) {
+        return <ViewerPanelOverrideMode {...props} sceneDocument={props.sceneDocument} />;
     }
     return <ViewerPanelWorkspaceMode {...props} />;
 }
