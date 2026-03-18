@@ -2,8 +2,10 @@
 
 import React, { createContext, useCallback, useContext, useMemo, useRef, useSyncExternalStore } from "react";
 
+import { DEFAULT_TRANSFORM_SNAP_SETTINGS } from "../lib/render/transformSessions.ts";
 import { createEmptySceneDocumentV2 } from "../lib/scene-graph/document.ts";
 import type { SceneDocumentV2 } from "../lib/scene-graph/types.ts";
+import { createRenderableSceneDocumentSnapshotGetter } from "./mvpRenderableSceneDocument.ts";
 import type { MvpSceneStore, MvpSceneStoreActions, MvpSceneStoreState } from "./mvpSceneStore.ts";
 
 interface MvpSceneStoreContextValue {
@@ -20,6 +22,11 @@ const EMPTY_SCENE_STORE_STATE: MvpSceneStoreState = {
     hoveredNodeId: null,
     activeTool: "select",
     draftTransforms: {},
+    transformSpace: "world",
+    transformSnap: {
+        ...DEFAULT_TRANSFORM_SNAP_SETTINGS,
+    },
+    transformSession: null,
     dirty: false,
     history: [],
     future: [],
@@ -35,6 +42,13 @@ const EMPTY_SCENE_ACTIONS: MvpSceneStoreActions = {
     clearSelection: () => undefined,
     setHoveredNodeId: () => undefined,
     setActiveTool: () => undefined,
+    setTransformSpace: () => undefined,
+    setTransformSnapEnabled: () => undefined,
+    patchTransformSnap: () => undefined,
+    beginTransformSession: () => undefined,
+    updateTransformSessionDrafts: () => undefined,
+    cancelTransformSession: () => undefined,
+    commitTransformSession: () => undefined,
     updateDraftTransform: () => undefined,
     updateDraftTransformByAssetInstanceId: () => undefined,
     clearDraftTransforms: () => undefined,
@@ -43,6 +57,17 @@ const EMPTY_SCENE_ACTIONS: MvpSceneStoreActions = {
     appendAsset: () => undefined,
     duplicateAsset: () => undefined,
     removeAsset: () => undefined,
+    appendGroup: () => undefined,
+    appendCamera: () => undefined,
+    appendLight: () => undefined,
+    removeNode: () => undefined,
+    renameNode: () => undefined,
+    setNodeVisibility: () => undefined,
+    setNodeLocked: () => undefined,
+    reparentNode: () => undefined,
+    updateNodeTransform: () => undefined,
+    patchCameraNode: () => undefined,
+    patchLightNode: () => undefined,
     appendPin: () => undefined,
     removePin: () => undefined,
     appendCameraView: () => undefined,
@@ -57,18 +82,19 @@ const EMPTY_SCENE_ACTIONS: MvpSceneStoreActions = {
 const MvpSceneStoreContext = createContext<MvpSceneStoreContextValue | null>(null);
 
 export function MvpSceneStoreProvider({
-    value,
+    store,
     children,
 }: {
-    value: MvpSceneStoreContextValue;
+    store: MvpSceneStore;
     children: React.ReactNode;
 }) {
+    const getRenderableSceneDocumentSnapshot = useMemo(() => createRenderableSceneDocumentSnapshotGetter(store), [store]);
     const memoizedValue = useMemo(
         () => ({
-            store: value.store,
-            getRenderableSceneDocumentSnapshot: value.getRenderableSceneDocumentSnapshot,
+            store,
+            getRenderableSceneDocumentSnapshot,
         }),
-        [value.getRenderableSceneDocumentSnapshot, value.store],
+        [getRenderableSceneDocumentSnapshot, store],
     );
 
     return <MvpSceneStoreContext.Provider value={memoizedValue}>{children}</MvpSceneStoreContext.Provider>;

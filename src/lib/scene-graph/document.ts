@@ -12,6 +12,7 @@ import {
     type SpatialPin,
     type WorkspaceSceneGraph,
 } from "../mvp-workspace.ts";
+import { Euler, Matrix4, Quaternion, Vector3 } from "three";
 import type {
     CameraNodeData,
     GroupNodeData,
@@ -198,6 +199,131 @@ export function addRootNode(document: SceneDocumentV2, node: SceneNodeRecord) {
     return nextDocument;
 }
 
+function getSiblingNodeIds(document: SceneDocumentV2, parentId: SceneNodeId | null) {
+    if (!parentId) {
+        return document.rootIds;
+    }
+
+    return document.nodes[parentId]?.childIds ?? [];
+}
+
+function insertNodeIntoDocument(
+    document: SceneDocumentV2,
+    node: SceneNodeRecord,
+    parentId: SceneNodeId | null = null,
+    index?: number,
+) {
+    const nextDocument = cloneSceneDocument(document);
+    const nextNode = {
+        ...node,
+        parentId,
+    };
+    nextDocument.nodes[nextNode.id] = nextNode;
+
+    if (!parentId) {
+        const rootIds = [...nextDocument.rootIds];
+        const insertAt = typeof index === "number" ? Math.max(0, Math.min(index, rootIds.length)) : rootIds.length;
+        rootIds.splice(insertAt, 0, nextNode.id);
+        nextDocument.rootIds = rootIds;
+        return nextDocument;
+    }
+
+    const parentNode = nextDocument.nodes[parentId];
+    if (!parentNode || parentNode.kind !== "group") {
+        nextDocument.rootIds = [...nextDocument.rootIds, nextNode.id];
+        nextDocument.nodes[nextNode.id] = {
+            ...nextNode,
+            parentId: null,
+        };
+        return nextDocument;
+    }
+
+    const childIds = [...parentNode.childIds];
+    const insertAt = typeof index === "number" ? Math.max(0, Math.min(index, childIds.length)) : childIds.length;
+    childIds.splice(insertAt, 0, nextNode.id);
+    nextDocument.nodes[parentId] = {
+        ...parentNode,
+        childIds,
+    };
+    return nextDocument;
+}
+
+function detachNodeFromDocument(document: SceneDocumentV2, nodeId: SceneNodeId) {
+    const node = document.nodes[nodeId];
+    if (!node) {
+        return document;
+    }
+
+    const nextDocument = cloneSceneDocument(document);
+    if (!node.parentId) {
+        nextDocument.rootIds = nextDocument.rootIds.filter((rootId) => rootId !== nodeId);
+        return nextDocument;
+    }
+
+    const parentNode = nextDocument.nodes[node.parentId];
+    if (!parentNode) {
+        return nextDocument;
+    }
+
+    nextDocument.nodes[node.parentId] = {
+        ...parentNode,
+        childIds: parentNode.childIds.filter((childId) => childId !== nodeId),
+    };
+    return nextDocument;
+}
+
+export function collectSceneNodeIdsDepthFirst(document: SceneDocumentV2, parentId: SceneNodeId | null = null): SceneNodeId[] {
+    const ordered: SceneNodeId[] = [];
+    const siblingIds = getSiblingNodeIds(document, parentId);
+
+    const visit = (nodeId: SceneNodeId) => {
+        const node = document.nodes[nodeId];
+        if (!node) {
+            return;
+        }
+
+        ordered.push(nodeId);
+        node.childIds.forEach((childId) => visit(childId));
+    };
+
+    siblingIds.forEach((nodeId) => visit(nodeId));
+    return ordered;
+}
+
+function collectSceneNodeSubtreeIds(document: SceneDocumentV2, nodeId: SceneNodeId): SceneNodeId[] {
+    const ordered: SceneNodeId[] = [];
+
+    const visit = (nextNodeId: SceneNodeId) => {
+        const node = document.nodes[nextNodeId];
+        if (!node) {
+            return;
+        }
+
+        ordered.push(nextNodeId);
+        node.childIds.forEach((childId) => visit(childId));
+    };
+
+    visit(nodeId);
+    return ordered;
+}
+
+function isSceneNodeDescendant(document: SceneDocumentV2, nodeId: SceneNodeId, potentialAncestorId: SceneNodeId) {
+    const node = document.nodes[nodeId];
+    if (!node) {
+        return false;
+    }
+
+    let currentParentId = node.parentId;
+    while (currentParentId) {
+        if (currentParentId === potentialAncestorId) {
+            return true;
+        }
+        currentParentId = document.nodes[currentParentId]?.parentId ?? null;
+    }
+
+    return false;
+}
+
 export function upsertNodeTransform(
     document: SceneDocumentV2,
     nodeId: SceneNodeId,
@@ -272,6 +398,202 @@ export function appendMeshAssetToSceneDocument(document: SceneDocumentV2, asset:
 
     const nextDocument = addRootNode(document, node);
     nextDocument.meshes[node.id] = createMeshNodeData(node.id, asset);
+    return nextDocument;
+}
+
+export function appendGroupNodeToSceneDocument(
+    document: SceneDocumentV2,
+    options: {
+        name?: string;
+        parentId?: SceneNodeId | null;
+    } = {},
+) {
+    const node = createSceneNodeRecord("group", {
+        name: options.name ?? "Group",
+        parentId: options.parentId ?? null,
+    });
+    const nextDocument = insertNodeIntoDocument(document, node, options.parentId ?? null);
+    nextDocument.groups[node.id] = createGroupNodeData(node.id);
+    return nextDocument;
+}
+
+export function appendCameraNodeToSceneDocument(
+    document: SceneDocumentV2,
+    options: {
+        name?: string;
+        parentId?: SceneNodeId | null;
+        camera?: Partial<CameraNodeData>;
+    } = {},
+) {
+    const node = createSceneNodeRecord("camera", {
+        name: options.name ?? "Camera",
+        parentId: options.parentId ?? null,
+    });
+    const nextDocument = insertNodeIntoDocument(document, node, options.parentId ?? null);
+    nextDocument.cameras[node.id] = createCameraNodeData(node.id, options.camera);
+    return nextDocument;
+}
+
+export function appendLightNodeToSceneDocument(
+    document: SceneDocumentV2,
+    options: {
+        name?: string;
+        parentId?: SceneNodeId | null;
+        light?: Partial<LightNodeData>;
+    } = {},
+) {
+    const node = createSceneNodeRecord("light", {
+        name: options.name ?? "Light",
+        parentId: options.parentId ?? null,
+    });
+    const nextDocument = insertNodeIntoDocument(document, node, options.parentId ?? null);
+    nextDocument.lights[node.id] = createLightNodeData(node.id, options.light);
+    return nextDocument;
+}
+
+export function renameSceneNode(document: SceneDocumentV2, nodeId: SceneNodeId, name: string): SceneDocumentV2 {
+    const node = document.nodes[nodeId];
+    const nextName = name.trim();
+    if (!node || !nextName || node.name === nextName) {
+        return document;
+    }
+
+    const nextDocument = cloneSceneDocument(document);
+    nextDocument.nodes[nodeId] = {
+        ...node,
+        name: nextName,
+    };
+    return nextDocument;
+}
+
+export function setSceneNodeVisibility(document: SceneDocumentV2, nodeId: SceneNodeId, visible: boolean): SceneDocumentV2 {
+    const node = document.nodes[nodeId];
+    if (!node || node.visible === visible) {
+        return document;
+    }
+
+    const nextDocument = cloneSceneDocument(document);
+    nextDocument.nodes[nodeId] = {
+        ...node,
+        visible,
+    };
+    return nextDocument;
+}
+
+export function setSceneNodeLocked(document: SceneDocumentV2, nodeId: SceneNodeId, locked: boolean): SceneDocumentV2 {
+    const node = document.nodes[nodeId];
+    if (!node || node.locked === locked) {
+        return document;
+    }
+
+    const nextDocument = cloneSceneDocument(document);
+    nextDocument.nodes[nodeId] = {
+        ...node,
+        locked,
+    };
+    return nextDocument;
+}
+
+export function removeSceneNodeFromSceneDocument(document: SceneDocumentV2, nodeId: SceneNodeId): SceneDocumentV2 {
+    const node = document.nodes[nodeId];
+    if (!node) {
+        return document;
+    }
+
+    const nextDocument = detachNodeFromDocument(document, nodeId);
+    const subtreeIds = collectSceneNodeSubtreeIds(nextDocument, nodeId);
+    subtreeIds.forEach((subtreeNodeId) => {
+        delete nextDocument.nodes[subtreeNodeId];
+        delete nextDocument.groups[subtreeNodeId];
+        delete nextDocument.cameras[subtreeNodeId];
+        delete nextDocument.lights[subtreeNodeId];
+        delete nextDocument.meshes[subtreeNodeId];
+        delete nextDocument.splats[subtreeNodeId];
+    });
+
+    if (nextDocument.viewer.activeCameraNodeId && subtreeIds.includes(nextDocument.viewer.activeCameraNodeId)) {
+        nextDocument.viewer.activeCameraNodeId = null;
+    }
+
+    return nextDocument;
+}
+
+export function reparentSceneNode(
+    document: SceneDocumentV2,
+    nodeId: SceneNodeId,
+    parentId: SceneNodeId | null,
+    index?: number,
+): SceneDocumentV2 {
+    const node = document.nodes[nodeId];
+    if (!node) {
+        return document;
+    }
+
+    if (parentId === nodeId) {
+        return document;
+    }
+
+    if (parentId && document.nodes[parentId]?.kind !== "group") {
+        return document;
+    }
+
+    if (parentId && isSceneNodeDescendant(document, parentId, nodeId)) {
+        return document;
+    }
+
+    if (node.parentId === parentId) {
+        const siblingIds = getSiblingNodeIds(document, parentId);
+        if (typeof index !== "number" || siblingIds[index] === nodeId) {
+            return document;
+        }
+    }
+
+    const detachedDocument = detachNodeFromDocument(document, nodeId);
+    const nextDocument = insertNodeIntoDocument(
+        detachedDocument,
+        {
+            ...detachedDocument.nodes[nodeId],
+            parentId,
+        },
+        parentId,
+        index,
+    );
+    return nextDocument;
+}
+
+export function patchCameraNodeData(
+    document: SceneDocumentV2,
+    nodeId: SceneNodeId,
+    patch: Partial<Omit<CameraNodeData, "id">>,
+): SceneDocumentV2 {
+    const camera = document.cameras[nodeId];
+    if (!camera) {
+        return document;
+    }
+
+    const nextDocument = cloneSceneDocument(document);
+    nextDocument.cameras[nodeId] = {
+        ...camera,
+        ...patch,
+    };
+    return nextDocument;
+}
+
+export function patchLightNodeData(
+    document: SceneDocumentV2,
+    nodeId: SceneNodeId,
+    patch: Partial<Omit<LightNodeData, "id">>,
+): SceneDocumentV2 {
+    const light = document.lights[nodeId];
+    if (!light) {
+        return document;
+    }
+
+    const nextDocument = cloneSceneDocument(document);
+    nextDocument.lights[nodeId] = {
+        ...light,
+        ...patch,
+    };
     return nextDocument;
 }
 
@@ -370,6 +692,10 @@ function findRootNodeIdByKind(document: SceneDocumentV2, kind: SceneNodeKind): S
     return document.rootIds.find((nodeId) => document.nodes[nodeId]?.kind === kind) ?? null;
 }
 
+function findSceneNodeIdByKind(document: SceneDocumentV2, kind: SceneNodeKind): SceneNodeId | null {
+    return collectSceneNodeIdsDepthFirst(document).find((nodeId) => document.nodes[nodeId]?.kind === kind) ?? null;
+}
+
 function readAssetInstanceId(asset: Record<string, unknown>) {
     if (typeof asset.instanceId === "string" && asset.instanceId) {
         return asset.instanceId;
@@ -396,6 +722,94 @@ function readMeshAssetMatchKeys(mesh: MeshNodeData) {
                   ? metadata.id
                   : null,
     };
+}
+
+function mergeSceneRecordWithUrls(
+    current: Record<string, unknown> | null | undefined,
+    incoming: Record<string, unknown>,
+): Record<string, unknown> {
+    const currentUrls = current?.urls && typeof current.urls === "object" ? (current.urls as Record<string, unknown>) : null;
+    const incomingUrls = incoming.urls && typeof incoming.urls === "object" ? (incoming.urls as Record<string, unknown>) : null;
+
+    return {
+        ...(current ?? {}),
+        ...incoming,
+        ...(currentUrls || incomingUrls
+            ? {
+                  urls: {
+                      ...(currentUrls ?? {}),
+                      ...(incomingUrls ?? {}),
+                  },
+              }
+            : {}),
+    };
+}
+
+function createSceneNodeMatrix(transform: SceneNodeTransform) {
+    const position = new Vector3(...parseVector3Tuple(transform.position, [0, 0, 0]));
+    const rotation = parseVector3Tuple(transform.rotation, [0, 0, 0]);
+    const quaternion = new Quaternion().setFromEuler(new Euler(rotation[0], rotation[1], rotation[2]));
+    const scale = new Vector3(...parseVector3Tuple(transform.scale, [1, 1, 1]));
+    return new Matrix4().compose(position, quaternion, scale);
+}
+
+function decomposeSceneNodeMatrix(matrix: Matrix4) {
+    const position = new Vector3();
+    const quaternion = new Quaternion();
+    const scale = new Vector3();
+    matrix.decompose(position, quaternion, scale);
+    const rotation = new Euler().setFromQuaternion(quaternion);
+
+    return {
+        position: [position.x, position.y, position.z] as [number, number, number],
+        rotation: [rotation.x, rotation.y, rotation.z] as [number, number, number],
+        scale: [scale.x, scale.y, scale.z] as [number, number, number],
+    };
+}
+
+interface ProjectedSceneNodeState {
+    nodeId: SceneNodeId;
+    node: SceneNodeRecord;
+    worldMatrix: Matrix4;
+    parentWorldMatrix: Matrix4 | null;
+    effectiveVisible: boolean;
+    effectiveLocked: boolean;
+}
+
+function collectProjectedSceneNodes(
+    document: SceneDocumentV2,
+    parentId: SceneNodeId | null = null,
+    parentWorldMatrix: Matrix4 | null = null,
+    parentVisible = true,
+    parentLocked = false,
+): ProjectedSceneNodeState[] {
+    const projected: ProjectedSceneNodeState[] = [];
+
+    getSiblingNodeIds(document, parentId).forEach((nodeId) => {
+        const node = document.nodes[nodeId];
+        if (!node) {
+            return;
+        }
+
+        const worldMatrix = parentWorldMatrix
+            ? parentWorldMatrix.clone().multiply(createSceneNodeMatrix(node.transform))
+            : createSceneNodeMatrix(node.transform);
+        const effectiveVisible = parentVisible && node.visible !== false;
+        const effectiveLocked = parentLocked || node.locked === true;
+
+        projected.push({
+            nodeId,
+            node,
+            worldMatrix,
+            parentWorldMatrix: parentWorldMatrix ? parentWorldMatrix.clone() : null,
+            effectiveVisible,
+            effectiveLocked,
+        });
+
+        projected.push(...collectProjectedSceneNodes(document, nodeId, worldMatrix, effectiveVisible, effectiveLocked));
+    });
+
+    return projected;
 }
 
 function createWorkspaceAssetFromMeshNode(document: SceneDocumentV2, nodeId: SceneNodeId, instanceIdOverride?: string) {
@@ -433,11 +847,7 @@ export function removeMeshAssetFromSceneDocument(document: SceneDocumentV2, inst
         return document;
     }
 
-    const nextDocument = cloneSceneDocument(document);
-    nextDocument.rootIds = nextDocument.rootIds.filter((rootId) => rootId !== nodeId);
-    delete nextDocument.nodes[nodeId];
-    delete nextDocument.meshes[nodeId];
-    return nextDocument;
+    return removeSceneNodeFromSceneDocument(document, nodeId);
 }
 
 export function duplicateMeshAssetInSceneDocument(
@@ -477,16 +887,35 @@ export function mergeWorkspaceSceneGraphIntoSceneDocument(
     document: SceneDocumentV2,
     workspace: WorkspaceSceneGraph,
 ): SceneDocumentV2 {
-    const nextDocument = replaceEnvironmentOnSceneDocument(
-        document,
+    let nextDocument = cloneSceneDocument(document);
+    const workspaceEnvironment =
         workspace.environment && typeof workspace.environment === "object"
             ? (workspace.environment as Record<string, unknown>)
-            : null,
-    );
+            : null;
 
-    const existingMeshNodeIds = nextDocument.rootIds.filter((nodeId) => nextDocument.nodes[nodeId]?.kind === "mesh");
+    if (workspaceEnvironment) {
+        const environmentNodeId = findSceneNodeIdByKind(nextDocument, "splat");
+        if (environmentNodeId) {
+            const currentNode = nextDocument.nodes[environmentNodeId];
+            const currentSplat = nextDocument.splats[environmentNodeId];
+            const mergedEnvironment = mergeSceneRecordWithUrls(currentSplat?.metadata, workspaceEnvironment);
+            nextDocument.nodes[environmentNodeId] = {
+                ...currentNode,
+                name:
+                    typeof workspaceEnvironment.name === "string" && workspaceEnvironment.name
+                        ? workspaceEnvironment.name
+                        : typeof workspaceEnvironment.sourceLabel === "string" && workspaceEnvironment.sourceLabel
+                          ? workspaceEnvironment.sourceLabel
+                          : currentNode?.name ?? "Environment",
+            };
+            nextDocument.splats[environmentNodeId] = createSplatNodeData(environmentNodeId, mergedEnvironment);
+        } else {
+            nextDocument = replaceEnvironmentOnSceneDocument(nextDocument, workspaceEnvironment);
+        }
+    }
+
+    const existingMeshNodeIds = collectSceneNodeIdsDepthFirst(nextDocument).filter((nodeId) => nextDocument.nodes[nodeId]?.kind === "mesh");
     const usedMeshNodeIds = new Set<SceneNodeId>();
-    const nextMeshNodeIds: SceneNodeId[] = [];
 
     workspace.assets.forEach((asset) => {
         const assetRecord = asset as Record<string, unknown>;
@@ -506,62 +935,22 @@ export function mergeWorkspaceSceneGraphIntoSceneDocument(
                 const keys = readMeshAssetMatchKeys(nextDocument.meshes[nodeId]);
                 return (assetInstanceId && keys.instanceId === assetInstanceId) || (assetId && keys.assetId === assetId);
             }) ?? null;
+        if (matchedNodeId) {
+            usedMeshNodeIds.add(matchedNodeId);
+            nextDocument.meshes[matchedNodeId] = createMeshNodeData(
+                matchedNodeId,
+                mergeSceneRecordWithUrls(nextDocument.meshes[matchedNodeId]?.metadata, assetRecord),
+            );
+            return;
+        }
 
-        const nodeId = matchedNodeId ?? createSceneNodeId("mesh");
-        usedMeshNodeIds.add(nodeId);
-        nextMeshNodeIds.push(nodeId);
-        nextDocument.nodes[nodeId] = createSceneNodeRecord("mesh", {
-            id: nodeId,
+        const node = createSceneNodeRecord("mesh", {
             name: typeof assetRecord.name === "string" && assetRecord.name ? assetRecord.name : "Asset",
             transform: createMeshTransformFromAsset(assetRecord),
         });
-        nextDocument.meshes[nodeId] = createMeshNodeData(nodeId, assetRecord);
+        nextDocument = insertNodeIntoDocument(nextDocument, node);
+        nextDocument.meshes[node.id] = createMeshNodeData(node.id, assetRecord);
     });
-
-    existingMeshNodeIds.forEach((nodeId) => {
-        if (usedMeshNodeIds.has(nodeId)) {
-            return;
-        }
-        delete nextDocument.nodes[nodeId];
-        delete nextDocument.meshes[nodeId];
-    });
-
-    if (existingMeshNodeIds.length > 0) {
-        let insertedMeshBlock = false;
-        nextDocument.rootIds = nextDocument.rootIds.flatMap((nodeId) => {
-            if (existingMeshNodeIds.includes(nodeId)) {
-                if (insertedMeshBlock) {
-                    return [];
-                }
-                insertedMeshBlock = true;
-                return nextMeshNodeIds;
-            }
-            return [nodeId];
-        });
-    } else if (nextMeshNodeIds.length > 0) {
-        nextDocument.rootIds = [...nextDocument.rootIds, ...nextMeshNodeIds];
-    }
-
-    nextDocument.direction = {
-        cameraViews: [...workspace.camera_views],
-        pins: [...workspace.pins],
-        directorPath: [...workspace.director_path],
-        directorBrief: workspace.director_brief,
-    };
-    nextDocument.viewer = {
-        ...nextDocument.viewer,
-        fov: workspace.viewer.fov,
-        lens_mm: workspace.viewer.lens_mm,
-    };
-
-    const activeCameraNodeId = nextDocument.viewer.activeCameraNodeId;
-    if (activeCameraNodeId && nextDocument.cameras[activeCameraNodeId]) {
-        nextDocument.cameras[activeCameraNodeId] = {
-            ...nextDocument.cameras[activeCameraNodeId],
-            fov: workspace.viewer.fov,
-            lens_mm: workspace.viewer.lens_mm,
-        };
-    }
 
     return nextDocument;
 }
@@ -571,13 +960,23 @@ export function ensureReviewRecord(sceneId?: string | null, review?: SceneReview
 }
 
 export function sceneDocumentToWorkspaceEnvironment(document: SceneDocumentV2) {
-    const environmentNodeId = document.rootIds.find((nodeId) => document.nodes[nodeId]?.kind === "splat") ?? null;
+    const environmentProjection = collectProjectedSceneNodes(document).find(({ node }) => node.kind === "splat") ?? null;
+    const environmentNodeId = environmentProjection?.nodeId ?? null;
     const environmentNode = environmentNodeId ? document.splats[environmentNodeId] : null;
-    return environmentNode
+    const node = environmentProjection?.node ?? null;
+    const metadataUrls =
+        environmentNode?.metadata?.urls && typeof environmentNode.metadata.urls === "object"
+            ? (environmentNode.metadata.urls as Record<string, unknown>)
+            : {};
+    return environmentNode && environmentProjection?.effectiveVisible !== false
         ? {
               ...(environmentNode.metadata ?? {}),
               id: environmentNode.sceneId,
+              name: node?.name ?? "Environment",
+              visible: environmentProjection?.effectiveVisible ?? true,
+              locked: environmentProjection?.effectiveLocked ?? false,
               urls: {
+                  ...metadataUrls,
                   viewer: environmentNode.viewerUrl,
                   splats: environmentNode.splatUrl,
                   cameras: environmentNode.camerasUrl,
@@ -588,22 +987,27 @@ export function sceneDocumentToWorkspaceEnvironment(document: SceneDocumentV2) {
 }
 
 export function sceneDocumentToWorkspaceAssets(document: SceneDocumentV2) {
-    const assetNodeIds = document.rootIds.filter((nodeId) => document.nodes[nodeId]?.kind === "mesh");
-    return assetNodeIds.map((nodeId) => {
-        const node = document.nodes[nodeId];
+    return collectProjectedSceneNodes(document).flatMap(({ nodeId, node, worldMatrix, parentWorldMatrix, effectiveVisible, effectiveLocked }) => {
+        if (node.kind !== "mesh" || !effectiveVisible) {
+            return [];
+        }
         const mesh = document.meshes[nodeId];
-        const rotation = node?.transform.rotation ?? [0, 0, 0, 1];
-        return {
+        const worldTransform = decomposeSceneNodeMatrix(worldMatrix);
+        return [{
             ...(mesh?.metadata ?? {}),
             asset_id: mesh?.assetId ?? nodeId,
             id: mesh?.assetId ?? nodeId,
             mesh: mesh?.meshUrl ?? null,
             texture: mesh?.textureUrl ?? null,
             preview: mesh?.previewUrl ?? null,
-            position: node?.transform.position ?? [0, 0, 0],
-            rotation: [rotation[0], rotation[1], rotation[2]],
-            scale: node?.transform.scale ?? [1, 1, 1],
-        };
+            name: node.name ?? (mesh?.assetId ?? nodeId),
+            visible: effectiveVisible,
+            locked: effectiveLocked,
+            position: worldTransform.position,
+            rotation: worldTransform.rotation,
+            scale: worldTransform.scale,
+            parentWorldMatrix: parentWorldMatrix ? Array.from(parentWorldMatrix.elements) : null,
+        }];
     });
 }
 

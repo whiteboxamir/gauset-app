@@ -1,50 +1,59 @@
-import {
-    sceneDocumentToWorkspaceAssets,
-    sceneDocumentToWorkspaceEnvironment,
-} from "../lib/scene-graph/document.ts";
-import type { SceneDocumentV2 } from "../lib/scene-graph/types.ts";
-import type { WorkspaceSceneGraph } from "../lib/mvp-workspace.ts";
+import { useMemo } from "react";
+
 import { useRenderableSceneDocumentSelector } from "./mvpSceneStoreContext.tsx";
+import {
+    selectSceneAssetsFromDocument,
+    selectSceneCameraViewsFromDocument,
+    selectSceneDirectorBriefFromDocument,
+    selectSceneDirectorPathFromDocument,
+    selectSceneEnvironmentFromDocument,
+    selectScenePinsFromDocument,
+    selectSceneViewerFromDocument,
+} from "./mvpSceneWorkspace.ts";
 
 function jsonValueEqual<T>(previous: T, next: T) {
     return JSON.stringify(previous) === JSON.stringify(next);
 }
 
-const selectAssets = (document: SceneDocumentV2): WorkspaceSceneGraph["assets"] => sceneDocumentToWorkspaceAssets(document);
-const selectEnvironment = (document: SceneDocumentV2): WorkspaceSceneGraph["environment"] => sceneDocumentToWorkspaceEnvironment(document);
-const selectCameraViews = (document: SceneDocumentV2) => [...document.direction.cameraViews];
-const selectPins = (document: SceneDocumentV2) => [...document.direction.pins];
-const selectDirectorPath = (document: SceneDocumentV2) => [...document.direction.directorPath];
-const selectDirectorBrief = (document: SceneDocumentV2) => document.direction.directorBrief;
-const selectViewer = (document: SceneDocumentV2): WorkspaceSceneGraph["viewer"] => ({
-    fov: document.viewer.fov,
-    lens_mm: document.viewer.lens_mm,
-});
-
 export function useSceneEnvironmentSlice() {
-    return useRenderableSceneDocumentSelector(selectEnvironment, jsonValueEqual);
+    return useRenderableSceneDocumentSelector(selectSceneEnvironmentFromDocument, jsonValueEqual);
 }
 
 export function useSceneAssetsSlice() {
-    return useRenderableSceneDocumentSelector(selectAssets, jsonValueEqual);
+    return useRenderableSceneDocumentSelector(selectSceneAssetsFromDocument, jsonValueEqual);
 }
 
 export function useSceneCameraViewsSlice() {
-    return useRenderableSceneDocumentSelector(selectCameraViews, jsonValueEqual);
+    return useRenderableSceneDocumentSelector(selectSceneCameraViewsFromDocument, jsonValueEqual);
 }
 
 export function useScenePinsSlice() {
-    return useRenderableSceneDocumentSelector(selectPins, jsonValueEqual);
+    return useRenderableSceneDocumentSelector(selectScenePinsFromDocument, jsonValueEqual);
 }
 
 export function useSceneDirectorPathSlice() {
-    return useRenderableSceneDocumentSelector(selectDirectorPath, jsonValueEqual);
+    return useRenderableSceneDocumentSelector(selectSceneDirectorPathFromDocument, jsonValueEqual);
 }
 
 export function useSceneDirectorBriefSlice() {
-    return useRenderableSceneDocumentSelector(selectDirectorBrief, Object.is);
+    return useRenderableSceneDocumentSelector(selectSceneDirectorBriefFromDocument, Object.is);
 }
 
 export function useSceneViewerSlice() {
-    return useRenderableSceneDocumentSelector(selectViewer, jsonValueEqual);
+    return useRenderableSceneDocumentSelector(selectSceneViewerFromDocument, jsonValueEqual);
+}
+
+export function useSceneViewerInteractionSlice() {
+    const camera_views = useSceneCameraViewsSlice();
+    const pins = useScenePinsSlice();
+    const viewer = useSceneViewerSlice();
+
+    return useMemo(
+        () => ({
+            camera_views,
+            pins,
+            viewer,
+        }),
+        [camera_views, pins, viewer],
+    );
 }
