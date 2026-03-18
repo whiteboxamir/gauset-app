@@ -1,6 +1,6 @@
 "use client";
 
-import { toProxyUrl } from "@/lib/mvp-api";
+import { toProxyUrl } from "./mvp-api.ts";
 
 export type Vector3Tuple = [number, number, number];
 export type QuaternionTuple = [number, number, number, number];
@@ -114,9 +114,58 @@ export type PersistedSceneGraphV1 = WorkspaceSceneGraph;
 
 export const DEFAULT_FOV = 45;
 export const DEFAULT_LENS_MM = 35;
+const UNKNOWN_TIMESTAMP = "";
 
 export function createId(prefix: string) {
     return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function hashDeterministicIdInput(value: string) {
+    let hash = 2166136261;
+    for (let index = 0; index < value.length; index += 1) {
+        hash ^= value.charCodeAt(index);
+        hash = Math.imul(hash, 16777619);
+    }
+    return (hash >>> 0).toString(36);
+}
+
+function normalizeStableIdToken(value: unknown): string | null {
+    if (value === null || value === undefined) {
+        return null;
+    }
+
+    if (Array.isArray(value)) {
+        const normalized = value.map((entry) => normalizeStableIdToken(entry)).filter(Boolean);
+        return normalized.length > 0 ? normalized.join("-") : null;
+    }
+
+    if (typeof value === "number") {
+        return Number.isFinite(value) ? String(value) : null;
+    }
+
+    if (typeof value === "boolean") {
+        return value ? "true" : "false";
+    }
+
+    if (typeof value !== "string") {
+        return null;
+    }
+
+    const normalized = value
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .slice(0, 32);
+    return normalized || null;
+}
+
+export function createStableId(prefix: string, ...parts: unknown[]) {
+    const normalizedParts = parts.map((entry) => normalizeStableIdToken(entry)).filter(Boolean);
+    const canonical = normalizedParts.length > 0 ? normalizedParts.join("|") : "default";
+    const slug = normalizedParts.slice(0, 3).join("_");
+    const hash = hashDeterministicIdInput(`${prefix}|${canonical}`);
+    return slug ? `${prefix}_${slug}_${hash}` : `${prefix}_${hash}`;
 }
 
 export function nowIso() {
@@ -215,7 +264,10 @@ function normalizeCameraView(raw: unknown, index: number): CameraView | null {
         Number.isFinite(input.lens_mm) && Number(input.lens_mm) > 0 ? Number(input.lens_mm) : fovToLensMm(fov);
 
     return {
-        id: typeof input.id === "string" && input.id ? input.id : createId("view"),
+        id:
+            typeof input.id === "string" && input.id
+                ? input.id
+                : createStableId("view", input.label, input.note, position, target, fov, lensMm, index),
         label: typeof input.label === "string" && input.label ? input.label : `View ${index + 1}`,
         position,
         target,
@@ -232,11 +284,14 @@ function normalizePin(raw: unknown, index: number): SpatialPin | null {
         input.type === "egress" || input.type === "lighting" || input.type === "hazard" ? input.type : "general";
 
     return {
-        id: typeof input.id === "string" && input.id ? input.id : createId("pin"),
+        id:
+            typeof input.id === "string" && input.id
+                ? input.id
+                : createStableId("pin", input.label, type, input.position, index),
         label: typeof input.label === "string" && input.label ? input.label : `Pin ${index + 1}`,
         type,
         position: parseVector3Tuple(input.position, [0, 0, 0]),
-        created_at: typeof input.created_at === "string" && input.created_at ? input.created_at : nowIso(),
+        created_at: typeof input.created_at === "string" && input.created_at ? input.created_at : UNKNOWN_TIMESTAMP,
     };
 }
 
@@ -311,7 +366,12 @@ export function normalizeWorkspaceSceneGraph(sceneGraph: unknown): WorkspaceScen
         director_path: Array.isArray(raw.director_path)
             ? raw.director_path.map(normalizePathFrame).filter(Boolean) as CameraPathFrame[]
             : [],
-        director_brief: typeof raw.director_brief === "string" ? raw.director_brief : "",
+        director_brief:
+            typeof raw.director_brief === "string"
+                ? raw.director_brief
+                : typeof raw.sceneDirectionNote === "string"
+                  ? raw.sceneDirectionNote
+                  : "",
         viewer: {
             fov,
             lens_mm: Math.round(lensMm * 10) / 10,
@@ -319,7 +379,7 @@ export function normalizeWorkspaceSceneGraph(sceneGraph: unknown): WorkspaceScen
     };
 }
 
-function normalizeReviewIssue(raw: unknown): ReviewIssue | null {
+function normalizeReviewIssue(raw: unknown, index: number): ReviewIssue | null {
     if (!raw || typeof raw !== "object") return null;
     const input = raw as Partial<ReviewIssue>;
     const type: SpatialPinType =
@@ -330,7 +390,10 @@ function normalizeReviewIssue(raw: unknown): ReviewIssue | null {
         input.status === "in_review" || input.status === "blocked" || input.status === "resolved" ? input.status : "open";
 
     return {
-        id: typeof input.id === "string" && input.id ? input.id : createId("issue"),
+        id:
+            typeof input.id === "string" && input.id
+                ? input.id
+                : createStableId("issue", input.title, input.body, type, input.anchor_position, input.anchor_view_id, index),
         title: typeof input.title === "string" ? input.title : "",
         body: typeof input.body === "string" ? input.body : "",
         type,
@@ -343,8 +406,8 @@ function normalizeReviewIssue(raw: unknown): ReviewIssue | null {
             : null,
         anchor_view_id: typeof input.anchor_view_id === "string" && input.anchor_view_id ? input.anchor_view_id : null,
         version_id: typeof input.version_id === "string" && input.version_id ? input.version_id : null,
-        created_at: typeof input.created_at === "string" && input.created_at ? input.created_at : nowIso(),
-        updated_at: typeof input.updated_at === "string" && input.updated_at ? input.updated_at : nowIso(),
+        created_at: typeof input.created_at === "string" && input.created_at ? input.created_at : UNKNOWN_TIMESTAMP,
+        updated_at: typeof input.updated_at === "string" && input.updated_at ? input.updated_at : UNKNOWN_TIMESTAMP,
     };
 }
 

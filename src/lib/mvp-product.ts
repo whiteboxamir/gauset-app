@@ -31,6 +31,7 @@ export interface BackendLaneCapability {
 export interface SetupStatusResponse {
     status: string;
     python_version?: string;
+    storage_mode?: string;
     backend?: {
         label?: string;
         kind?: string;
@@ -84,6 +85,15 @@ export interface SetupStatusResponse {
         uploads?: boolean;
         assets?: boolean;
         scenes?: boolean;
+    };
+    storage?: {
+        mode?: string;
+        durable?: boolean;
+        public_write_safe?: boolean;
+        summary?: string;
+        availability_reason?: string | null;
+        required_env?: string[];
+        checklist?: string[];
     };
     torch?: {
         installed?: boolean;
@@ -227,6 +237,7 @@ export interface EnvironmentRenderingMetadata {
     source_format?: string;
     viewer_source?: string;
     apply_preview_orientation?: boolean;
+    preview_density_multiplier?: number;
 }
 
 export interface EnvironmentDeliveryAxis {
@@ -539,12 +550,21 @@ function inferLaneAvailability(payload: LegacySetupStatusResponse, lane: "previe
 
 export function normalizeSetupStatus(raw: unknown): SetupStatusResponse {
     const payload = (raw && typeof raw === "object" ? raw : {}) as LegacySetupStatusResponse;
-    const previewAvailable = inferLaneAvailability(payload, "preview");
-    const reconstructionAvailable = inferLaneAvailability(payload, "reconstruction");
-    const assetAvailable = inferLaneAvailability(payload, "asset");
+    const deployment = payload.backend?.deployment ?? payload.storage_mode ?? "";
+    const storageMode = typeof payload.storage?.mode === "string" ? payload.storage.mode : payload.storage_mode ?? "";
+    const publicWriteSafe =
+        typeof payload.storage?.public_write_safe === "boolean"
+            ? payload.storage.public_write_safe
+            : !(deployment === "vercel" && storageMode === "filesystem");
+    const previewAvailable = inferLaneAvailability(payload, "preview") && publicWriteSafe;
+    const reconstructionAvailable = inferLaneAvailability(payload, "reconstruction") && publicWriteSafe;
+    const assetAvailable = inferLaneAvailability(payload, "asset") && publicWriteSafe;
 
     const backendTruth =
-        payload.backend?.truth ??
+        !publicWriteSafe
+            ? payload.storage?.availability_reason ??
+              "Public MVP writes are disabled because this deployment is using filesystem storage. Configure durable blob storage before enabling uploads, preview generation, asset extraction, scene saves, reviews, or comments."
+            : payload.backend?.truth ??
         (previewAvailable && assetAvailable && reconstructionAvailable
             ? "Preview, reconstruction, and asset generation lanes are available."
             : previewAvailable && assetAvailable
@@ -572,11 +592,16 @@ export function normalizeSetupStatus(raw: unknown): SetupStatusResponse {
         reconstruction_backend: payload.reconstruction_backend,
         benchmark_status: payload.benchmark_status,
         release_gates: payload.release_gates,
+        storage_mode: storageMode || payload.storage_mode,
         capabilities: {
             preview: {
                 available: previewAvailable,
                 label: payload.capabilities?.preview?.label ?? "Instant Preview",
-                summary: payload.capabilities?.preview?.summary ?? "Generate a single-photo Gaussian preview for nearby camera moves.",
+                summary:
+                    payload.capabilities?.preview?.summary ??
+                    (publicWriteSafe
+                        ? "Generate a single-photo Gaussian preview for nearby camera moves."
+                        : "Preview writes are disabled until durable blob storage is configured for this public deployment."),
                 truth: payload.capabilities?.preview?.truth ?? "This is a synthesized preview, not a faithful multi-view reconstruction.",
                 lane_truth: payload.capabilities?.preview?.lane_truth,
                 input_strategy: payload.capabilities?.preview?.input_strategy ?? "1 photo",
@@ -601,8 +626,16 @@ export function normalizeSetupStatus(raw: unknown): SetupStatusResponse {
             asset: {
                 available: assetAvailable,
                 label: payload.capabilities?.asset?.label ?? "Single-Image Asset",
-                summary: payload.capabilities?.asset?.summary ?? "Generate a hero prop mesh from one reference image.",
-                truth: payload.capabilities?.asset?.truth ?? "This lane is object-focused generation, not environment reconstruction.",
+                summary:
+                    payload.capabilities?.asset?.summary ??
+                    (publicWriteSafe
+                        ? "Generate a hero prop mesh from one reference image."
+                        : "Asset extraction is disabled until durable blob storage is configured for this public deployment."),
+                truth:
+                    payload.capabilities?.asset?.truth ??
+                    (publicWriteSafe
+                        ? "This lane is object-focused generation, not environment reconstruction."
+                        : "This lane is safety-disabled because generated files cannot persist durably in the current public storage mode."),
                 lane_truth: payload.capabilities?.asset?.lane_truth,
                 input_strategy: payload.capabilities?.asset?.input_strategy ?? "1 photo",
                 min_images: payload.capabilities?.asset?.min_images ?? 1,
@@ -613,6 +646,23 @@ export function normalizeSetupStatus(raw: unknown): SetupStatusResponse {
             uploads: payload.directories?.uploads ?? true,
             assets: payload.directories?.assets ?? true,
             scenes: payload.directories?.scenes ?? true,
+        },
+        storage: {
+            mode: storageMode || payload.storage_mode,
+            durable: typeof payload.storage?.durable === "boolean" ? payload.storage.durable : publicWriteSafe,
+            public_write_safe: publicWriteSafe,
+            summary:
+                payload.storage?.summary ??
+                (publicWriteSafe
+                    ? "Durable storage is configured for MVP writes."
+                    : "Filesystem storage is not durable on the public MVP deployment, so write lanes are safety-disabled until blob storage is configured."),
+            availability_reason:
+                payload.storage?.availability_reason ??
+                (publicWriteSafe
+                    ? null
+                    : "Public MVP writes are disabled because this deployment is using filesystem storage."),
+            required_env: payload.storage?.required_env ?? [],
+            checklist: payload.storage?.checklist ?? [],
         },
     };
 }

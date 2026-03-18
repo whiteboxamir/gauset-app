@@ -19,10 +19,20 @@ export default function MVPError({
                     </div>
                     <h1 className="mt-6 text-3xl font-medium tracking-[-0.04em] text-white">Failed to load workspace</h1>
                     <p className="mt-4 max-w-2xl text-sm leading-7 text-neutral-300">
-                        The workspace hit a render error before the editor could finish mounting. The rest of the app is still intact, and you can retry the route without reloading the entire site.
+                        The workspace hit a render error before the editor could finish mounting. The route has not changed product truth: viewer certification stays host-specific, and reconstruction remains whatever the backend actually reports.
                     </p>
                     <div className="mt-6 rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-neutral-400">
                         {error.message || "Unknown MVP render failure."}
+                    </div>
+                    <div className="mt-6 grid gap-3 md:grid-cols-2">
+                        <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
+                            <p className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">Safe retry</p>
+                            <p className="mt-2 text-sm text-white">Retrying remounts only the workspace shell. It does not fabricate backend availability or viewer proof.</p>
+                        </div>
+                        <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
+                            <p className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">What persists</p>
+                            <p className="mt-2 text-sm text-white">Saved versions, local draft recovery, and review state remain attached to their real scene ids.</p>
+                        </div>
                     </div>
                     <div className="mt-8 flex flex-wrap gap-3">
                         <button

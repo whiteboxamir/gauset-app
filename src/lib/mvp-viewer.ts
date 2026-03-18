@@ -169,21 +169,21 @@ export function resolveViewerCapabilities({
     const renderSource = resolveEnvironmentRenderSource({ plyUrl, viewerUrl, metadata });
     const isSingleImagePreview = isSingleImagePreviewMetadata(metadata);
 
-    if (!capabilities.webglSupported) {
-        return createFallbackDecision(
-            capabilities,
-            renderSource,
-            "webgl_unavailable",
-            "WebGL could not be initialized in this environment.",
-        );
-    }
-
     if (renderSource.mode === "sharp" && !capabilities.webgl2Supported) {
         return createFallbackDecision(
             capabilities,
             renderSource,
             "webgl2_required",
             "This device does not expose WebGL2, so the sharp splat renderer cannot start.",
+        );
+    }
+
+    if (!capabilities.webglSupported) {
+        return createFallbackDecision(
+            capabilities,
+            renderSource,
+            "webgl_unavailable",
+            "WebGL could not be initialized in this environment.",
         );
     }
 
@@ -208,6 +208,15 @@ export function resolveViewerCapabilities({
 export function classifyViewerFailure(message: string): ViewerFallbackReason {
     const normalized = message.trim().toLowerCase();
 
+    if (normalized.includes("webgl2")) {
+        return "webgl2_required";
+    }
+    if (normalized.includes("ext_color_buffer_float")) {
+        return "ext_color_buffer_float_required";
+    }
+    if (normalized.includes("webgl")) {
+        return "webgl_unavailable";
+    }
     if (normalized.includes("texture size")) {
         return "texture_size_exceeded";
     }

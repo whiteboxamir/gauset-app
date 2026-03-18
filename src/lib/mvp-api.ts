@@ -31,7 +31,7 @@ function normalizeProxyPath(pathname: string) {
     return pathname;
 }
 
-export function toProxyUrl(urlOrPath?: string) {
+export function toProxyUrl(urlOrPath?: string | null) {
     if (!urlOrPath) return "";
     if (urlOrPath.startsWith("http://") || urlOrPath.startsWith("https://")) {
         try {
@@ -49,4 +49,34 @@ export function toProxyUrl(urlOrPath?: string) {
     if (urlOrPath.startsWith("/storage/")) return `${MVP_API_BASE_URL}${urlOrPath}`;
     if (urlOrPath.startsWith("/")) return `${MVP_API_BASE_URL}${urlOrPath}`;
     return `${MVP_API_BASE_URL}/${urlOrPath}`;
+}
+
+export function withMvpShareToken(urlOrPath?: string | null, shareToken?: string | null) {
+    if (!urlOrPath || !shareToken) {
+        return urlOrPath ?? "";
+    }
+
+    let candidate = urlOrPath;
+    if (candidate.startsWith("http://") || candidate.startsWith("https://")) {
+        try {
+            const parsed = new URL(candidate);
+            if (LOCAL_DEV_HOSTNAMES.has(parsed.hostname)) {
+                candidate = `${normalizeProxyPath(parsed.pathname)}${parsed.search}${parsed.hash}`;
+            } else if (parsed.pathname.startsWith(`${MVP_API_BASE_URL}/`) || parsed.pathname.startsWith("/storage/")) {
+                candidate = `${parsed.pathname}${parsed.search}${parsed.hash}`;
+            } else {
+                return urlOrPath;
+            }
+        } catch {
+            return urlOrPath;
+        }
+    } else if (candidate.startsWith("/storage/")) {
+        candidate = `${MVP_API_BASE_URL}${candidate}`;
+    } else if (!candidate.startsWith(`${MVP_API_BASE_URL}/`) && candidate !== MVP_API_BASE_URL) {
+        return urlOrPath;
+    }
+
+    const parsed = new URL(candidate, "https://gauset.invalid");
+    parsed.searchParams.set("share", shareToken);
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
 }
