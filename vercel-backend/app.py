@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import math
@@ -18,9 +19,9 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 import trimesh
 from PIL import Image, ImageOps
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse, Response
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -49,12 +50,143 @@ def _version_id() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
 
 
+SOURCE_PROVENANCE_VERSION = "gauset.source_provenance.v1"
+WORLD_SOURCE_VERSION = "gauset.world_source.v1"
+LANE_METADATA_VERSION = "gauset.lane_truth.v1"
+HANDOFF_MANIFEST_VERSION = "gauset.handoff_manifest.v1"
+HANDOFF_TARGETS = ["scene_document_v2", "external_world_package", "unreal_handoff_manifest"]
+
+
 def _response_field(payload: Any, key: str) -> Optional[str]:
     if isinstance(payload, dict):
         value = payload.get(key)
     else:
         value = getattr(payload, key, None)
     return value if isinstance(value, str) else None
+
+
+def _source_kind_for_type(source_type: str) -> str:
+    return "provider_generated_still" if source_type == "generated" else "uploaded_still"
+
+
+def _source_origin_for_type(source_type: str) -> str:
+    return "local_provider_generation" if source_type == "generated" else "local_upload"
+
+
+def _source_ingest_channel_for_type(source_type: str) -> str:
+    return "generate_image" if source_type == "generated" else "upload"
+
+
+def _text_or_none(value: Any) -> str | None:
+    text = str(value or "").strip()
+    return text or None
+
+
+def _list_of_text(values: Any, *, limit: int = 6) -> List[str]:
+    if not isinstance(values, (list, tuple, set)):
+        values = [values]
+    normalized: List[str] = []
+    seen: set[str] = set()
+    for value in values:
+        text = _text_or_none(value)
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        normalized.append(text)
+        if len(normalized) >= limit:
+            break
+    return normalized
+
+
+def _build_source_provenance(record: Dict[str, Any]) -> Dict[str, Any]:
+    source_type = str(record.get("source_type") or "upload").strip() or "upload"
+    return {
+        "schema_version": SOURCE_PROVENANCE_VERSION,
+        "kind": _source_kind_for_type(source_type),
+        "origin": _source_origin_for_type(source_type),
+        "ingest_channel": _source_ingest_channel_for_type(source_type),
+        "source_type": source_type,
+        "image_id": str(record.get("image_id") or "").strip(),
+        "filename": str(record.get("filename") or "").strip(),
+        "original_filename": _text_or_none(record.get("original_filename")) or str(record.get("filename") or "").strip(),
+        "provider": _text_or_none(record.get("provider")),
+        "model": _text_or_none(record.get("model")),
+        "prompt": _text_or_none(record.get("prompt")),
+        "generation_job_id": _text_or_none(record.get("generation_job_id")),
+        "future_world_source_kinds": ["capture_set", "external_world_package", "downstream_handoff_manifest"],
+    }
+
+
+def _build_world_source(
+    *,
+    lane: str,
+    ingest_channel: str,
+    input_strategy: str,
+    primary_source: Dict[str, Any],
+    upstream_sources: List[Dict[str, Any]] | None = None,
+    session_id: str | None = None,
+    frame_count: int | None = None,
+) -> Dict[str, Any]:
+    sources = [source for source in (upstream_sources or [primary_source]) if isinstance(source, dict)]
+    return {
+        "schema_version": WORLD_SOURCE_VERSION,
+        "kind": str(primary_source.get("kind") or "uploaded_still").strip() or "uploaded_still",
+        "origin": str(primary_source.get("origin") or "local_backend_ingest").strip() or "local_backend_ingest",
+        "ingest_channel": ingest_channel,
+        "lane": lane,
+        "input_strategy": input_strategy,
+        "primary_source": primary_source,
+        "upstream_sources": sources,
+        "upstream_image_ids": [str(source.get("image_id") or "").strip() for source in sources if str(source.get("image_id") or "").strip()],
+        "capture_session_id": session_id,
+        "frame_count": frame_count,
+        "future_ingest_support": ["external_world_package", "downstream_handoff_manifest"],
+    }
+
+
+def _build_lane_metadata(
+    *,
+    lane: str,
+    lane_truth: str,
+    available: bool,
+    readiness: str,
+    summary: str,
+    blockers: List[str] | None = None,
+    production_ready: bool = False,
+    hero_ready: bool = False,
+    world_class_ready: bool = False,
+) -> Dict[str, Any]:
+    return {
+        "schema_version": LANE_METADATA_VERSION,
+        "lane": lane,
+        "lane_truth": lane_truth,
+        "available": available,
+        "readiness": readiness,
+        "summary": summary,
+        "blockers": _list_of_text(blockers or [], limit=8),
+        "production_ready": production_ready,
+        "hero_ready": hero_ready,
+        "world_class_ready": world_class_ready,
+    }
+
+
+def _build_handoff_manifest(
+    *,
+    lane: str,
+    world_source: Dict[str, Any],
+    ready: bool,
+    summary: str,
+    blockers: List[str] | None = None,
+) -> Dict[str, Any]:
+    return {
+        "schema_version": HANDOFF_MANIFEST_VERSION,
+        "lane": lane,
+        "ready": ready,
+        "summary": summary,
+        "targets": list(HANDOFF_TARGETS),
+        "source_kind": str(world_source.get("kind") or "").strip() or None,
+        "blockers": _list_of_text(blockers or [], limit=8),
+    }
 
 
 class StorageBackend:
@@ -72,6 +204,13 @@ class StorageBackend:
 
     def mode(self) -> str:
         raise NotImplementedError
+
+
+class StorageBackendError(RuntimeError):
+    def __init__(self, detail: str, *, status_code: int = 503) -> None:
+        super().__init__(detail)
+        self.detail = detail
+        self.status_code = status_code
 
 
 class LocalStorageBackend(StorageBackend):
@@ -120,7 +259,10 @@ class BlobStorageBackend(StorageBackend):
         return f"{self.base_url}/{encoded_path}{suffix}"
 
     def write_bytes(self, path: str, data: bytes) -> None:
-        vercel_blob.put(path, data, {"allowOverwrite": True}, verbose=False)
+        try:
+            vercel_blob.put(path, data, {"allowOverwrite": True}, verbose=False)
+        except Exception as exc:
+            raise StorageBackendError(f"Blob storage write failed: {exc}", status_code=502) from exc
 
     def read_bytes(self, path: str) -> bytes:
         request = urllib.request.Request(self._blob_url(path, fresh=True), method="GET")
@@ -130,7 +272,12 @@ class BlobStorageBackend(StorageBackend):
         except urllib.error.HTTPError as exc:
             if exc.code == 404:
                 raise FileNotFoundError(path) from exc
-            raise
+            raise StorageBackendError(
+                f"Blob storage read failed ({exc.code}): {exc.reason or 'request failed'}",
+                status_code=502,
+            ) from exc
+        except Exception as exc:
+            raise StorageBackendError(f"Blob storage read failed: {exc}", status_code=502) from exc
 
     def exists(self, path: str) -> bool:
         try:
@@ -146,16 +293,231 @@ class BlobStorageBackend(StorageBackend):
         return "blob"
 
 
-def _storage_backend() -> StorageBackend:
+class UnavailableStorageBackend(StorageBackend):
+    def __init__(self, mode: str, detail: str) -> None:
+        self._mode = mode
+        self.detail = detail
+
+    def _raise(self) -> None:
+        raise StorageBackendError(self.detail, status_code=503)
+
+    def write_bytes(self, path: str, data: bytes) -> None:
+        self._raise()
+
+    def read_bytes(self, path: str) -> bytes:
+        self._raise()
+
+    def exists(self, path: str) -> bool:
+        self._raise()
+
+    def mode(self) -> str:
+        return self._mode
+
+
+PUBLIC_WRITE_STORAGE_CHECKLIST = [
+    "Configure BLOB_READ_WRITE_TOKEN for this public deployment.",
+    "Redeploy the public MVP backend so uploads, scenes, and generated assets persist durably.",
+    "Verify /api/mvp/setup/status reports storage_mode=blob before re-enabling write lanes.",
+]
+
+PUBLIC_WRITE_STORAGE_ERROR_CHECKLIST = [
+    "Confirm the blob storage runtime is installed and the configured token is valid for this deployment.",
+    "Fix the blob storage initialization failure and redeploy the public MVP backend.",
+    "Verify /api/mvp/setup/status reports storage_mode=blob before re-enabling write lanes.",
+]
+
+
+def _storage_backend() -> tuple[StorageBackend, Dict[str, Any]]:
     blob_token = os.getenv("BLOB_READ_WRITE_TOKEN", "").strip()
     if blob_token:
-        return BlobStorageBackend()
+        try:
+            backend = BlobStorageBackend()
+        except Exception as exc:
+            detail = f"Public MVP writes are disabled because configured blob storage is unavailable in this deployment: {exc}"
+            return (
+                UnavailableStorageBackend("unavailable", detail),
+                {
+                    "mode": "unavailable",
+                    "configured_mode": "blob",
+                    "runtime_status": "error",
+                    "durable": False,
+                    "public_write_safe": False,
+                    "summary": (
+                        "Blob storage is configured for this public deployment, but initialization failed, "
+                        "so write lanes stay safety-disabled until that runtime issue is fixed."
+                    ),
+                    "availability_reason": detail,
+                    "required_env": [],
+                    "checklist": PUBLIC_WRITE_STORAGE_ERROR_CHECKLIST,
+                    "initialization_error": str(exc),
+                },
+            )
+        return (
+            backend,
+            {
+                "mode": "blob",
+                "configured_mode": "blob",
+                "runtime_status": "ready",
+                "durable": True,
+                "public_write_safe": True,
+                "summary": "Durable blob storage is configured for public MVP uploads, scenes, and generated assets.",
+                "availability_reason": None,
+                "required_env": [],
+                "checklist": PUBLIC_WRITE_STORAGE_CHECKLIST,
+                "initialization_error": None,
+            },
+        )
 
     local_root = Path(os.getenv("GAUSET_MVP_STORAGE_ROOT", "/tmp/gauset-mvp-storage")).resolve()
-    return LocalStorageBackend(local_root)
+    return (
+        LocalStorageBackend(local_root),
+        {
+            "mode": "filesystem",
+            "configured_mode": "filesystem",
+            "runtime_status": "ready",
+            "durable": False,
+            "public_write_safe": False,
+            "summary": (
+                "Filesystem storage is not durable on the public MVP deployment, so write lanes are safety-disabled "
+                "until blob storage is configured."
+            ),
+            "availability_reason": (
+                "Public MVP writes are disabled because this deployment is using filesystem storage. "
+                "Configure durable blob storage before enabling uploads, preview generation, asset extraction, "
+                "capture sessions, scene saves, reviews, or comments."
+            ),
+            "required_env": ["BLOB_READ_WRITE_TOKEN"],
+            "checklist": PUBLIC_WRITE_STORAGE_CHECKLIST,
+            "initialization_error": None,
+        },
+    )
 
 
-STORAGE = _storage_backend()
+STORAGE, STORAGE_STATUS = _storage_backend()
+
+
+def _public_storage_write_safe() -> bool:
+    return bool(STORAGE_STATUS["public_write_safe"])
+
+
+def _public_storage_block_reason() -> str:
+    return str(STORAGE_STATUS["availability_reason"] or "Public MVP writes are disabled in this deployment.")
+
+
+def _public_storage_summary() -> str:
+    return str(STORAGE_STATUS["summary"])
+
+
+def _storage_status_payload() -> Dict[str, Any]:
+    return {
+        "mode": STORAGE_STATUS["mode"],
+        "configured_mode": STORAGE_STATUS["configured_mode"],
+        "runtime_status": STORAGE_STATUS["runtime_status"],
+        "durable": STORAGE_STATUS["durable"],
+        "public_write_safe": STORAGE_STATUS["public_write_safe"],
+        "summary": STORAGE_STATUS["summary"],
+        "availability_reason": STORAGE_STATUS["availability_reason"],
+        "required_env": list(STORAGE_STATUS["required_env"]),
+        "checklist": list(STORAGE_STATUS["checklist"]),
+        "initialization_error": STORAGE_STATUS["initialization_error"],
+    }
+
+
+def _require_public_write_storage() -> None:
+    if _public_storage_write_safe():
+        return
+    raise HTTPException(status_code=503, detail=_public_storage_block_reason())
+
+
+def _worker_token() -> str:
+    return (
+        os.getenv("GAUSET_BACKEND_WORKER_TOKEN", "").strip()
+        or os.getenv("GAUSET_IMAGE_TO_SPLAT_BACKEND_TOKEN", "").strip()
+        or os.getenv("GAUSET_WORKER_TOKEN", "").strip()
+    )
+
+
+def _require_worker_auth(request: Request) -> None:
+    expected = _worker_token()
+    if not expected:
+        return
+
+    authorization = request.headers.get("authorization", "").strip()
+    explicit = request.headers.get("x-gauset-worker-token", "").strip()
+    bearer = authorization[7:].strip() if authorization.lower().startswith("bearer ") else ""
+    provided = explicit or bearer
+    if provided != expected:
+        raise HTTPException(status_code=401, detail="Unauthorized worker request")
+
+
+def _job_context_from_request(request: Request) -> Dict[str, Any]:
+    return {
+        "studio_id": request.headers.get("x-gauset-studio-id", "").strip() or None,
+        "user_id": request.headers.get("x-gauset-user-id", "").strip() or None,
+    }
+
+
+def _parse_job_timestamp(value: Any) -> Optional[datetime]:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    if not normalized:
+        return None
+    if normalized.endswith("Z"):
+        normalized = normalized[:-1] + "+00:00"
+    try:
+        return datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+
+
+def _normalize_host(value: Optional[str]) -> str:
+    normalized = str(value or "").strip()
+    if normalized.startswith("http://"):
+        normalized = normalized[7:]
+    elif normalized.startswith("https://"):
+        normalized = normalized[8:]
+    return normalized.rstrip("/")
+
+
+def _shorten_sha(value: Optional[str]) -> str:
+    normalized = str(value or "").strip()
+    return normalized[:7] if normalized else "no-sha"
+
+
+def _deployment_fingerprint() -> Dict[str, str]:
+    commit_sha = (
+        os.getenv("VERCEL_GIT_COMMIT_SHA", "").strip()
+        or os.getenv("GIT_COMMIT_SHA", "").strip()
+        or os.getenv("NEXT_PUBLIC_GIT_COMMIT_SHA", "").strip()
+    )
+    commit_ref = (
+        os.getenv("VERCEL_GIT_COMMIT_REF", "").strip()
+        or os.getenv("GIT_BRANCH", "").strip()
+        or os.getenv("NEXT_PUBLIC_GIT_COMMIT_REF", "").strip()
+    )
+    vercel_env = os.getenv("VERCEL_ENV", "").strip()
+    deployment_host = (
+        _normalize_host(os.getenv("VERCEL_PROJECT_PRODUCTION_URL"))
+        or _normalize_host(os.getenv("VERCEL_URL"))
+        or _normalize_host(os.getenv("NEXT_PUBLIC_VERCEL_URL"))
+        or _normalize_host(os.getenv("NEXT_PUBLIC_GAUSET_APP_HOST"))
+        or "local"
+    )
+    deployment_id = os.getenv("VERCEL_DEPLOYMENT_ID", "").strip()
+    runtime_target = "vercel" if os.getenv("VERCEL") == "1" else "local-production" if os.getenv("NODE_ENV") == "production" else "local-development"
+    commit_short = _shorten_sha(commit_sha)
+    build_label = " · ".join(part for part in [deployment_host, vercel_env or runtime_target, commit_short] if part)
+    return {
+        "build_label": build_label,
+        "commit_ref": commit_ref,
+        "commit_sha": commit_sha,
+        "commit_short": commit_short,
+        "deployment_host": deployment_host,
+        "deployment_id": deployment_id,
+        "runtime_target": runtime_target,
+        "vercel_env": vercel_env,
+    }
 
 CAPTURE_MIN_IMAGES = 8
 CAPTURE_RECOMMENDED_IMAGES = 12
@@ -845,6 +1207,10 @@ def _job_path(job_id: str) -> str:
     return f"jobs/{job_id}.json"
 
 
+def _job_index_path() -> str:
+    return "jobs/index.json"
+
+
 def _scene_path(scene_id: str) -> str:
     return f"scenes/{scene_id}/scene.json"
 
@@ -903,11 +1269,50 @@ def _asset_urls(asset_id: str) -> Dict[str, str]:
 
 
 def _build_upload_response(record: Dict[str, Any]) -> Dict[str, Any]:
+    source_provenance = record.get("source_provenance")
+    if not isinstance(source_provenance, dict):
+        source_provenance = _build_source_provenance(record)
+
+    world_source = record.get("world_source")
+    if not isinstance(world_source, dict):
+        world_source = _build_world_source(
+            lane="upload",
+            ingest_channel="upload",
+            input_strategy="1 uploaded source image",
+            primary_source=source_provenance,
+            upstream_sources=[source_provenance],
+        )
+
+    lane_metadata = record.get("lane_metadata")
+    if not isinstance(lane_metadata, dict):
+        lane_metadata = _build_lane_metadata(
+            lane="upload",
+            lane_truth="single_image_upload",
+            available=True,
+            readiness="ready",
+            summary="Source image is ready for downstream generation and asset creation.",
+            blockers=[],
+        )
+
+    handoff_manifest = record.get("handoff_manifest")
+    if not isinstance(handoff_manifest, dict):
+        handoff_manifest = _build_handoff_manifest(
+            lane="upload",
+            world_source=world_source,
+            ready=True,
+            summary="Uploaded source image is ready for downstream claimability.",
+            blockers=[],
+        )
+
     payload: Dict[str, Any] = {
         "image_id": record["image_id"],
         "filename": record.get("stored_filename") or record.get("filename"),
         "filepath": record.get("storage_path") or record.get("filepath"),
         "url": record.get("url") or f"/storage/{record.get('storage_path')}",
+        "source_provenance": source_provenance,
+        "world_source": world_source,
+        "lane_metadata": lane_metadata,
+        "handoff_manifest": handoff_manifest,
     }
     for key in ("source_type", "provider", "model", "prompt", "generation_job_id"):
         if record.get(key) is not None:
@@ -941,6 +1346,29 @@ def _write_upload_record(
         "prompt": prompt,
         "generation_job_id": generation_job_id,
     }
+    payload["source_provenance"] = _build_source_provenance(payload)
+    payload["world_source"] = _build_world_source(
+        lane="upload",
+        ingest_channel="upload",
+        input_strategy="1 uploaded source image",
+        primary_source=payload["source_provenance"],
+        upstream_sources=[payload["source_provenance"]],
+    )
+    payload["lane_metadata"] = _build_lane_metadata(
+        lane="upload",
+        lane_truth="single_image_upload",
+        available=True,
+        readiness="ready",
+        summary="Source image is ready for downstream generation and asset creation.",
+        blockers=[],
+    )
+    payload["handoff_manifest"] = _build_handoff_manifest(
+        lane="upload",
+        world_source=payload["world_source"],
+        ready=True,
+        summary="Uploaded source image is ready for downstream claimability.",
+        blockers=[],
+    )
     _write_json(_upload_meta_path(image_id), payload)
     return payload
 
@@ -1103,7 +1531,15 @@ def _load_upload_record(image_id: str) -> Dict[str, Any]:
     upload_meta_path = _upload_meta_path(image_id)
     if not STORAGE.exists(upload_meta_path):
         raise HTTPException(status_code=404, detail="Uploaded image not found")
-    return _read_json(upload_meta_path)
+    payload = _read_json(upload_meta_path)
+    if not isinstance(payload, dict):
+        payload = {}
+    payload["source_provenance"] = (
+        payload.get("source_provenance")
+        if isinstance(payload.get("source_provenance"), dict)
+        else _build_source_provenance(payload)
+    )
+    return payload
 
 
 def _load_scene_review(scene_id: str) -> Dict[str, Any]:
@@ -1135,8 +1571,77 @@ def _load_version_payload(scene_id: str, version_id: str) -> Dict[str, Any]:
     return _read_json(path)
 
 
+def _load_job_index() -> List[Dict[str, Any]]:
+    path = _job_index_path()
+    if not STORAGE.exists(path):
+        return []
+    payload = _read_json(path)
+    return payload if isinstance(payload, list) else []
+
+
+def _job_index_summary(payload: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "id": str(payload.get("id") or ""),
+        "type": str(payload.get("type") or ""),
+        "status": str(payload.get("status") or ""),
+        "studio_id": payload.get("studio_id"),
+        "user_id": payload.get("user_id"),
+        "image_id": payload.get("image_id"),
+        "created_at": payload.get("created_at"),
+        "updated_at": payload.get("updated_at"),
+    }
+
+
+def _job_matches_filters(
+    payload: Dict[str, Any],
+    *,
+    studio_id: str | None,
+    statuses: set[str],
+    types: set[str],
+    created_gte: Optional[datetime],
+    updated_gte: Optional[datetime],
+    include_missing_context: bool,
+) -> bool:
+    payload_studio_id = str(payload.get("studio_id") or "").strip() or None
+    payload_status = str(payload.get("status") or "").strip()
+    payload_type = str(payload.get("type") or "").strip()
+
+    if studio_id:
+        if payload_studio_id != studio_id:
+            if not include_missing_context or payload_studio_id is not None:
+                return False
+        elif payload_studio_id is None and not include_missing_context:
+            return False
+
+    if statuses and payload_status not in statuses:
+        return False
+
+    if types and payload_type not in types:
+        return False
+
+    created_at = _parse_job_timestamp(payload.get("created_at"))
+    updated_at = _parse_job_timestamp(payload.get("updated_at"))
+    if created_gte and (created_at is None or created_at < created_gte):
+        return False
+    if updated_gte and (updated_at is None or updated_at < updated_gte):
+        return False
+
+    return True
+
+
 def _save_job(job_id: str, payload: Dict[str, Any]) -> None:
     _write_json(_job_path(job_id), payload)
+    summaries = [entry for entry in _load_job_index() if str(entry.get("id") or "") != job_id]
+    summaries.append(_job_index_summary(payload))
+    summaries.sort(
+        key=lambda entry: (
+            str(entry.get("updated_at") or ""),
+            str(entry.get("created_at") or ""),
+            str(entry.get("id") or ""),
+        ),
+        reverse=True,
+    )
+    _write_json(_job_index_path(), summaries)
 
 
 def _finalize_generated_image_job(job_payload: Dict[str, Any], provider_job: Any) -> Dict[str, Any]:
@@ -1311,6 +1816,57 @@ def _finalize_environment_job(job_payload: Dict[str, Any], provider_job: Any) ->
     if "cameras" not in stored_keys and not STORAGE.exists(paths["cameras"]):
         STORAGE.write_bytes(paths["cameras"], b"[]\n")
 
+    source_provenance = job_payload.get("source_provenance")
+    if not isinstance(source_provenance, dict):
+        source_provenance = _build_source_provenance(
+            {
+                "image_id": job_payload.get("image_id", ""),
+                "source_type": "upload",
+                "filename": "",
+                "source_id": job_payload.get("image_id", ""),
+            }
+        )
+
+    world_source = job_payload.get("world_source")
+    if not isinstance(world_source, dict):
+        world_source = _build_world_source(
+            lane="preview",
+            ingest_channel="generate_environment",
+            input_strategy="1 photo",
+            primary_source=source_provenance,
+            upstream_sources=[source_provenance],
+            frame_count=1,
+        )
+
+    lane_metadata = job_payload.get("lane_metadata")
+    if not isinstance(lane_metadata, dict):
+        lane_metadata = _build_lane_metadata(
+            lane="preview",
+            lane_truth="single_image_lrm_preview",
+            available=True,
+            readiness="ready",
+            summary="Single-image environment generation has completed.",
+            blockers=[],
+        )
+    else:
+        lane_metadata = {**lane_metadata, "readiness": "ready", "summary": "Single-image environment generation has completed."}
+
+    handoff_manifest = job_payload.get("handoff_manifest")
+    if not isinstance(handoff_manifest, dict):
+        handoff_manifest = _build_handoff_manifest(
+            lane="preview",
+            world_source=world_source,
+            ready=True,
+            summary="Single-image environment generation ready for downstream handoff.",
+            blockers=[],
+        )
+
+    job_payload["source_type"] = str(job_payload.get("source_type") or source_provenance.get("source_type") or "upload")
+    job_payload["source_provenance"] = source_provenance
+    job_payload["world_source"] = world_source
+    job_payload["lane_metadata"] = lane_metadata
+    job_payload["handoff_manifest"] = handoff_manifest
+
     metadata = _normalize_environment_metadata(scene_id)
     result = {
         "scene_id": scene_id,
@@ -1329,6 +1885,11 @@ def _finalize_environment_job(job_payload: Dict[str, Any], provider_job: Any) ->
         "viewer_renderer": metadata.get("rendering", {}).get("viewer_renderer", "sharp_gaussian_direct"),
         "training_backend": metadata.get("training_backend", "ml_sharp_gpu_worker"),
         "provider": job_payload.get("environment_provider"),
+        "source_type": job_payload.get("source_type"),
+        "source_provenance": source_provenance,
+        "world_source": world_source,
+        "lane_metadata": lane_metadata,
+        "handoff_manifest": handoff_manifest,
     }
     job_payload["status"] = "completed"
     job_payload["error"] = None
@@ -1401,8 +1962,65 @@ class CaptureSessionFramesRequest(BaseModel):
 
 class SceneSaveRequest(BaseModel):
     scene_id: str
-    scene_graph: Dict[str, Any]
+    scene_graph: Dict[str, Any] | None = None
+    scene_document: Dict[str, Any] | None = None
     source: str = "manual"
+
+
+def _normalize_scene_save_payload(
+    *,
+    scene_graph: Dict[str, Any] | None,
+    scene_document: Dict[str, Any] | None,
+) -> tuple[Dict[str, Any], Dict[str, Any]]:
+    raw_scene_document = scene_document if isinstance(scene_document, dict) else None
+    raw_scene_graph = scene_graph if isinstance(scene_graph, dict) else None
+    canonical_scene = raw_scene_document or raw_scene_graph or {}
+    compatibility_scene_graph = raw_scene_graph if raw_scene_graph is not None else _normalize_scene_graph(canonical_scene)
+    return canonical_scene, compatibility_scene_graph
+
+
+def _build_generation_provenance_payload(
+    *,
+    upload_record: Dict[str, Any],
+    lane: str,
+    ingest_channel: str,
+    input_strategy: str,
+) -> Dict[str, Any]:
+    source_provenance = upload_record.get("source_provenance")
+    if not isinstance(source_provenance, dict):
+        source_provenance = _build_source_provenance(upload_record)
+
+    world_source = _build_world_source(
+        lane=lane,
+        ingest_channel=ingest_channel,
+        input_strategy=input_strategy,
+        primary_source=source_provenance,
+        upstream_sources=[source_provenance],
+    )
+    lane_truth = f"single_image_{lane}"
+    if lane == "preview":
+        lane_truth = "single_image_lrm_preview"
+
+    return {
+        "source_type": upload_record.get("source_type") or "upload",
+        "source_provenance": source_provenance,
+        "world_source": world_source,
+        "lane_metadata": _build_lane_metadata(
+            lane=lane,
+            lane_truth=lane_truth,
+            available=True,
+            readiness="processing",
+            summary=f"Single-item {lane} job is processing.",
+            blockers=["Job still processing."],
+        ),
+        "handoff_manifest": _build_handoff_manifest(
+            lane=lane,
+            world_source=world_source,
+            ready=False,
+            summary=f"{lane.title()} handoff remains blocked until processing completes.",
+            blockers=["Processing is still in progress."],
+        ),
+    }
 
 
 class VersionCommentRequest(BaseModel):
@@ -1438,30 +2056,169 @@ def _coverage_percent(frame_count: int, target_images: int) -> int:
     return min(100, round((frame_count / target_images) * 100))
 
 
-def _capture_session_payload(target_images: int) -> Dict[str, Any]:
-    recommended_images = _clamp_target_images(target_images)
+def _build_capture_frame_record(image_id: str) -> Dict[str, Any]:
+    upload_record = _load_upload_record(image_id)
+    storage_path = str(upload_record["storage_path"])
+    filename = upload_record.get("stored_filename") or upload_record.get("filename") or Path(storage_path).name
+    source_provenance = upload_record.get("source_provenance")
+    if not isinstance(source_provenance, dict):
+        source_provenance = _build_source_provenance(upload_record)
     return {
-        "session_id": f"capture_{str(uuid.uuid4())[:8]}",
+        "image_id": image_id,
+        "filename": filename,
+        "url": upload_record.get("url") or f"/storage/{storage_path}",
+        "added_at": _utc_now(),
+        "source_provenance": source_provenance,
+    }
+
+
+def _hash_uploaded_image(image_id: str) -> str:
+    upload_record = _load_upload_record(image_id)
+    return hashlib.sha1(STORAGE.read_bytes(str(upload_record["storage_path"]))).hexdigest()
+
+
+def _capture_session_payload(session: Dict[str, Any]) -> Dict[str, Any]:
+    frames = session.get("frames", [])
+    frame_hashes = [
+        _hash_uploaded_image(str(frame["image_id"]))
+        for frame in frames
+        if isinstance(frame, dict) and str(frame.get("image_id") or "").strip()
+    ]
+    unique_hashes = list(dict.fromkeys(frame_hashes))
+    frame_count = len(frames)
+    unique_frame_count = len(unique_hashes)
+    duplicate_frames = max(frame_count - unique_frame_count, 0)
+    duplicate_ratio = duplicate_frames / frame_count if frame_count else 0.0
+
+    blockers: List[str] = []
+    if frame_count >= CAPTURE_MIN_IMAGES and unique_frame_count < CAPTURE_MIN_IMAGES:
+        blockers.append(
+            f"Only {unique_frame_count} unique views are available; add more distinct camera positions before reconstruction."
+        )
+    if duplicate_frames > 0 and frame_count >= CAPTURE_MIN_IMAGES:
+        blockers.append("Duplicate or near-identical frames are in the capture set. Replace them with new overlap views.")
+
+    ready = frame_count >= CAPTURE_MIN_IMAGES and unique_frame_count >= CAPTURE_MIN_IMAGES
+    status = "ready" if ready else "blocked" if blockers else "collecting"
+    recommended_images = _clamp_target_images(
+        int(session.get("target_images") or session.get("recommended_images") or CAPTURE_RECOMMENDED_IMAGES)
+    )
+    coverage_percent = _coverage_percent(frame_count, recommended_images)
+
+    session_id = str(session.get("session_id") or f"capture_{str(uuid.uuid4())[:8]}")
+    upstream_sources: List[Dict[str, Any]] = [
+        frame["source_provenance"]
+        for frame in frames
+        if isinstance(frame, dict)
+        and isinstance(frame.get("source_provenance"), dict)
+        and frame.get("source_provenance")
+    ]
+    source_provenance = session.get("source_provenance")
+    if not isinstance(source_provenance, dict):
+        source_provenance = upstream_sources[0] if upstream_sources else None
+
+    world_source = session.get("world_source")
+    if not isinstance(world_source, dict):
+        world_source = (
+            _build_world_source(
+                lane="reconstruction",
+                ingest_channel="capture_session",
+                input_strategy="8-32 overlapping photos or short orbit video",
+                primary_source=source_provenance or {"source_type": "upload", "source_id": "", "filename": ""},
+                upstream_sources=upstream_sources,
+                session_id=session_id,
+                frame_count=frame_count,
+            )
+            if source_provenance or upstream_sources
+            else None
+        )
+    else:
+        world_source = world_source if world_source else None
+
+    readiness = "collecting"
+    if blockers:
+        readiness = "blocked"
+    if ready:
+        readiness = "ready"
+    lane_metadata = _build_lane_metadata(
+        lane="reconstruction",
+        lane_truth="single_image_preview_reconstruction_session",
+        available=True,
+        readiness=readiness,
+        summary="Capture reconstruction session is collecting frames." if not ready else "Capture session is ready for reconstruction.",
+        blockers=blockers,
+    )
+    handoff_manifest = _build_handoff_manifest(
+        lane="reconstruction",
+        world_source=world_source
+        or _build_world_source(
+            lane="reconstruction",
+            ingest_channel="capture_session",
+            input_strategy="8-32 overlapping photos or short orbit video",
+            primary_source=source_provenance or {"source_type": "upload", "source_id": "", "filename": ""},
+            upstream_sources=upstream_sources,
+            session_id=session_id,
+            frame_count=frame_count,
+        ),
+        ready=ready,
+        summary="Capture handoff remains blocked until a reconstruction lane output can be produced.",
+        blockers=blockers,
+    )
+
+    payload = {
+        "session_id": session_id,
         "lane": "reconstruction",
-        "status": "collecting",
-        "created_at": _utc_now(),
+        "status": status,
+        "created_at": str(session.get("created_at") or _utc_now()),
         "updated_at": _utc_now(),
         "minimum_images": CAPTURE_MIN_IMAGES,
         "recommended_images": recommended_images,
         "max_images": CAPTURE_MAX_IMAGES,
-        "frame_count": 0,
-        "coverage_percent": 0,
-        "ready_for_reconstruction": False,
-        "frames": [],
+        "frame_count": frame_count,
+        "coverage_percent": coverage_percent,
+        "ready_for_reconstruction": ready,
+        "frames": frames,
         "guidance": _capture_guidance(),
+        "reconstruction_blockers": blockers,
+        "source_provenance": source_provenance,
+        "world_source": world_source,
+        "lane_metadata": lane_metadata,
+        "handoff_manifest": handoff_manifest,
+        "quality_summary": {
+            "score": round(max(0.0, 10.0 - duplicate_ratio * 10.0), 1),
+            "coverage_score": round(min(10.0, frame_count / max(CAPTURE_MIN_IMAGES, 1) * 10.0), 1),
+            "band": "capture_ready" if ready else "capture_blocked" if blockers else "capture_building",
+            "readiness": "ready" if ready else "blocked" if blockers else "building",
+            "frame_count": frame_count,
+            "unique_frame_count": unique_frame_count,
+            "duplicate_ratio": round(duplicate_ratio, 4),
+            "sharp_frame_count": unique_frame_count,
+            "duplicate_frames": duplicate_frames,
+            "warnings": blockers,
+            "recommended_next_actions": (
+                ["Start reconstruction."] if ready else ["Collect more overlapping views."]
+            ),
+            "reconstruction_gate": {
+                "allowed": ready,
+                "label": "ready" if ready else "blocked" if blockers else "building",
+                "unique_frame_count": unique_frame_count,
+                "minimum_sharp_frames": CAPTURE_MIN_IMAGES,
+                "blockers": blockers,
+            },
+        },
     }
+    session.update(payload)
+    return payload
 
 
 def _load_capture_session(session_id: str) -> Dict[str, Any]:
     path = _capture_session_path(session_id)
     if not STORAGE.exists(path):
         raise HTTPException(status_code=404, detail="Capture session not found")
-    return _read_json(path)
+    payload = _read_json(path)
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=500, detail="Capture session payload is invalid")
+    return _capture_session_payload(payload)
 
 
 def _save_capture_session(payload: Dict[str, Any]) -> None:
@@ -1476,6 +2233,14 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(StorageBackendError)
+async def handle_storage_backend_error(request: Request, exc: StorageBackendError) -> Response:
+    scope_path = str(request.scope.get("path") or "")
+    if scope_path.startswith("/storage/"):
+        return Response(content=exc.detail, media_type="text/plain", status_code=exc.status_code)
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
 
 @app.middleware("http")
@@ -1498,46 +2263,75 @@ async def health() -> Dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/deployment")
+async def deployment() -> Dict[str, Any]:
+    return {"status": "ok", "fingerprint": _deployment_fingerprint()}
+
+
 @app.get("/setup/status")
 async def setup_status() -> Dict[str, Any]:
     provider_summary = get_provider_registry().image_provider_summary()
     environment_bridge = get_environment_bridge_registry().status_payload()
     bridge_available = bool(environment_bridge.get("available"))
+    public_write_safe = _public_storage_write_safe()
+    preview_available = public_write_safe
+    asset_available = public_write_safe
     preview_summary = (
         "Generate a dense single-image Gaussian preview through the ML-Sharp GPU worker."
-        if bridge_available
+        if public_write_safe and bridge_available
         else "Generate a single-photo Gaussian preview for nearby camera moves."
     )
+    if not public_write_safe:
+        preview_summary = "Preview writes are disabled until durable blob storage is operational for this public deployment."
     preview_truth = (
         "This output is produced by a single-image Gaussian model through a dedicated GPU worker. Hidden geometry can still be hallucinated."
-        if bridge_available
+        if public_write_safe and bridge_available
         else "This output is a synthesized preview, not a faithful multi-view reconstruction."
     )
+    asset_summary = "Generate a hero prop mesh from one reference image."
+    asset_truth = "This lane is object-focused generation, not environment reconstruction."
+    if not public_write_safe:
+        asset_summary = "Asset extraction is disabled until durable blob storage is operational for this public deployment."
+        asset_truth = "This lane is safety-disabled because generated files cannot persist durably in the current public storage mode."
     backend_truth = (
-        "This deployment dispatches single-image preview jobs to a dedicated ML-Sharp GPU worker and stores the resulting Gaussian splats locally."
-        if bridge_available
+        "This deployment dispatches single-image preview jobs to a dedicated ML-Sharp GPU worker and stores the resulting Gaussian splats in durable public blob storage."
+        if public_write_safe and bridge_available
         else "This deployment provides single-photo preview and asset generation. Production-grade multi-view Gaussian reconstruction requires a separate GPU worker."
     )
+    if not public_write_safe:
+        backend_truth = _public_storage_block_reason()
     return {
         "status": "ok",
         "python_version": os.sys.version.split()[0],
         "backend": {
             "label": "Production Preview Backend",
-            "kind": "image-to-splat-bridge-and-asset" if bridge_available else "single-image-preview-and-asset",
+            "kind": (
+                "image-to-splat-bridge-and-asset"
+                if public_write_safe and bridge_available
+                else "single-image-preview-and-asset"
+                if public_write_safe
+                else "public-preview-read-only-safety-mode"
+            ),
             "deployment": "vercel",
             "truth": backend_truth,
-            "lane_truth": "public_single_image_lrm_and_asset_only" if bridge_available else "public_preview_and_asset_only",
+            "lane_truth": (
+                "public_single_image_lrm_and_asset_only"
+                if public_write_safe and bridge_available
+                else "public_preview_and_asset_only"
+                if public_write_safe
+                else "public_write_lanes_disabled_unsafe_storage"
+            ),
         },
         "lane_truth": {
-            "preview": "single_image_lrm_preview" if bridge_available else "preview_only_single_image",
+            "preview": "single_image_lrm_preview" if public_write_safe and bridge_available else "preview_only_single_image",
             "reconstruction": "gpu_worker_not_connected",
             "asset": "single_image_asset",
         },
         "reconstruction_backend": {
-            "name": "ml_sharp_gpu_worker" if bridge_available else "gpu_worker_missing",
-            "kind": "remote_single_image_gaussian_worker" if bridge_available else "unavailable_in_public_preview_backend",
-            "gpu_worker_connected": bridge_available,
-            "native_gaussian_training": bridge_available,
+            "name": "gpu_worker_missing",
+            "kind": "unavailable_in_public_preview_backend",
+            "gpu_worker_connected": False,
+            "native_gaussian_training": False,
             "world_class_ready": False,
         },
         "benchmark_status": {
@@ -1546,19 +2340,20 @@ async def setup_status() -> Dict[str, Any]:
             "summary": "The public preview deployment is not benchmarked as a real-space reconstruction system.",
         },
         "release_gates": {
-            "truthful_preview_lane": True,
-            "gpu_reconstruction_connected": bridge_available,
-            "native_gaussian_training": bridge_available,
+            "truthful_preview_lane": preview_available,
+            "gpu_reconstruction_connected": False,
+            "native_gaussian_training": False,
             "holdout_metrics": False,
             "market_benchmarking": False,
+            "durable_public_storage": public_write_safe,
         },
         "capabilities": {
             "preview": {
-                "available": True,
-                "label": "Image-to-Splat Preview" if bridge_available else "Instant Preview",
+                "available": preview_available,
+                "label": "Image-to-Splat Preview" if public_write_safe and bridge_available else "Instant Preview",
                 "summary": preview_summary,
                 "truth": preview_truth,
-                "lane_truth": "single_image_lrm_preview" if bridge_available else "preview_only_single_image",
+                "lane_truth": "single_image_lrm_preview" if public_write_safe and bridge_available else "preview_only_single_image",
                 "input_strategy": "1 photo",
                 "min_images": 1,
                 "recommended_images": 1,
@@ -1574,10 +2369,10 @@ async def setup_status() -> Dict[str, Any]:
                 "recommended_images": CAPTURE_RECOMMENDED_IMAGES,
             },
             "asset": {
-                "available": True,
+                "available": asset_available,
                 "label": "Single-Image Asset",
-                "summary": "Generate a hero prop mesh from one reference image.",
-                "truth": "This lane is object-focused generation, not environment reconstruction.",
+                "summary": asset_summary,
+                "truth": asset_truth,
                 "lane_truth": "single_image_asset",
                 "input_strategy": "1 photo",
                 "min_images": 1,
@@ -1590,7 +2385,8 @@ async def setup_status() -> Dict[str, Any]:
             "max_images": CAPTURE_MAX_IMAGES,
             "guidance": _capture_guidance(),
         },
-        "storage_mode": STORAGE.mode(),
+        "storage_mode": STORAGE_STATUS["mode"],
+        "storage": _storage_status_payload(),
         "generator": {
             "environment": "ml_sharp_gpu_worker" if bridge_available else "gauset-depth-synth-v1",
             "asset": "gauset-relief-mesh-v1",
@@ -1628,6 +2424,7 @@ async def list_generation_providers() -> Dict[str, Any]:
 
 @app.post("/upload")
 async def upload_image(file: UploadFile = File(...)) -> Dict[str, Any]:
+    _require_public_write_storage()
     if not file.filename:
         raise HTTPException(status_code=400, detail="Missing filename in upload")
 
@@ -1643,7 +2440,9 @@ async def upload_image(file: UploadFile = File(...)) -> Dict[str, Any]:
 
 
 @app.post("/generate/image")
-async def generate_image(request: GenerateImageRequest) -> Dict[str, Any]:
+async def generate_image(request: GenerateImageRequest, http_request: Request) -> Dict[str, Any]:
+    _require_public_write_storage()
+    job_context = _job_context_from_request(http_request)
     prompt = request.prompt.strip()
     if not prompt:
         raise HTTPException(status_code=400, detail="Prompt is required")
@@ -1712,6 +2511,7 @@ async def generate_image(request: GenerateImageRequest) -> Dict[str, Any]:
         "id": job_id,
         "type": "generated_image",
         "status": "processing",
+        **job_context,
         "created_at": _utc_now(),
         "updated_at": _utc_now(),
         "error": None,
@@ -1761,13 +2561,17 @@ async def generate_image(request: GenerateImageRequest) -> Dict[str, Any]:
 
 
 @app.post("/generate/environment")
-async def generate_environment(request: GenerateRequest) -> Dict[str, Any]:
+async def generate_environment(request: GenerateRequest, http_request: Request) -> Dict[str, Any]:
+    _require_public_write_storage()
+    job_context = _job_context_from_request(http_request)
     scene_id = f"scene_{str(uuid.uuid4())[:8]}"
+    image_record = None
     job_payload = {
         "id": scene_id,
         "type": "environment",
         "status": "processing",
         "image_id": request.image_id,
+        **job_context,
         "created_at": _utc_now(),
         "updated_at": _utc_now(),
         "error": None,
@@ -1777,10 +2581,19 @@ async def generate_environment(request: GenerateRequest) -> Dict[str, Any]:
         "remote_scene_id": None,
         "warnings": [],
     }
+    image_record = None
     _save_job(scene_id, job_payload)
 
     try:
         upload_record = _load_upload_record(request.image_id)
+        image_record = upload_record
+        provenance_payload = _build_generation_provenance_payload(
+            upload_record=upload_record,
+            lane="preview",
+            ingest_channel="generate_environment",
+            input_strategy="1 photo",
+        )
+        job_payload.update(provenance_payload)
         image_path = upload_record["storage_path"]
         image_bytes = STORAGE.read_bytes(image_path)
         bridge_status = get_environment_bridge_registry().status_payload()
@@ -1813,6 +2626,45 @@ async def generate_environment(request: GenerateRequest) -> Dict[str, Any]:
             for name, blob in payloads.items():
                 STORAGE.write_bytes(f"scenes/{scene_id}/environment/{name}", blob)
             metadata = _normalize_environment_metadata(scene_id)
+            source_provenance = job_payload.get("source_provenance")
+            if not isinstance(source_provenance, dict):
+                source_provenance = _build_source_provenance(upload_record)
+            world_source = job_payload.get("world_source")
+            if not isinstance(world_source, dict):
+                world_source = _build_world_source(
+                    lane="preview",
+                    ingest_channel="generate_environment",
+                    input_strategy="1 photo",
+                    primary_source=source_provenance,
+                    upstream_sources=[source_provenance],
+                )
+            lane_metadata = job_payload.get("lane_metadata")
+            if not isinstance(lane_metadata, dict):
+                lane_metadata = _build_lane_metadata(
+                    lane="preview",
+                    lane_truth="single_image_lrm_preview",
+                    available=True,
+                    readiness="ready",
+                    summary="Single-image environment generation has completed.",
+                    blockers=[],
+                )
+            else:
+                lane_metadata = {
+                    **lane_metadata,
+                    "readiness": "ready",
+                    "summary": "Single-image environment generation has completed.",
+                }
+            handoff_manifest = job_payload.get("handoff_manifest")
+            if not isinstance(handoff_manifest, dict):
+                handoff_manifest = _build_handoff_manifest(
+                    lane="preview",
+                    world_source=world_source,
+                    ready=True,
+                    summary="Single-image environment generation is ready for downstream handoff.",
+                    blockers=[],
+                )
+            else:
+                handoff_manifest = {**handoff_manifest, "ready": True, "blockers": []}
 
             result = {
                 "scene_id": scene_id,
@@ -1826,19 +2678,42 @@ async def generate_environment(request: GenerateRequest) -> Dict[str, Any]:
                     "benchmark_report": f"scenes/{scene_id}/environment/benchmark-report.json",
                 },
                 "urls": _scene_urls(scene_id),
+                "source_type": job_payload.get("source_type") or upload_record.get("source_type") or "upload",
+                "source_provenance": source_provenance,
+                "world_source": world_source,
+                "lane_metadata": lane_metadata,
+                "handoff_manifest": handoff_manifest,
                 "source_format": metadata.get("rendering", {}).get("source_format", "sharp_ply"),
                 "viewer_renderer": metadata.get("rendering", {}).get("viewer_renderer", "sharp_gaussian_direct"),
                 "training_backend": metadata.get("training_backend", "single_image_depth_preview"),
             }
             job_payload["status"] = "completed"
             job_payload["updated_at"] = _utc_now()
+            job_payload["source_type"] = (
+                job_payload.get("source_type") or upload_record.get("source_type") or "upload"
+            )
+            job_payload["source_provenance"] = source_provenance
+            job_payload["world_source"] = world_source
+            job_payload["lane_metadata"] = lane_metadata
+            job_payload["handoff_manifest"] = handoff_manifest
             job_payload["result"] = result
             _save_job(scene_id, job_payload)
+    except ProviderError as exc:
+        print(f"[environment] provider failed for {request.image_id}: {exc}")
+        job_payload["status"] = "failed"
+        job_payload["updated_at"] = _utc_now()
+        job_payload["error"] = str(exc)
+        if image_record is not None:
+            job_payload["source_type"] = image_record.get("source_type") or "upload"
+        _save_job(scene_id, job_payload)
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:  # pragma: no cover - defensive
         print(f"[environment] generation failed for {request.image_id}: {exc}")
         job_payload["status"] = "failed"
         job_payload["updated_at"] = _utc_now()
         job_payload["error"] = str(exc)
+        if image_record is not None:
+            job_payload["source_type"] = image_record.get("source_type") or "upload"
         _save_job(scene_id, job_payload)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -1847,29 +2722,48 @@ async def generate_environment(request: GenerateRequest) -> Dict[str, Any]:
         "job_id": scene_id,
         "status": "processing",
         "urls": _scene_urls(scene_id),
+        "source_type": job_payload.get("source_type"),
+        "source_provenance": job_payload.get("source_provenance"),
+        "world_source": job_payload.get("world_source"),
+        "lane_metadata": job_payload.get("lane_metadata"),
+        "handoff_manifest": job_payload.get("handoff_manifest"),
     }
 
 
 @app.post("/generate/asset")
-async def generate_asset(request: GenerateRequest) -> Dict[str, Any]:
+async def generate_asset(request: GenerateRequest, http_request: Request) -> Dict[str, Any]:
+    _require_public_write_storage()
+    job_context = _job_context_from_request(http_request)
     asset_id = f"asset_{str(uuid.uuid4())[:8]}"
+    image_record = None
     job_payload = {
         "id": asset_id,
         "type": "asset",
         "status": "processing",
         "image_id": request.image_id,
+        **job_context,
         "created_at": _utc_now(),
         "updated_at": _utc_now(),
         "error": None,
         "result": None,
     }
+    image_record = None
     _save_job(asset_id, job_payload)
 
     try:
         upload_record = _load_upload_record(request.image_id)
+        image_record = upload_record
+        provenance_payload = _build_generation_provenance_payload(
+            upload_record=upload_record,
+            lane="asset",
+            ingest_channel="generate_asset",
+            input_strategy="1 photo",
+        )
+        job_payload.update(provenance_payload)
         image_path = upload_record["storage_path"]
         image_bytes = STORAGE.read_bytes(image_path)
         payloads = _asset_payload(image_bytes, upload_record["filename"])
+        job_payload["source_type"] = upload_record.get("source_type") or "upload"
         for name, blob in payloads.items():
             STORAGE.write_bytes(f"assets/{asset_id}/{name}", blob)
 
@@ -1885,13 +2779,33 @@ async def generate_asset(request: GenerateRequest) -> Dict[str, Any]:
         }
         job_payload["status"] = "completed"
         job_payload["updated_at"] = _utc_now()
-        job_payload["result"] = result
+        job_payload["lane_metadata"] = {
+            **(job_payload.get("lane_metadata") if isinstance(job_payload.get("lane_metadata"), dict) else {}),
+            "readiness": "ready",
+            "summary": "Single-image asset generation is complete.",
+        }
+        job_payload["handoff_manifest"] = {
+            **(job_payload.get("handoff_manifest") if isinstance(job_payload.get("handoff_manifest"), dict) else {}),
+            "ready": True,
+            "summary": "Single-image asset ready for downstream handoff.",
+            "blockers": [],
+        }
+        job_payload["result"] = {
+            **result,
+            "source_type": job_payload.get("source_type"),
+            "source_provenance": job_payload.get("source_provenance"),
+            "world_source": job_payload.get("world_source"),
+            "lane_metadata": job_payload.get("lane_metadata"),
+            "handoff_manifest": job_payload.get("handoff_manifest"),
+        }
         _save_job(asset_id, job_payload)
     except Exception as exc:  # pragma: no cover - defensive
         print(f"[asset] generation failed for {request.image_id}: {exc}")
         job_payload["status"] = "failed"
         job_payload["updated_at"] = _utc_now()
         job_payload["error"] = str(exc)
+        if image_record is not None:
+            job_payload["source_type"] = image_record.get("source_type") or "upload"
         _save_job(asset_id, job_payload)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -1900,12 +2814,25 @@ async def generate_asset(request: GenerateRequest) -> Dict[str, Any]:
         "job_id": asset_id,
         "status": "processing",
         "urls": _asset_urls(asset_id),
+        "source_type": job_payload.get("source_type"),
+        "source_provenance": job_payload.get("source_provenance"),
+        "world_source": job_payload.get("world_source"),
+        "lane_metadata": job_payload.get("lane_metadata"),
+        "handoff_manifest": job_payload.get("handoff_manifest"),
     }
 
 
 @app.post("/capture/session")
 async def create_capture_session(request: CaptureSessionCreateRequest) -> Dict[str, Any]:
-    payload = _capture_session_payload(request.target_images)
+    _require_public_write_storage()
+    payload = _capture_session_payload(
+        {
+            "session_id": f"capture_{str(uuid.uuid4())[:8]}",
+            "created_at": _utc_now(),
+            "frames": [],
+            "target_images": _clamp_target_images(request.target_images),
+        }
+    )
     _save_capture_session(payload)
     return payload
 
@@ -1917,6 +2844,7 @@ async def get_capture_session(session_id: str) -> Dict[str, Any]:
 
 @app.post("/capture/session/{session_id}/frames")
 async def add_capture_frames(session_id: str, request: CaptureSessionFramesRequest) -> Dict[str, Any]:
+    _require_public_write_storage()
     if not request.image_ids:
         raise HTTPException(status_code=400, detail="At least one uploaded image is required")
 
@@ -1926,30 +2854,17 @@ async def add_capture_frames(session_id: str, request: CaptureSessionFramesReque
     for image_id in request.image_ids:
         if image_id in known_ids or len(payload["frames"]) >= payload["max_images"]:
             continue
-        upload_record = _load_upload_record(image_id)
-        storage_path = upload_record["storage_path"]
-        filename = upload_record.get("stored_filename") or upload_record.get("filename") or Path(storage_path).name
-        payload["frames"].append(
-            {
-                "image_id": image_id,
-                "filename": filename,
-                "url": upload_record.get("url") or f"/storage/{storage_path}",
-                "added_at": _utc_now(),
-            }
-        )
+        payload["frames"].append(_build_capture_frame_record(image_id))
         known_ids.add(image_id)
 
-    payload["frame_count"] = len(payload["frames"])
-    payload["coverage_percent"] = _coverage_percent(payload["frame_count"], payload["recommended_images"])
-    payload["ready_for_reconstruction"] = payload["frame_count"] >= payload["minimum_images"]
-    payload["status"] = "ready" if payload["ready_for_reconstruction"] else "collecting"
-    payload["updated_at"] = _utc_now()
+    payload = _capture_session_payload(payload)
     _save_capture_session(payload)
     return payload
 
 
 @app.post("/reconstruct/session/{session_id}")
 async def start_reconstruction(session_id: str) -> Dict[str, Any]:
+    _require_public_write_storage()
     payload = _load_capture_session(session_id)
     if not payload.get("ready_for_reconstruction"):
         raise HTTPException(
@@ -1960,6 +2875,63 @@ async def start_reconstruction(session_id: str) -> Dict[str, Any]:
         status_code=501,
         detail="This backend can collect capture sets, but a dedicated multi-view Gaussian reconstruction worker is not connected yet.",
     )
+
+
+@app.get("/jobs")
+async def list_jobs(
+    http_request: Request,
+    studio_id: str | None = None,
+    status: str | None = None,
+    types: str | None = None,
+    created_gte: str | None = None,
+    updated_gte: str | None = None,
+    include_missing_context: bool = False,
+    offset: int = 0,
+    limit: int = Query(default=100, ge=1, le=500),
+) -> Dict[str, Any]:
+    _require_worker_auth(http_request)
+
+    statuses = {entry.strip() for entry in (status or "").split(",") if entry.strip()}
+    job_types = {entry.strip() for entry in (types or "").split(",") if entry.strip()}
+    created_since = _parse_job_timestamp(created_gte)
+    updated_since = _parse_job_timestamp(updated_gte)
+    normalized_studio_id = studio_id.strip() if isinstance(studio_id, str) and studio_id.strip() else None
+
+    filtered_summaries = [
+        summary
+        for summary in _load_job_index()
+        if isinstance(summary, dict)
+        and _job_matches_filters(
+            summary,
+            studio_id=normalized_studio_id,
+            statuses=statuses,
+            types=job_types,
+            created_gte=created_since,
+            updated_gte=updated_since,
+            include_missing_context=include_missing_context,
+        )
+    ]
+
+    normalized_offset = max(0, int(offset))
+    page_summaries = filtered_summaries[normalized_offset : normalized_offset + limit]
+    jobs: List[Dict[str, Any]] = []
+    for summary in page_summaries:
+        job_id = str(summary.get("id") or "").strip()
+        if not job_id:
+            continue
+        path = _job_path(job_id)
+        if not STORAGE.exists(path):
+            continue
+        payload = _read_json(path)
+        if isinstance(payload, dict):
+            jobs.append(payload)
+
+    next_offset = normalized_offset + len(page_summaries)
+    return {
+        "jobs": jobs,
+        "next_offset": next_offset if next_offset < len(filtered_summaries) else None,
+        "total_count": len(filtered_summaries),
+    }
 
 
 @app.get("/jobs/{job_id}")
@@ -1978,7 +2950,14 @@ async def job_status(job_id: str) -> Dict[str, Any]:
 
 @app.post("/scene/save")
 async def save_scene(request: SceneSaveRequest) -> Dict[str, Any]:
-    scene_graph = _normalize_scene_graph(request.scene_graph)
+    _require_public_write_storage()
+    if request.scene_document is None and request.scene_graph is None:
+        raise HTTPException(status_code=400, detail="Either scene_graph or scene_document is required.")
+
+    scene_document, scene_graph = _normalize_scene_save_payload(
+        scene_graph=request.scene_graph,
+        scene_document=request.scene_document,
+    )
     saved_at = _utc_now()
     version_id = _version_id()
 
@@ -1987,11 +2966,12 @@ async def save_scene(request: SceneSaveRequest) -> Dict[str, Any]:
         "version_id": version_id,
         "saved_at": saved_at,
         "source": request.source,
-        "summary": _scene_summary(scene_graph),
+        "summary": _scene_summary(scene_document),
+        "scene_document": scene_document,
         "scene_graph": scene_graph,
     }
 
-    _write_json(_scene_path(request.scene_id), scene_graph)
+    _write_json(_scene_path(request.scene_id), scene_document)
     _write_json(_scene_version_path(request.scene_id, version_id), version_payload)
     version_index_path = _scene_versions_index_path(request.scene_id)
     existing_versions = _read_json(version_index_path) if STORAGE.exists(version_index_path) else []
@@ -2046,6 +3026,7 @@ async def get_scene_review(scene_id: str) -> Dict[str, Any]:
 
 @app.post("/scene/{scene_id}/review")
 async def upsert_scene_review(scene_id: str, request: SceneReviewRequest) -> Dict[str, Any]:
+    _require_public_write_storage()
     if not _scene_exists(scene_id):
         raise HTTPException(status_code=404, detail="Scene not found")
 
@@ -2100,6 +3081,7 @@ async def create_scene_comment(
     version_id: str,
     request: VersionCommentRequest,
 ) -> Dict[str, Any]:
+    _require_public_write_storage()
     _load_version_payload(scene_id, version_id)
     comment = {
         "comment_id": uuid.uuid4().hex,
