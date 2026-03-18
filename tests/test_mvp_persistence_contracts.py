@@ -3,6 +3,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -151,6 +152,22 @@ class MvpPersistenceContractTests(unittest.TestCase):
                 "activeCameraNodeId": None,
             },
         }
+
+    def _assert_ingest_record(
+        self,
+        record: dict,
+        *,
+        source_kind: str,
+        lane: str,
+        production_readiness: str,
+        scene_id: str | None,
+    ) -> None:
+        self.assertEqual(record["contract"], routes.WORLD_INGEST_RECORD_VERSION)
+        self.assertEqual(record["status"], "accepted")
+        self.assertEqual(record["source"]["kind"], source_kind)
+        self.assertEqual(record["truth"]["lane"], lane)
+        self.assertEqual(record["truth"]["production_readiness"], production_readiness)
+        self.assertEqual(record["workspace_binding"]["scene_id"], scene_id)
 
     def test_scene_save_round_trips_full_scene_graph(self) -> None:
         scene_id = "scene_phase1_contract"
@@ -344,6 +361,83 @@ class MvpPersistenceContractTests(unittest.TestCase):
         self.assertEqual(compatibility_scene_graph["director_brief"], "50mm push with clear left egress.")
         self.assertEqual(compatibility_scene_graph["viewer"]["lens_mm"], 50.0)
 
+    def test_scene_document_ingest_record_round_trips_from_metadata(self) -> None:
+        scene_id = "scene_ingest_round_trip_contract"
+        scene_document = self._build_scene_document_v2(scene_id)
+        ingest_record = {
+            "contract": "world-ingest/v1",
+            "ingest_id": f"ingest_{scene_id}",
+            "status": "accepted",
+            "source": {
+                "kind": "provider_generated_still",
+                "label": "Backlot provider output",
+                "vendor": "vertex_imagen",
+                "captured_at": "2026-03-18T10:00:00+00:00",
+                "source_uri": "/storage/uploads/images/provider-frame.png",
+                "origin": "public_provider_generation",
+                "ingest_channel": "generate_environment",
+            },
+            "package": {
+                "media_type": "application/x-gauset-scene-document+json",
+                "checksum_sha256": None,
+                "entrypoints": {
+                    "workspace": f"/mvp?scene={scene_id}",
+                    "review": f"/mvp/review?scene={scene_id}",
+                },
+                "files": {
+                    "metadata": f"/storage/scenes/{scene_id}/environment/metadata.json",
+                },
+            },
+            "scene_document": None,
+            "compatibility_scene_graph": None,
+            "workspace_binding": {
+                "project_id": "11111111-1111-4111-8111-111111111111",
+                "scene_id": scene_id,
+            },
+            "versioning": {
+                "version_id": None,
+                "version_locked": False,
+            },
+            "workflow": {
+                "workspace_path": f"/mvp?scene={scene_id}",
+                "review_path": f"/mvp/review?scene={scene_id}",
+                "share_path": None,
+                "save_ready": True,
+                "review_ready": True,
+                "share_ready": False,
+            },
+            "truth": {
+                "lane": "preview",
+                "truth_label": "Preview world accepted",
+                "lane_truth": "single_image_lrm_preview",
+                "production_readiness": "review_only",
+                "blockers": ["preview_not_reconstruction"],
+            },
+        }
+        scene_document["splats"]["node_environment"]["metadata"]["ingest_record"] = ingest_record
+
+        response = self.client.post(
+            "/scene/save",
+            json={
+                "scene_id": scene_id,
+                "scene_document": scene_document,
+                "source": "manual",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+
+        saved_scene_document, version_document = self._load_scene_artifacts(scene_id, payload["version_id"])
+        self.assertEqual(saved_scene_document["splats"]["node_environment"]["metadata"]["ingest_record"], ingest_record)
+        self.assertEqual(
+            version_document["scene_document"]["splats"]["node_environment"]["metadata"]["ingest_record"],
+            ingest_record,
+        )
+        self.assertEqual(
+            version_document["scene_graph"]["__scene_document_v2"]["splats"]["node_environment"]["metadata"]["ingest_record"],
+            ingest_record,
+        )
+
     def test_scene_save_rejects_mismatched_scene_document_and_scene_graph(self) -> None:
         scene_id = "scene_document_graph_mismatch_contract"
         scene_document = self._build_scene_document_v2(scene_id)
@@ -402,6 +496,94 @@ class MvpPersistenceContractTests(unittest.TestCase):
         self.assertFalse((routes.SCENES_DIR / scene_id / "scene.json").exists())
         versions_dir = routes.SCENES_DIR / scene_id / "versions"
         self.assertEqual(list(versions_dir.glob("*.json")), [])
+
+    def test_upload_response_emits_world_ingest_record(self) -> None:
+        payload = routes._build_upload_response(
+            {
+                "image_id": "img_upload_contract",
+                "filename": "frame.png",
+                "filepath": str(self.root / "uploads" / "images" / "frame.png"),
+                "url": "/storage/uploads/images/frame.png",
+                "source_type": "upload",
+            }
+        )
+
+        self._assert_ingest_record(
+            payload["ingest_record"],
+            source_kind="upload",
+            lane="upload",
+            production_readiness="blocked",
+            scene_id=None,
+        )
+        self.assertEqual(payload["ingest_record"]["package"]["files"]["source"], "/storage/uploads/images/frame.png")
+        self.assertFalse(payload["ingest_record"]["workflow"]["save_ready"])
+        self.assertFalse(payload["ingest_record"]["workflow"]["review_ready"])
+        self.assertFalse(payload["ingest_record"]["workflow"]["share_ready"])
+
+    def test_preview_generation_metadata_persists_world_ingest_record(self) -> None:
+        scene_id = "scene_preview_ingest_contract"
+        metadata_dir = routes.SCENES_DIR / scene_id / "environment"
+        metadata_dir.mkdir(parents=True, exist_ok=True)
+        metadata_path = metadata_dir / "metadata.json"
+        metadata_path.write_text(json.dumps({"truth_label": "Preview world accepted"}))
+
+        metadata = routes._merge_generation_metadata(
+            metadata_path,
+            lane="preview",
+            lane_truth="single_image_lrm_preview",
+            upload_record={
+                "image_id": "img_preview_contract",
+                "filename": "frame.png",
+                "original_filename": "frame.png",
+                "url": "/storage/uploads/images/frame.png",
+                "source_type": "upload",
+            },
+            ingest_channel="generate_environment",
+            input_strategy="1 photo",
+            delivery_defaults=routes._preview_delivery_defaults(),
+        )
+
+        self._assert_ingest_record(
+            metadata["ingest_record"],
+            source_kind="upload",
+            lane="preview",
+            production_readiness="review_only",
+            scene_id=scene_id,
+        )
+        self.assertEqual(metadata["ingest_record"]["workflow"]["workspace_path"], f"/mvp?scene={scene_id}")
+        self.assertEqual(metadata["ingest_record"]["workflow"]["review_path"], f"/mvp/review?scene={scene_id}")
+        self.assertTrue(metadata["ingest_record"]["workflow"]["save_ready"])
+        self.assertTrue(metadata["ingest_record"]["workflow"]["review_ready"])
+        self.assertFalse(metadata["ingest_record"]["workflow"]["share_ready"])
+
+        persisted_metadata = json.loads(metadata_path.read_text())
+        self.assertEqual(persisted_metadata["ingest_record"]["ingest_id"], f"ingest_{scene_id}")
+        self.assertEqual(persisted_metadata["ingest_record"]["workspace_binding"]["scene_id"], scene_id)
+
+    def test_capture_session_payload_emits_world_ingest_record(self) -> None:
+        session = {
+            "session_id": "capture_contract_session",
+            "created_at": "2026-03-17T12:00:00Z",
+            "target_images": routes.CAPTURE_RECOMMENDED_IMAGES,
+            "frames": [{"image_id": f"img_{index}"} for index in range(routes.CAPTURE_MIN_IMAGES)],
+        }
+
+        with patch.object(routes, "_hash_uploaded_image", side_effect=[f"hash_{index}" for index in range(routes.CAPTURE_MIN_IMAGES)]):
+            payload = routes._capture_session_payload(session)
+
+        self._assert_ingest_record(
+            payload["ingest_record"],
+            source_kind="capture_session",
+            lane="reconstruction",
+            production_readiness="blocked",
+            scene_id=None,
+        )
+        self.assertEqual(payload["ingest_record"]["truth"]["lane_truth"], "gpu_worker_not_connected")
+        self.assertEqual(payload["ingest_record"]["workflow"]["workspace_path"], "/mvp")
+        self.assertEqual(payload["ingest_record"]["workflow"]["review_path"], "/mvp/review")
+        self.assertFalse(payload["ingest_record"]["workflow"]["save_ready"])
+        self.assertFalse(payload["ingest_record"]["workflow"]["review_ready"])
+        self.assertFalse(payload["ingest_record"]["workflow"]["share_ready"])
 
     def test_review_round_trips_full_metadata_and_structured_issues(self) -> None:
         scene_id = "scene_review_contract"

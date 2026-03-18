@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 
 import { useRouter } from "next/navigation";
 
+import type { DownstreamHandoffManifest } from "@/server/contracts/downstream-handoff";
 import type { ProjectWorldLink } from "@/server/contracts/projects";
 import { EmptyState } from "@/components/platform/EmptyState";
 import { StatusBadge } from "@/components/platform/StatusBadge";
@@ -24,6 +25,10 @@ function formatDate(value: string) {
     }
 
     return dateFormatter.format(parsed);
+}
+
+function asErrorMessage(value: unknown, fallback: string): string {
+    return typeof value === "string" && value.trim().length > 0 ? value : fallback;
 }
 
 export function ProjectWorldLinkManager({
@@ -101,20 +106,53 @@ export function ProjectWorldLinkManager({
         });
     };
 
+    const downloadHandoff = (linkedSceneId: string, target: "generic" | "unreal") => {
+        setError(null);
+        setMessage(null);
+        startTransition(async () => {
+            try {
+                const response = await fetch(`/api/projects/${projectId}/world-links/${encodeURIComponent(linkedSceneId)}/handoff?target=${target}`, {
+                    cache: "no-store",
+                });
+                const payload = (await response.json()) as DownstreamHandoffManifest | { message?: unknown };
+                const manifest = response.ok && "contract" in payload ? payload : null;
+                if (!manifest) {
+                    throw new Error(asErrorMessage("message" in payload ? payload.message : undefined, "Unable to generate handoff manifest."));
+                }
+
+                const blob = new Blob([JSON.stringify(manifest, null, 2)], { type: "application/json" });
+                const url = URL.createObjectURL(blob);
+                const anchor = document.createElement("a");
+                anchor.href = url;
+                anchor.download = `${linkedSceneId}-${manifest.source.version_id}-${target}-handoff.json`;
+                document.body.appendChild(anchor);
+                anchor.click();
+                document.body.removeChild(anchor);
+                URL.revokeObjectURL(url);
+
+                setMessage(
+                    manifest.delivery.status === "ready"
+                        ? `${manifest.target.label} exported from saved version ${manifest.source.version_id}.`
+                        : `${manifest.target.label} exported with blockers from saved version ${manifest.source.version_id}.`,
+                );
+            } catch (handoffError) {
+                setError(handoffError instanceof Error ? handoffError.message : "Unable to generate handoff manifest.");
+            }
+        });
+    };
+
     return (
         <section id="world-links" className="space-y-5">
             <div className="rounded-[1.85rem] border border-white/10 bg-black/30 p-5">
                 <div className="flex flex-wrap items-start justify-between gap-4">
                     <div className="max-w-3xl">
                         <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-cyan-200/70">World links</p>
-                        <h3 className="mt-2 text-lg font-medium text-white">Attach real scenes to the durable project layer</h3>
+                        <h3 className="mt-2 text-lg font-medium text-white">Attach or reopen real worlds inside the project layer</h3>
                         <p className="mt-3 text-sm leading-7 text-neutral-400">
-                            Linking a scene here records project ownership in the platform layer. Conflicting links are rejected so this page cannot bypass existing scene ownership
-                            or membership truth.
+                            Linking a scene here records project ownership in the platform layer. Conflicting links are rejected so this page cannot bypass existing scene ownership or membership truth.
                         </p>
                         <p className="mt-2 text-sm leading-7 text-neutral-500">
-                            Opening a linked world from this panel records the revisit automatically. Manual activity logging is only for launches that already happened elsewhere,
-                            and it now validates that the reopened scene is already owned by this project.
+                            Opening a linked world from this panel records the revisit automatically. The named handoff actions below emit explicit downstream manifests from saved versions instead of pretending that review-share export is a delivery artifact.
                         </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
@@ -197,6 +235,22 @@ export function ProjectWorldLinkManager({
                                         className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-sm font-medium text-white transition-colors hover:border-white/20 hover:bg-white/[0.08] disabled:opacity-60"
                                     >
                                         Record external reopen
+                                    </button>
+                                    <button
+                                        type="button"
+                                        disabled={isPending}
+                                        onClick={() => downloadHandoff(worldLink.sceneId, "generic")}
+                                        className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-sm font-medium text-white transition-colors hover:border-white/20 hover:bg-white/[0.08] disabled:opacity-60"
+                                    >
+                                        Generic handoff
+                                    </button>
+                                    <button
+                                        type="button"
+                                        disabled={isPending}
+                                        onClick={() => downloadHandoff(worldLink.sceneId, "unreal")}
+                                        className="rounded-2xl border border-cyan-300/20 bg-cyan-400/10 px-4 py-2.5 text-sm font-medium text-cyan-50 transition-colors hover:border-cyan-200/30 hover:bg-cyan-400/15 disabled:opacity-60"
+                                    >
+                                        Unreal handoff
                                     </button>
                                 </div>
                             </div>

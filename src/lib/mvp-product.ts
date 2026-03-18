@@ -426,6 +426,8 @@ export interface GeneratedEnvironmentMetadata {
     release_gates?: EnvironmentReleaseGates;
     quality?: EnvironmentQualityMetrics;
     delivery?: EnvironmentDeliveryProfile;
+    ingest_record?: Record<string, unknown>;
+    downstream_handoff?: Record<string, unknown>;
     preview_enhancement?: EnvironmentPreviewEnhancement;
     source_camera?: {
         position?: [number, number, number];

@@ -8,6 +8,7 @@ import { OperationalAttentionStrip } from "@/components/platform/OperationalAtte
 import { ReleaseReadinessPanel } from "@/components/platform/ReleaseReadinessPanel";
 import { ActivityFeed } from "@/components/worlds/ActivityFeed";
 import { ProjectHomeHero } from "@/components/worlds/ProjectHomeHero";
+import { ProjectWorldLaunchPanel } from "@/components/worlds/ProjectWorldLaunchPanel";
 import { ProjectWorldLinkManager } from "@/components/worlds/ProjectWorldLinkManager";
 import { ReviewSharePanel } from "@/components/worlds/ReviewSharePanel";
 import { WorldTruthPanel } from "@/components/worlds/WorldTruthPanel";
@@ -97,11 +98,7 @@ export default async function PlatformProjectDetailPage({
             />
 
             <div className="grid gap-6 xl:grid-cols-[1.02fr,0.98fr]">
-                <ProjectWorldLinkManager
-                    projectId={detail.project.projectId}
-                    worldLinks={detail.worldLinks}
-                    canAccessMvp={canAccessMvp}
-                />
+                <ProjectWorldLaunchPanel projectId={detail.project.projectId} canAccessMvp={canAccessMvp} />
                 <ReviewSharePanel
                     projectId={detail.project.projectId}
                     worldLinks={detail.worldLinks}
@@ -111,6 +108,12 @@ export default async function PlatformProjectDetailPage({
                     reviewShareSummary={reviewShareState.summary}
                 />
             </div>
+
+            <ProjectWorldLinkManager
+                projectId={detail.project.projectId}
+                worldLinks={detail.worldLinks}
+                canAccessMvp={canAccessMvp}
+            />
 
             <div className="grid gap-6 xl:grid-cols-[1.05fr,0.95fr]">
                 <CoverageSurfacePanel

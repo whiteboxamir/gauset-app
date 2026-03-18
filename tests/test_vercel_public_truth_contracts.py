@@ -1,4 +1,5 @@
 import importlib.util
+import io
 import os
 import sys
 import tempfile
@@ -7,6 +8,9 @@ import uuid
 from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
+
+from fastapi.testclient import TestClient
+from PIL import Image
 
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[1]
@@ -45,6 +49,13 @@ def _load_vercel_backend_app(env_overrides: dict[str, str | None]):
         return module
 
 
+def _png_bytes(color: tuple[int, int, int]) -> bytes:
+    image = Image.new("RGB", (96, 96), color=color)
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
 class VercelPublicTruthContractTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory(prefix="gauset-vercel-public-truth-")
@@ -56,9 +67,21 @@ class VercelPublicTruthContractTests(unittest.TestCase):
                 "GAUSET_IMAGE_TO_SPLAT_BACKEND_URL": None,
             }
         )
+        self._storage_gate = patch.object(self.app, "_public_storage_write_safe", return_value=True)
+        self._storage_gate.start()
+        self.client = TestClient(self.app.app)
 
     def tearDown(self) -> None:
+        self._storage_gate.stop()
         self.temp_dir.cleanup()
+
+    def _upload_image(self, *, color: tuple[int, int, int]) -> dict:
+        response = self.client.post(
+            "/upload",
+            files={"file": ("frame.png", _png_bytes(color), "image/png")},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        return response.json()
 
     def test_source_provenance_uses_public_origin_labels(self) -> None:
         upload_provenance = self.app._build_source_provenance(
@@ -94,6 +117,14 @@ class VercelPublicTruthContractTests(unittest.TestCase):
         self.assertFalse(payload["handoff_manifest"]["ready"])
         self.assertIn("downstream handoff remains blocked", payload["handoff_manifest"]["summary"])
         self.assertGreater(len(payload["handoff_manifest"]["blockers"]), 0)
+        self.assertEqual(payload["ingest_record"]["contract"], "world-ingest/v1")
+        self.assertEqual(payload["ingest_record"]["source"]["kind"], "upload")
+        self.assertEqual(payload["ingest_record"]["workflow"]["save_ready"], False)
+        self.assertEqual(payload["ingest_record"]["workspace_binding"]["scene_id"], None)
+        self.assertEqual(payload["ingest_record"]["truth"]["production_readiness"], "blocked")
+        self.assertEqual(payload["ingest_record"]["status"], "accepted")
+        self.assertEqual(payload["ingest_record"]["truth"]["lane"], "upload")
+        self.assertFalse(payload["ingest_record"]["workflow"]["share_ready"])
 
     def test_preview_and_asset_helper_posture_stays_blocked(self) -> None:
         world_source = self.app._build_world_source(
@@ -116,6 +147,30 @@ class VercelPublicTruthContractTests(unittest.TestCase):
         self.assertFalse(asset_handoff["ready"])
         self.assertGreater(len(asset_handoff["blockers"]), 0)
 
+    def test_generate_environment_job_emits_canonical_ingest_record(self) -> None:
+        uploaded = self._upload_image(color=(80, 60, 140))
+
+        response = self.client.post(
+            "/generate/environment",
+            json={"image_id": uploaded["image_id"]},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        launch_payload = response.json()
+        self.assertEqual(launch_payload["ingest_record"]["contract"], "world-ingest/v1")
+        self.assertEqual(launch_payload["ingest_record"]["workspace_binding"]["scene_id"], launch_payload["scene_id"])
+        self.assertFalse(launch_payload["ingest_record"]["workflow"]["save_ready"])
+        self.assertEqual(launch_payload["ingest_record"]["truth"]["production_readiness"], "blocked")
+
+        job_response = self.client.get(f"/jobs/{launch_payload['job_id']}")
+        self.assertEqual(job_response.status_code, 200, job_response.text)
+        job_payload = job_response.json()
+        self.assertEqual(job_payload["status"], "completed")
+        self.assertEqual(job_payload["ingest_record"]["contract"], "world-ingest/v1")
+        self.assertEqual(job_payload["ingest_record"]["workspace_binding"]["scene_id"], launch_payload["scene_id"])
+        self.assertTrue(job_payload["result"]["ingest_record"]["workflow"]["save_ready"])
+        self.assertTrue(job_payload["result"]["ingest_record"]["workflow"]["review_ready"])
+        self.assertEqual(job_payload["result"]["ingest_record"]["truth"]["production_readiness"], "review_only")
+
     def test_capture_session_payload_stays_worker_blocked_even_when_capture_ready(self) -> None:
         session = {
             "session_id": "capture_ready_session",
@@ -133,6 +188,16 @@ class VercelPublicTruthContractTests(unittest.TestCase):
         self.assertFalse(payload["handoff_manifest"]["ready"])
         self.assertIn("Dedicated multi-view reconstruction worker is not connected.", payload["handoff_manifest"]["blockers"])
         self.assertNotIn("Start reconstruction.", payload["quality_summary"]["recommended_next_actions"])
+        self.assertEqual(payload["ingest_record"]["contract"], "world-ingest/v1")
+        self.assertEqual(payload["ingest_record"]["source"]["kind"], "capture_session")
+        self.assertEqual(payload["ingest_record"]["workflow"]["workspace_path"], "/mvp")
+        self.assertEqual(payload["ingest_record"]["workflow"]["review_ready"], False)
+        self.assertEqual(payload["ingest_record"]["truth"]["lane"], "reconstruction")
+        self.assertEqual(payload["ingest_record"]["truth"]["lane_truth"], "gpu_worker_not_connected")
+        self.assertEqual(payload["ingest_record"]["truth"]["production_readiness"], "blocked")
+        self.assertFalse(payload["ingest_record"]["workflow"]["save_ready"])
+        self.assertFalse(payload["ingest_record"]["workflow"]["review_ready"])
+        self.assertFalse(payload["ingest_record"]["workflow"]["share_ready"])
 
 
 if __name__ == "__main__":

@@ -30,7 +30,10 @@ import {
 import { buildReviewPackageFromSavedVersion } from "../src/components/Editor/reviewExperienceShared.ts";
 import { projectWorldLinkSchema } from "../src/server/contracts/projects.ts";
 import { createReviewShareRequestSchema, reviewShareReadinessSchema, reviewShareSummarySchema } from "../src/server/contracts/review-shares.ts";
+import { downstreamHandoffManifestSchema } from "../src/server/contracts/downstream-handoff.ts";
 import { deriveWorldTruthSummary, flattenWorldTruthSummary } from "../src/server/world-truth.ts";
+import { worldIngestRecordSchema } from "../src/server/contracts/world-ingest.ts";
+import { buildDownstreamHandoffManifest, deriveWorldIngestRecord } from "../src/lib/world-workflow.ts";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -712,11 +715,12 @@ function testWorldIngestContracts() {
     assert.equal(typeof thirdPartyRequest.package.entrypoints.environment_splat, "string");
 
     assert.equal(ingestRecord.contract, "world-ingest/v1");
+    assert.equal(worldIngestRecordSchema.parse(ingestRecord).contract, "world-ingest/v1");
     assert.equal(ingestRecord.status, "accepted");
     assert.equal(ingestRecord.source.kind, "third_party_world_model_output");
     assertSceneDocumentShape(ingestRecord.scene_document, "World ingest record");
     assertCompatibilityGraphShape(ingestRecord.compatibility_scene_graph, "World ingest compatibility graph");
-    assert.equal(ingestRecord.workspace_binding.project_id, "proj_backlot_scout_01");
+    assert.equal(ingestRecord.workspace_binding.project_id, "11111111-1111-4111-8111-111111111111");
     assert.equal(ingestRecord.workspace_binding.scene_id, "scene_backlot_reconstruction_01");
     assert.equal(ingestRecord.versioning.version_required, true);
     assert.equal(ingestRecord.workflow.save_ready, true);
@@ -726,6 +730,19 @@ function testWorldIngestContracts() {
     assert.equal(ingestRecord.truth.truth_label, "Imported Reconstruction Package");
     assert.match(ingestRecord.truth.lane_truth, /did not rerun capture/i);
     assert.ok(ingestRecord.truth.blockers.includes("downstream_target_not_selected"));
+
+    const savedVersion = readJsonFixture<JsonRecord>("contracts/schemas/scene-version.response.confirmed.json");
+    const derivedRecord = deriveWorldIngestRecord({
+        sceneId: String(savedVersion.scene_id),
+        versionId: String(savedVersion.version_id),
+        projectId: "11111111-1111-4111-8111-111111111111",
+        sceneDocument: savedVersion.scene_document,
+        sceneGraph: savedVersion.scene_graph,
+    });
+    assert.ok(derivedRecord);
+    assert.equal(derivedRecord?.contract, "world-ingest/v1");
+    assert.equal(derivedRecord?.workspace_binding.project_id, "11111111-1111-4111-8111-111111111111");
+    assert.equal(derivedRecord?.workflow.share_ready, true);
 }
 
 function testReviewVersionShareContracts() {
@@ -757,6 +774,7 @@ function testDownstreamHandoffContracts() {
     const blockedManifest = readJsonFixture("contracts/schemas/downstream-handoff.unreal.preview-blocked.manifest.json");
 
     assert.equal(readyManifest.contract, "downstream-handoff/v1");
+    assert.equal(downstreamHandoffManifestSchema.parse(readyManifest).contract, "downstream-handoff/v1");
     assert.equal(readyManifest.target.system, "unreal_engine");
     assert.equal(readyManifest.target.profile, "unreal_scene_package/v1");
     assert.equal(readyManifest.target.coordinate_system, "left_handed_z_up");
@@ -783,6 +801,72 @@ function testDownstreamHandoffContracts() {
     assert.ok(blockedManifest.truth.blockers.includes("preview_not_reconstruction"));
     assert.equal(blockedManifest.delivery.status, "blocked");
     assert.ok(blockedManifest.delivery.requirements.some((requirement: { key?: string; passed?: boolean }) => requirement.key === "review_approved" && requirement.passed === false));
+
+    const builtManifest = buildDownstreamHandoffManifest({
+        projectId: "11111111-1111-4111-8111-111111111111",
+        sceneId: "scene_backlot_reconstruction_01",
+        versionId: "20260316T173000000Z",
+        sceneDocument: readyManifest.scene_document,
+        sceneGraph: readyManifest.compatibility_scene_graph,
+        ingestRecord: readyManifest.source.ingest_record_id
+            ? {
+                  contract: "world-ingest/v1",
+                  ingest_id: readyManifest.source.ingest_record_id,
+                  status: "accepted",
+                  source: {
+                      kind: readyManifest.truth.source_kind,
+                      label: "Backlot reconstruction",
+                      vendor: null,
+                      captured_at: "2026-03-16T17:30:00.000Z",
+                      source_uri: null,
+                      origin: null,
+                      ingest_channel: null,
+                  },
+                  package: {
+                      media_type: "application/x-gauset-scene-document+json",
+                      checksum_sha256: null,
+                      entrypoints: {
+                          workspace: "/mvp?scene=scene_backlot_reconstruction_01",
+                          review: "/mvp/review?scene=scene_backlot_reconstruction_01",
+                      },
+                      files: {
+                          metadata: "/api/mvp/storage/scenes/scene_backlot_reconstruction_01/environment/metadata.json",
+                      },
+                  },
+                  scene_document: readyManifest.scene_document,
+                  compatibility_scene_graph: readyManifest.compatibility_scene_graph,
+                  workspace_binding: {
+                      project_id: "11111111-1111-4111-8111-111111111111",
+                      scene_id: "scene_backlot_reconstruction_01",
+                  },
+                  versioning: {
+                      version_id: "20260316T173000000Z",
+                      version_locked: true,
+                  },
+                  workflow: {
+                      workspace_path: "/mvp?scene=scene_backlot_reconstruction_01",
+                      review_path: "/mvp/review?scene=scene_backlot_reconstruction_01",
+                      share_path: "/mvp/review?scene=scene_backlot_reconstruction_01&version=20260316T173000000Z",
+                      save_ready: true,
+                      review_ready: true,
+                      share_ready: true,
+                  },
+                  truth: {
+                      lane: "reconstruction",
+                      truth_label: "Imported Reconstruction Package",
+                      lane_truth: "Imported from a third-party reconstruction output.",
+                      production_readiness: "handoff_ready",
+                      blockers: [],
+                  },
+              }
+            : null,
+        checkedBy: "platform-contracts",
+        targetSystem: "unreal_engine",
+        targetProfile: "unreal_scene_package/v1",
+    });
+    assert.equal(builtManifest.contract, "downstream-handoff/v1");
+    assert.equal(builtManifest.target.system, "unreal_engine");
+    assert.equal(builtManifest.review.version_locked, true);
 }
 
 function testSceneDocumentTruthSummaryContracts() {
@@ -840,8 +924,8 @@ function testSceneDocumentTruthSummaryContracts() {
             },
         },
     });
-    assert.equal(provenanceFallbackTruth?.sourceKind, "uploaded_still");
-    assert.equal(provenanceFallbackTruth?.ingestRecordId, "img_123");
+    assert.equal(provenanceFallbackTruth?.sourceKind, "upload");
+    assert.equal(provenanceFallbackTruth?.ingestRecordId, "ingest_scene_source_provenance_fallback_20260317T100000000Z_preview");
 }
 
 function testReviewShareRequestShapeContracts() {

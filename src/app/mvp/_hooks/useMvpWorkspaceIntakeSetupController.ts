@@ -13,11 +13,13 @@ import {
 import { formatBandLabel, type MvpWorkspaceIntakeSetupState } from "./mvpWorkspaceIntakeShared";
 
 export function useMvpWorkspaceIntakeSetupController({
+    initialProviderId = null,
     generateAspectRatio,
     generateCount,
     setGenerateAspectRatio,
     setGenerateCount,
 }: {
+    initialProviderId?: string | null;
     generateAspectRatio: string;
     generateCount: number;
     setGenerateAspectRatio: (value: string) => void;
@@ -28,7 +30,7 @@ export function useMvpWorkspaceIntakeSetupController({
     const [setupStatus, setSetupStatus] = useState<SetupStatusResponse | null>(null);
     const [providerCatalog, setProviderCatalog] = useState<ProviderCatalogResponse | null>(null);
     const [providersLoading, setProvidersLoading] = useState(false);
-    const [selectedProviderId, setSelectedProviderId] = useState("");
+    const [selectedProviderId, setSelectedProviderId] = useState(initialProviderId ?? "");
     const [selectedModelId, setSelectedModelId] = useState("");
 
     useEffect(() => {

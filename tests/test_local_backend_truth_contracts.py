@@ -80,7 +80,13 @@ class LocalBackendTruthContractTests(unittest.TestCase):
             files={"file": ("capture.png", _png_bytes(color), "image/png")},
         )
         self.assertEqual(response.status_code, 200)
-        return response.json()
+        payload = response.json()
+        self.assertEqual(payload["ingest_record"]["contract"], "world-ingest/v1")
+        self.assertEqual(payload["ingest_record"]["source"]["kind"], "upload")
+        self.assertEqual(payload["ingest_record"]["truth"]["lane"], "upload")
+        self.assertEqual(payload["ingest_record"]["truth"]["production_readiness"], "blocked")
+        self.assertFalse(payload["ingest_record"]["workflow"]["share_ready"])
+        return payload
 
     def test_setup_status_reports_preview_truth_without_reconstruction_connectivity(self) -> None:
         class _ProviderRegistry:
@@ -200,10 +206,16 @@ class LocalBackendTruthContractTests(unittest.TestCase):
         session_id = payload["session_id"]
         self.assertEqual(payload["recommended_images"], 20)
         self.assertEqual(payload["coverage_percent"], 0.0)
+        self.assertEqual(payload["ingest_record"]["contract"], "world-ingest/v1")
+        self.assertEqual(payload["ingest_record"]["source"]["kind"], "capture_session")
+        self.assertEqual(payload["ingest_record"]["truth"]["lane_truth"], "gpu_worker_not_connected")
+        self.assertFalse(payload["ingest_record"]["workflow"]["save_ready"])
 
         get_response = self.client.get(f"/capture/session/{session_id}")
         self.assertEqual(get_response.status_code, 200)
-        self.assertEqual(get_response.json()["recommended_images"], 20)
+        fetched_session = get_response.json()
+        self.assertEqual(fetched_session["recommended_images"], 20)
+        self.assertEqual(fetched_session["ingest_record"]["contract"], "world-ingest/v1")
 
         uploaded = [self._upload_image(color=(40 + (index * 10), 60, 120)) for index in range(5)]
         add_frames_response = self.client.post(
@@ -217,10 +229,67 @@ class LocalBackendTruthContractTests(unittest.TestCase):
         self.assertEqual(updated["recommended_images"], 20)
         self.assertEqual(updated["coverage_percent"], 25.0)
         self.assertFalse(updated["ready_for_reconstruction"])
+        self.assertEqual(updated["ingest_record"]["contract"], "world-ingest/v1")
+        self.assertEqual(updated["ingest_record"]["source"]["kind"], "capture_session")
+        self.assertFalse(updated["ingest_record"]["workflow"]["review_ready"])
 
         fetched = self.client.get(f"/capture/session/{session_id}").json()
         self.assertEqual(fetched["coverage_percent"], 25.0)
         self.assertEqual(fetched["frame_count"], 5)
+        self.assertEqual(fetched["ingest_record"]["contract"], "world-ingest/v1")
+
+    def test_upload_and_preview_metadata_emit_canonical_ingest_records(self) -> None:
+        uploaded = self._upload_image(color=(70, 90, 140))
+        upload_record = routes._load_upload_record(uploaded["image_id"])
+        upload_payload = routes._build_upload_response(upload_record)
+
+        self.assertEqual(upload_payload["ingest_record"]["contract"], "world-ingest/v1")
+        self.assertEqual(upload_payload["ingest_record"]["source"]["kind"], "upload")
+        self.assertEqual(upload_payload["ingest_record"]["truth"]["production_readiness"], "blocked")
+        self.assertFalse(upload_payload["ingest_record"]["workflow"]["review_ready"])
+
+        scene_id = "scene_ingest_contract_preview"
+        metadata_path = routes.SCENES_DIR / scene_id / "environment" / "metadata.json"
+        metadata_path.parent.mkdir(parents=True, exist_ok=True)
+        metadata_path.write_text(json.dumps({"truth_label": "Preview world accepted"}, indent=2))
+        preview_metadata = routes._merge_generation_metadata(
+            metadata_path,
+            lane="preview",
+            lane_truth="single_image_lrm_preview",
+            upload_record=upload_record,
+            ingest_channel="generate_environment",
+            input_strategy="1 photo",
+            delivery_defaults=routes._preview_delivery_defaults(),
+        )
+
+        self.assertEqual(preview_metadata["ingest_record"]["contract"], "world-ingest/v1")
+        self.assertEqual(preview_metadata["ingest_record"]["source"]["kind"], "upload")
+        self.assertEqual(preview_metadata["ingest_record"]["workspace_binding"]["scene_id"], scene_id)
+        self.assertEqual(preview_metadata["ingest_record"]["truth"]["production_readiness"], "review_only")
+        self.assertEqual(preview_metadata["ingest_record"]["workflow"]["workspace_path"], f"/mvp?scene={scene_id}")
+
+    def test_generate_environment_job_emits_canonical_ingest_records(self) -> None:
+        uploaded = self._upload_image(color=(90, 80, 130))
+
+        response = self.client.post(
+            "/generate/environment",
+            headers=self._worker_headers(),
+            json={"image_id": uploaded["image_id"]},
+        )
+        self.assertEqual(response.status_code, 200)
+        launch_payload = response.json()
+        self.assertEqual(launch_payload["ingest_record"]["contract"], "world-ingest/v1")
+        self.assertEqual(launch_payload["ingest_record"]["workspace_binding"]["scene_id"], launch_payload["scene_id"])
+        self.assertFalse(launch_payload["ingest_record"]["workflow"]["save_ready"])
+
+        job_response = self.client.get(f"/jobs/{launch_payload['job_id']}", headers=self._worker_headers())
+        self.assertEqual(job_response.status_code, 200)
+        job_payload = job_response.json()
+        self.assertEqual(job_payload["status"], "completed")
+        self.assertEqual(job_payload["ingest_record"]["contract"], "world-ingest/v1")
+        self.assertTrue(job_payload["result"]["ingest_record"]["workflow"]["save_ready"])
+        self.assertTrue(job_payload["result"]["ingest_record"]["workflow"]["review_ready"])
+        self.assertEqual(job_payload["result"]["ingest_record"]["truth"]["production_readiness"], "review_only")
 
     def test_generate_environment_job_fails_when_required_artifacts_are_missing(self) -> None:
         uploaded = self._upload_image(color=(80, 60, 140))

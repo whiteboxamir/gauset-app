@@ -52,7 +52,7 @@ function buildExperimentalMockEnvelope(frameCount: number, truthLabel?: string) 
         provider: "gauset_mock_render_preview",
         truthLabel:
             truthLabel ??
-            `Experimental mock render preview. Consumed ${frameCount} recorded camera frames and did not call a live provider.`,
+            `Experimental mock render preview. Consumed ${frameCount} recorded camera frames and did not call a live provider. Use /app/worlds for the production brief-to-world workflow.`,
     };
 }
 

@@ -8,7 +8,25 @@
     "vendor": "nerfstudio",
     "format": "splatfacto/gaussian-splat/v1",
     "captured_at": "2026-03-15T02:12:00.000Z",
-    "source_uri": "s3://partner-drop/backlot-reconstruction/output/"
+    "source_uri": "s3://partner-drop/backlot-reconstruction/output/",
+    "origin": "partner_drop",
+    "ingest_channel": "external_import"
+  },
+  "package": {
+    "media_type": "application/x-gauset-scene-document+json",
+    "checksum_sha256": "sha256_backlot_reconstruction_01",
+    "entrypoints": {
+      "workspace": "/mvp?scene=scene_backlot_reconstruction_01",
+      "review": "/mvp/review?scene=scene_backlot_reconstruction_01&version=20260316T173000000Z",
+      "metadata": "/api/mvp/storage/scenes/scene_backlot_reconstruction_01/environment/metadata.json"
+    },
+    "files": {
+      "viewer": "/api/mvp/storage/scenes/scene_backlot_reconstruction_01/environment/metadata.json",
+      "splats": "/api/mvp/storage/scenes/scene_backlot_reconstruction_01/environment/splats.ply",
+      "cameras": "/api/mvp/storage/scenes/scene_backlot_reconstruction_01/environment/cameras.json",
+      "metadata": "/api/mvp/storage/scenes/scene_backlot_reconstruction_01/environment/metadata.json",
+      "preview_projection": "/api/mvp/storage/scenes/scene_backlot_reconstruction_01/environment/preview-projection.png"
+    }
   },
   "scene_document": {
     "version": 2,
@@ -569,7 +587,7 @@
     }
   },
   "workspace_binding": {
-    "project_id": "proj_backlot_scout_01",
+    "project_id": "11111111-1111-4111-8111-111111111111",
     "scene_id": "scene_backlot_reconstruction_01"
   },
   "versioning": {

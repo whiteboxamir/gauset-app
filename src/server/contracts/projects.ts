@@ -7,10 +7,16 @@ import { projectMembershipRoleValues, projectStatusValues } from "../../types/pl
 const worldTruthFieldSchema = z.object({
     sourceKind: z.string().min(1).nullable().optional(),
     ingestRecordId: z.string().min(1).nullable().optional(),
+    handoffManifestId: z.string().min(1).nullable().optional(),
     latestVersionId: z.string().min(1).nullable().optional(),
     lane: z.string().min(1).nullable().optional(),
+    productionReadiness: z.string().min(1).nullable().optional(),
+    reviewApprovalState: z.string().min(1).nullable().optional(),
+    versionLocked: z.boolean().optional(),
     blockers: z.array(z.string().min(1)).optional(),
     deliveryStatus: z.string().min(1).nullable().optional(),
+    downstreamTargetSystem: z.string().min(1).nullable().optional(),
+    downstreamTargetProfile: z.string().min(1).nullable().optional(),
     downstreamTargetSummary: z.string().min(1).nullable().optional(),
 });
 

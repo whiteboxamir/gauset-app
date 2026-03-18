@@ -21,11 +21,21 @@ export default function MVPRouteClient({
     clarityMode = false,
     routeVariant = "workspace",
     launchSceneId = null,
+    launchProjectId = null,
+    launchIntent = null,
+    launchBrief = null,
+    launchReferences = null,
+    launchProviderId = null,
     deploymentFingerprint,
 }: {
     clarityMode?: boolean;
     routeVariant?: MvpRouteVariant;
     launchSceneId?: string | null;
+    launchProjectId?: string | null;
+    launchIntent?: "generate" | "capture" | "import" | null;
+    launchBrief?: string | null;
+    launchReferences?: string | null;
+    launchProviderId?: string | null;
     deploymentFingerprint: MvpDeploymentFingerprint;
 }) {
     const sceneStoreRef = useRef(createMvpSceneStore(createEmptySceneDocumentV2()));
@@ -36,6 +46,11 @@ export default function MVPRouteClient({
         clarityMode,
         routeVariant,
         launchSceneId,
+        launchProjectId,
+        launchIntent,
+        launchBrief,
+        launchReferences,
+        launchProviderId,
         sceneStore: sceneStoreRef.current,
         editorSessionActions,
     });

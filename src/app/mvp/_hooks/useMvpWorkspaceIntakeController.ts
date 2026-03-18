@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { toProxyUrl } from "@/lib/mvp-api";
+import { deriveWorldIngestRecord } from "@/lib/world-workflow";
 
 import {
     defaultEnvironmentUrls,
@@ -26,9 +27,20 @@ export function useMvpWorkspaceIntakeController({
     handleGenerationStart,
     handleGenerationSuccess,
     handleGenerationError,
-}: WorkspaceIntakeActions) {
-    const [intakeMode, setIntakeMode] = useState<IntakeMode>("import");
-    const [generatePrompt, setGeneratePrompt] = useState("");
+    launchProjectId,
+    launchIntent,
+    launchBrief,
+    launchReferences,
+    launchProviderId,
+}: WorkspaceIntakeActions & {
+    launchProjectId?: string | null;
+    launchIntent?: "generate" | "capture" | "import" | null;
+    launchBrief?: string | null;
+    launchReferences?: string | null;
+    launchProviderId?: string | null;
+}) {
+    const [intakeMode, setIntakeMode] = useState<IntakeMode>(launchIntent === "generate" ? "generate" : "import");
+    const [generatePrompt, setGeneratePrompt] = useState(launchBrief ?? "");
     const [generateNegativePrompt, setGenerateNegativePrompt] = useState("");
     const [generateAspectRatio, setGenerateAspectRatio] = useState("16:9");
     const [generateCount, setGenerateCount] = useState(1);
@@ -36,6 +48,7 @@ export function useMvpWorkspaceIntakeController({
     const [errorText, setErrorText] = useState("");
     const [jobs, setJobs] = useState<JobRecord[]>([]);
     const setup = useMvpWorkspaceIntakeSetupController({
+        initialProviderId: launchProviderId,
         generateAspectRatio,
         generateCount,
         setGenerateAspectRatio,
@@ -96,21 +109,49 @@ export function useMvpWorkspaceIntakeController({
                 preview_projection: toProxyUrl(urlCandidates?.preview_projection ?? fallbackUrls.preview_projection),
             };
             const metadata = await fetchEnvironmentMetadata(urls.metadata);
+            const nextMetadata = metadata
+                ? structuredClone(metadata)
+                : ({
+                      lane: fallbackLane,
+                  } as Record<string, unknown>);
+            const ingestRecord = deriveWorldIngestRecord({
+                sceneId,
+                projectId: launchProjectId,
+                sceneGraph: {
+                    environment: {
+                        id: sceneId,
+                        lane: (nextMetadata as { lane?: string }).lane ?? fallbackLane,
+                        sourceLabel: launchBrief ?? launchReferences ?? null,
+                        urls,
+                        metadata: nextMetadata,
+                    },
+                },
+                fallbackLabel: launchBrief ?? launchReferences ?? null,
+            });
+            if (ingestRecord) {
+                (nextMetadata as Record<string, unknown>).ingest_record = ingestRecord;
+            }
             markProgrammaticSceneChange();
             replaceSceneEnvironment({
                 id: sceneId,
-                lane: metadata?.lane ?? fallbackLane,
+                lane: ((nextMetadata as { lane?: "preview" | "reconstruction" }).lane ?? fallbackLane),
                 urls,
                 files: fileCandidates ?? null,
-                metadata,
+                metadata: nextMetadata,
             });
             setActiveScene(sceneId);
             return {
-                metadata,
+                metadata: nextMetadata as typeof metadata,
             };
         },
-        [markProgrammaticSceneChange, replaceSceneEnvironment, setActiveScene],
+        [launchBrief, launchProjectId, launchReferences, markProgrammaticSceneChange, replaceSceneEnvironment, setActiveScene],
     );
+
+    useEffect(() => {
+        if (launchIntent === "generate") {
+            setIntakeMode("generate");
+        }
+    }, [launchIntent]);
 
     const generation = useMvpWorkspaceGenerationController({
         backendWritesDisabled: setup.backendWritesDisabled,

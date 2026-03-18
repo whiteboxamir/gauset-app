@@ -60,6 +60,9 @@ export function OpenWorkspaceButton({
                     if (sceneId) {
                         searchParams.set("scene", sceneId);
                     }
+                    if (projectId) {
+                        searchParams.set("project", projectId);
+                    }
 
                     router.push(searchParams.size > 0 ? `/mvp?${searchParams.toString()}` : "/mvp");
                 });

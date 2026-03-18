@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import Link from "next/link";
 import { useState, useEffect } from "react";
 import { DirectorControls } from "@/components/Viewfinder/DirectorControls";
 import { AgenticChat, AgentAction } from "@/components/Viewfinder/AgenticChat";
@@ -16,6 +17,8 @@ const SceneViewer = dynamic(() => import("@/components/Viewfinder/SceneViewer"),
 
 const PRO_EXPERIMENT_TRUTH =
     "Experimental /pro sandbox. Video generation uses a mocked API response and is not connected to live providers, auth, billing, or entitlements.";
+const PRO_CORE_WORKFLOW_REDIRECT =
+    "Production brief, world ingest, review, and named handoff now live in /app/worlds and /mvp. /pro remains maintenance-only until real provider-backed orchestration is folded into the core workflow.";
 
 type GeneratedVideoResponse = {
     success?: boolean;
@@ -228,18 +231,26 @@ export default function ProPage() {
                         </div>
                         <div>
                             <h1 className="font-bold tracking-widest text-sm uppercase">Gauset Pro Experimental</h1>
-                            <p className="text-[10px] uppercase tracking-[0.16em] text-amber-300/80">Mock render lane</p>
+                            <p className="text-[10px] uppercase tracking-[0.16em] text-amber-300/80">Maintenance-only mock lane</p>
                         </div>
                     </div>
-                    {isSceneReady && (
-                        <button
-                            onClick={handleExportScenario}
-                            title="Export Scene Configuration"
-                            className="p-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg transition-colors text-white/70 hover:text-white flex items-center gap-2 text-xs"
+                    <div className="flex items-center gap-2">
+                        <Link
+                            href="/app/worlds"
+                            className="rounded-lg border border-cyan-300/20 bg-cyan-400/10 px-3 py-2 text-[11px] font-medium uppercase tracking-[0.14em] text-cyan-50 transition-colors hover:border-cyan-200/30 hover:bg-cyan-400/15"
                         >
-                            <Save className="w-4 h-4" /> Save
-                        </button>
-                    )}
+                            Open core workflow
+                        </Link>
+                        {isSceneReady && (
+                            <button
+                                onClick={handleExportScenario}
+                                title="Export Scene Configuration"
+                                className="p-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg transition-colors text-white/70 hover:text-white flex items-center gap-2 text-xs"
+                            >
+                                <Save className="w-4 h-4" /> Save
+                            </button>
+                        )}
+                    </div>
                 </div>
 
                 <div
@@ -248,6 +259,7 @@ export default function ProPage() {
                 >
                     <p className="text-[10px] font-medium uppercase tracking-[0.16em] text-amber-50">Experimental surface</p>
                     <p className="mt-2">{PRO_EXPERIMENT_TRUTH}</p>
+                    <p className="mt-2 text-amber-200/90">{PRO_CORE_WORKFLOW_REDIRECT}</p>
                 </div>
                 {videoTruth !== PRO_EXPERIMENT_TRUTH && !videoUrl && (
                     <div className="mx-5 rounded-2xl border border-rose-400/20 bg-rose-400/10 px-4 py-3 text-[11px] leading-5 text-rose-100">

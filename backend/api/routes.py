@@ -47,6 +47,7 @@ WORLD_SOURCE_VERSION = "gauset.world_source.v1"
 LANE_METADATA_VERSION = "gauset.lane_truth.v1"
 HANDOFF_MANIFEST_VERSION = "gauset.handoff_manifest.v1"
 HANDOFF_TARGETS = ["scene_document_v2", "external_world_package", "unreal_handoff_manifest"]
+WORLD_INGEST_RECORD_VERSION = "world-ingest/v1"
 SCENE_DOCUMENT_GRAPH_MISMATCH_CODE = "SCENE_DOCUMENT_GRAPH_MISMATCH"
 
 
@@ -203,7 +204,12 @@ def _write_json_dict(path: Path, payload: Dict[str, Any]) -> None:
 
 
 def _source_kind_for_type(source_type: str) -> str:
-    return "provider_generated_still" if source_type == "generated" else "uploaded_still"
+    return "provider_generated_still" if source_type == "generated" else "upload"
+
+
+def _normalize_ingest_source_kind(source_kind: str) -> str:
+    normalized = str(source_kind or "").strip() or "upload"
+    return "upload" if normalized == "uploaded_still" else normalized
 
 
 def _source_origin_for_type(source_type: str) -> str:
@@ -268,6 +274,25 @@ def _load_upload_record(image_id: str) -> Dict[str, Any]:
 
 
 def _build_upload_response(record: Dict[str, Any]) -> Dict[str, Any]:
+    source_provenance = record.get("source_provenance") if isinstance(record.get("source_provenance"), dict) else _build_source_provenance(record)
+    ingest_record = _build_ingest_record(
+        ingest_id=f"ingest_{str(record['image_id']).strip()}",
+        source_kind=_normalize_ingest_source_kind(source_provenance.get("kind") or "upload"),
+        source_label=str(record.get("original_filename") or record["filename"]).strip() or str(record["image_id"]),
+        vendor=_text_or_none(record.get("provider")),
+        source_uri=str(record.get("url") or "").strip() or None,
+        origin=_text_or_none(source_provenance.get("origin")),
+        ingest_channel=_text_or_none(source_provenance.get("ingest_channel")) or "upload",
+        media_type=_guess_media_type(str(record.get("filepath") or "")),
+        scene_id=None,
+        lane="upload",
+        truth_label="Uploaded source only",
+        lane_truth="single_image_upload",
+        blockers=["Single uploaded image is only a source input, not a durable world handoff."],
+        production_readiness="blocked",
+        files={"source": record.get("url")},
+        entrypoints={"source": record.get("url")},
+    )
     return {
         "image_id": record["image_id"],
         "filename": record["filename"],
@@ -278,7 +303,8 @@ def _build_upload_response(record: Dict[str, Any]) -> Dict[str, Any]:
         "model": record.get("model"),
         "prompt": record.get("prompt"),
         "generation_job_id": record.get("generation_job_id"),
-        "source_provenance": record.get("source_provenance"),
+        "source_provenance": source_provenance,
+        "ingest_record": ingest_record,
     }
 
 
@@ -293,9 +319,12 @@ def _build_world_source(
     frame_count: int | None = None,
 ) -> Dict[str, Any]:
     sources = [source for source in (upstream_sources or [primary_source]) if isinstance(source, dict)]
+    kind = str(primary_source.get("kind") or "upload").strip() or "upload"
+    if kind == "uploaded_still":
+        kind = "upload"
     return {
         "schema_version": WORLD_SOURCE_VERSION,
-        "kind": str(primary_source.get("kind") or "uploaded_still").strip() or "uploaded_still",
+        "kind": kind,
         "origin": "local_backend_ingest",
         "ingest_channel": ingest_channel,
         "lane": lane,
@@ -355,6 +384,86 @@ def _build_handoff_manifest(
         "targets": list(HANDOFF_TARGETS),
         "source_kind": str(world_source.get("kind") or "").strip() or None,
         "blockers": _list_of_text(blockers or [], limit=8),
+    }
+
+
+def _build_ingest_record(
+    *,
+    ingest_id: str,
+    source_kind: str,
+    source_label: str,
+    vendor: str | None,
+    source_uri: str | None,
+    origin: str | None,
+    ingest_channel: str | None,
+    media_type: str | None,
+    scene_id: str | None,
+    version_id: str | None = None,
+    lane: str | None = None,
+    truth_label: str | None = None,
+    lane_truth: str | None = None,
+    blockers: List[str] | None = None,
+    production_readiness: str = "blocked",
+    files: Dict[str, Any] | None = None,
+    entrypoints: Dict[str, Any] | None = None,
+    save_ready: bool = False,
+    review_ready: bool = False,
+    share_ready: bool = False,
+) -> Dict[str, Any]:
+    normalized_files = {
+        key: str(value).strip()
+        for key, value in (files or {}).items()
+        if str(key).strip() and str(value).strip()
+    }
+    normalized_entrypoints = {
+        key: str(value).strip()
+        for key, value in (entrypoints or {}).items()
+        if str(key).strip() and str(value).strip()
+    }
+    return {
+        "contract": WORLD_INGEST_RECORD_VERSION,
+        "ingest_id": ingest_id,
+        "status": "accepted",
+        "source": {
+            "kind": source_kind,
+            "label": source_label,
+            "vendor": vendor,
+            "captured_at": _utc_now(),
+            "source_uri": source_uri,
+            "origin": origin,
+            "ingest_channel": ingest_channel,
+        },
+        "package": {
+            "media_type": media_type,
+            "checksum_sha256": None,
+            "entrypoints": normalized_entrypoints,
+            "files": normalized_files,
+        },
+        "scene_document": None,
+        "compatibility_scene_graph": None,
+        "workspace_binding": {
+            "project_id": None,
+            "scene_id": scene_id,
+        },
+        "versioning": {
+            "version_id": version_id,
+            "version_locked": bool(version_id),
+        },
+        "workflow": {
+            "workspace_path": normalized_entrypoints.get("workspace"),
+            "review_path": normalized_entrypoints.get("review"),
+            "share_path": normalized_entrypoints.get("share"),
+            "save_ready": save_ready,
+            "review_ready": review_ready,
+            "share_ready": share_ready,
+        },
+        "truth": {
+            "lane": lane,
+            "truth_label": truth_label,
+            "lane_truth": lane_truth,
+            "production_readiness": production_readiness,
+            "blockers": _list_of_text(blockers or [], limit=8),
+        },
     }
 
 
@@ -444,6 +553,33 @@ def _merge_generation_metadata(
         ),
         blockers=list(delivery.get("blocking_issues") or []),
     )
+    scene_id = metadata_path.parents[1].name
+    scene_urls = _scene_urls(scene_id)
+    ingest_record = _build_ingest_record(
+        ingest_id=f"ingest_{scene_id}",
+        source_kind=_normalize_ingest_source_kind(world_source.get("kind") or "upload"),
+        source_label=str(upload_record.get("original_filename") or upload_record.get("filename") or scene_id).strip() or scene_id,
+        vendor=_text_or_none(upload_record.get("provider")),
+        source_uri=str(upload_record.get("url") or "").strip() or None,
+        origin=_text_or_none(source_provenance.get("origin")) or _text_or_none(world_source.get("origin")),
+        ingest_channel=ingest_channel,
+        media_type="application/x-gauset-scene-document+json",
+        scene_id=scene_id,
+        lane=lane,
+        truth_label=_text_or_none(metadata.get("truth_label")) or str(delivery.get("label") or f"{lane.title()} workflow"),
+        lane_truth=lane_truth,
+        blockers=list(delivery.get("blocking_issues") or []),
+        production_readiness="production_ready" if production_ready else "review_only" if lane == "preview" else "blocked",
+        files=scene_urls,
+        entrypoints={
+            "workspace": f"/mvp?scene={scene_id}",
+            "review": f"/mvp/review?scene={scene_id}",
+            "metadata": scene_urls.get("metadata"),
+        },
+        save_ready=True,
+        review_ready=True,
+        share_ready=False,
+    )
 
     metadata.update(
         {
@@ -457,6 +593,7 @@ def _merge_generation_metadata(
             "lane_metadata": lane_metadata,
             "delivery": delivery,
             "handoff_manifest": handoff_manifest,
+            "ingest_record": ingest_record,
             **(extra_fields or {}),
         }
     )
@@ -1366,6 +1503,27 @@ def _capture_session_payload(session: Dict[str, Any]) -> Dict[str, Any]:
         summary="Capture session truth is explicit, but downstream handoff remains blocked until the dedicated reconstruction worker exists.",
         blockers=list(lane_metadata.get("blockers") or []),
     )
+    ingest_record = _build_ingest_record(
+        ingest_id=f"ingest_{session['session_id']}",
+        source_kind="capture_session",
+        source_label=f"Capture session {session['session_id']}",
+        vendor=None,
+        source_uri=None,
+        origin=_text_or_none(capture_world_source.get("origin")),
+        ingest_channel="capture_session",
+        media_type="application/x-gauset-capture-session+json",
+        scene_id=None,
+        lane="reconstruction",
+        truth_label="Capture session pending reconstruction worker",
+        lane_truth="gpu_worker_not_connected",
+        blockers=list(lane_metadata.get("blockers") or []),
+        production_readiness="blocked",
+        files={"capture_session": session["session_id"]},
+        entrypoints={"workspace": "/mvp", "review": "/mvp/review"},
+        save_ready=False,
+        review_ready=False,
+        share_ready=False,
+    )
     next_actions = (
         [
             "Capture set passes local QC, but the dedicated multi-view worker is not connected yet.",
@@ -1396,6 +1554,7 @@ def _capture_session_payload(session: Dict[str, Any]) -> Dict[str, Any]:
         "world_source": capture_world_source,
         "lane_metadata": lane_metadata,
         "handoff_manifest": handoff_manifest,
+        "ingest_record": ingest_record,
         "quality_summary": {
             "score": round(max(0.0, 10.0 - duplicate_ratio * 10.0), 1),
             "coverage_score": round(min(10.0, frame_count / max(CAPTURE_MIN_IMAGES, 1) * 10.0), 1),
@@ -1786,6 +1945,31 @@ async def generate_environment_api(payload: GenerateRequest, background_tasks: B
     scene_id = f"scene_{str(uuid.uuid4())[:8]}"
     output_dir = SCENES_DIR / scene_id / "environment"
     output_dir.mkdir(parents=True, exist_ok=True)
+    pending_ingest_record = _build_ingest_record(
+        ingest_id=f"ingest_{scene_id}",
+        source_kind=str(pending_world_source.get("kind") or "upload").strip() or "upload",
+        source_label=str(upload_record.get("original_filename") or upload_record.get("filename") or scene_id).strip() or scene_id,
+        vendor=_text_or_none(upload_record.get("provider")),
+        source_uri=str(upload_record.get("url") or "").strip() or None,
+        origin=_text_or_none(source_provenance.get("origin")) or _text_or_none(pending_world_source.get("origin")),
+        ingest_channel="generate_environment",
+        media_type="application/x-gauset-scene-document+json",
+        scene_id=scene_id,
+        lane="preview",
+        truth_label="Preview world is processing",
+        lane_truth="single_image_preview_processing",
+        blockers=["Job still processing."],
+        production_readiness="blocked",
+        files=_scene_urls(scene_id),
+        entrypoints={
+            "workspace": f"/mvp?scene={scene_id}",
+            "review": f"/mvp/review?scene={scene_id}",
+            "metadata": _scene_urls(scene_id).get("metadata"),
+        },
+        save_ready=False,
+        review_ready=False,
+        share_ready=False,
+    )
 
     jobs[scene_id] = {
         "id": scene_id,
@@ -1810,6 +1994,7 @@ async def generate_environment_api(payload: GenerateRequest, background_tasks: B
             summary="Single-image preview job is still processing, so no downstream handoff can be claimed yet.",
             blockers=["Job still processing."],
         ),
+        "ingest_record": pending_ingest_record,
         **job_context,
         "created_at": _utc_now(),
         "updated_at": _utc_now(),
@@ -1860,10 +2045,12 @@ async def generate_environment_api(payload: GenerateRequest, background_tasks: B
                 ready=False,
                 summary="Preview metadata was normalized, but downstream handoff remains blocked.",
             )
+            ingest_record = metadata.get("ingest_record") if isinstance(metadata.get("ingest_record"), dict) else pending_ingest_record
             jobs[scene_id]["status"] = "completed"
             jobs[scene_id]["lane_truth"] = str(metadata.get("lane_truth") or "single_image_lrm_preview")
             jobs[scene_id]["lane_metadata"] = lane_metadata
             jobs[scene_id]["handoff_manifest"] = handoff_manifest
+            jobs[scene_id]["ingest_record"] = ingest_record
             jobs[scene_id]["result"] = {
                 "scene_id": scene_id,
                 "environment_dir": str(generated_dir),
@@ -1876,6 +2063,7 @@ async def generate_environment_api(payload: GenerateRequest, background_tasks: B
                 "lane_truth": str(metadata.get("lane_truth") or "single_image_lrm_preview"),
                 "lane_metadata": lane_metadata,
                 "handoff_manifest": handoff_manifest,
+                "ingest_record": ingest_record,
             }
         except Exception as exc:
             jobs[scene_id]["status"] = "failed"
@@ -1892,6 +2080,7 @@ async def generate_environment_api(payload: GenerateRequest, background_tasks: B
         "source_type": upload_record["source_type"],
         "source_provenance": source_provenance,
         "world_source": pending_world_source,
+        "ingest_record": pending_ingest_record,
     }
 
 

@@ -38,7 +38,7 @@
     "test:mvp-workspace-persistence": "node --experimental-loader ./scripts/node-path-alias-loader.mjs --experimental-strip-types --experimental-specifier-resolution=node scripts/test_mvp_workspace_persistence.ts",
     "test:platform-contracts": "node --experimental-loader ./scripts/node-path-alias-loader.mjs --experimental-strip-types --experimental-specifier-resolution=node scripts/test_platform_contracts.ts",
     "test:platform-auth-contracts": "node --experimental-strip-types --experimental-specifier-resolution=node scripts/test_platform_auth_contracts.ts",
-    "test:platform-scenarios": "node --experimental-strip-types --experimental-specifier-resolution=node scripts/test_platform_scenarios.ts",
+    "test:platform-scenarios": "node --experimental-loader ./scripts/node-path-alias-loader.mjs --experimental-strip-types --experimental-specifier-resolution=node scripts/test_platform_scenarios.ts",
     "test:platform-release-gates": "node --experimental-loader ./scripts/node-path-alias-loader.mjs scripts/test_platform_release_gates.mjs",
     "test:project-world-link-audit": "node scripts/check_project_world_link_ownership_audit.mjs",
     "test:platform-routes": "node scripts/test_platform_route_smoke.mjs",

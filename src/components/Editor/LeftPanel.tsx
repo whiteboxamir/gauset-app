@@ -29,6 +29,11 @@ export default function LeftPanel({
         handleGenerationStart,
         handleGenerationSuccess,
         handleGenerationError,
+        launchProjectId,
+        launchIntent,
+        launchBrief,
+        launchReferences,
+        launchProviderId,
     } = useMvpWorkspaceSession();
     const intake = useMvpWorkspaceIntakeController({
         setActiveScene,
@@ -39,6 +44,11 @@ export default function LeftPanel({
         handleGenerationStart,
         handleGenerationSuccess,
         handleGenerationError,
+        launchProjectId,
+        launchIntent,
+        launchBrief,
+        launchReferences,
+        launchProviderId,
     });
     const showCondensedOfflineState = intake.backendMode === "offline" && !intake.selectedUpload && (intake.captureSession?.frame_count ?? 0) === 0;
 

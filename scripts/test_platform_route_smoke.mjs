@@ -47,7 +47,7 @@ const pageChecks = [
     },
     {
         file: "src/app/(app)/app/worlds/[projectId]/page.tsx",
-        tokens: ["ContinuitySurfacePanel", "ReleaseReadinessPanel", "getProjectReadinessDetailForSession", "getPlatformOpsSurfaceForSession"],
+        tokens: ["ContinuitySurfacePanel", "ReleaseReadinessPanel", "ProjectWorldLaunchPanel", "getProjectReadinessDetailForSession", "getPlatformOpsSurfaceForSession"],
     },
 ];
 
@@ -151,6 +151,10 @@ const apiChecks = [
     {
         file: "src/app/api/projects/[projectId]/world-links/route.ts",
         tokens: ["addWorldLinkToProjectForSession", "syncPlatformNotificationsAfterMutation"],
+    },
+    {
+        file: "src/app/api/projects/[projectId]/world-links/[sceneId]/handoff/route.ts",
+        tokens: ["buildProjectWorldHandoffForSession", "getProjectDetailForSession"],
     },
     {
         file: "src/app/api/projects/[projectId]/review-shares/readiness/route.ts",
