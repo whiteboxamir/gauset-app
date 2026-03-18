@@ -19,14 +19,24 @@ Standalone application repository for the Gauset product app (editor + local bac
 
 ## Local run
 
-### Frontend
+### Full local stack
 
 ```bash
 npm install --legacy-peer-deps
 npm run dev
 ```
 
-### Backend
+`npm run dev` starts the local backend plus the MVP frontend and prints the exact workspace URL, which defaults to `http://127.0.0.1:3015/mvp`.
+
+### Frontend only
+
+```bash
+npm run dev:web
+```
+
+Use `npm run dev:web` only when you intentionally want the standalone Next.js frontend on port `3001`.
+
+### Backend only
 
 ```bash
 ./setup.sh
@@ -40,3 +50,8 @@ Backend docs: `http://127.0.0.1:8000/docs`
 
 - This repo is app-focused and intentionally separate from the marketing/landing site.
 - Current model wrappers are scaffolded and can be replaced with full ML-Sharp / TripoSR inference.
+
+## Platform activation
+
+- Readiness diagnostics: `npm run diagnose:platform-readiness`
+- Staging activation runbook: `docs/platform-staging-activation-runbook.md`

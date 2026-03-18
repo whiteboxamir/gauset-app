@@ -18,6 +18,7 @@ Both are reached from the frontend through the same Next catch-all proxy: `src/a
 - [request-flow.md](./request-flow.md): end-to-end request paths from UI to proxy to backend to storage outputs.
 - [file-ownership.md](./file-ownership.md): directory ownership matrix, hot paths, and safe isolation zones.
 - [component-map.md](./component-map.md): route-level and component-level map of the current app shell.
+- [shot-orchestration.md](./shot-orchestration.md): minimal spec for compiling world state into provider-agnostic shot generation inputs.
 
 ## Shared Hot Paths
 

@@ -1,82 +1,79 @@
 # File Ownership Matrix
 
-This matrix is tuned for parallel work. "Runtime-critical" means a change can break the current app without touching any other layer.
+Date: March 17, 2026
 
-## Ownership Matrix
+Status: Freeze gate active for Phase 2 closeout -> Phase 3 renderer prep. Implementation lanes remain blocked until the truth-freeze commit exists.
 
-| Zone | Purpose | Runtime-Critical | Conflict Risk | Isolation Guidance |
-| --- | --- | --- | --- | --- |
-| `src/app/mvp`, `src/app/mvp/review` | Active MVP editor and read-only review routes | High | High | Keep one owner at a time unless work is split cleanly between editor shell and review shell |
-| `src/components/Editor` | MVP upload, generation, viewer, save, review, comment UI | High | High | Shared hot path; any UI contract change here usually requires backend awareness |
-| `src/lib/mvp-api.ts`, `src/lib/mvp-product.ts`, `src/lib/mvp-review.ts` | Shared MVP URL helpers and payload normalization | High | High | Treat as contract files, not as leaf utilities |
-| `src/app/api/mvp/[...path]/route.ts` | Sole transport bridge from Next to Python backend | High | Very High | Single-owner zone; path or header changes affect all MVP flows |
-| `backend/server.py`, `backend/api`, `backend/models` | Local backend, local storage mounts, model wrappers, local reconstruction | High | High | Separate owner from frontend if possible; coordinate on payload shape only |
-| `vercel-backend` | Deployed Python backend, storage backend abstraction, `/storage` proxy | High | High | Separate owner from local backend only if a clear API contract freeze exists |
-| `uploads`, `assets`, `scenes`, `captures`, `reconstruction_cache` | Runtime-generated state and artifacts | High state impact | Medium | Do not use for source edits; safe to inspect, unsafe as a merge surface |
-| `src/app/pro`, `src/components/Viewfinder`, `src/app/api/generate`, `src/app/api/agent`, `src/app/api/interrogate` | Separate prototype workspace and mock APIs | Medium | Low | Good isolated thread; does not use `/api/mvp` |
-| `src/app/login`, `src/app/dashboard`, `src/app/api/waitlist`, `src/app/api/auth/logout`, `src/app/actions.ts`, `src/lib/db.ts`, `src/lib/supabase.ts` | Auth, waitlist, lightweight app shell state | Medium | Low to Medium | Good isolated thread; overlap mostly limited to shared styling and env config |
-| `src/components/ui/LoginForm.tsx`, `src/components/ui/BackgroundNoise.tsx` | UI used by active login/dashboard routes | Medium | Low | Safe as long as auth owners coordinate |
-| `src/components/experience`, `src/components/layout` | Currently unwired experience/marketing components | Low | Low | Strong low-conflict zone; confirm future intent before major rewrites |
-| `src/components/ui/WaitlistForm.tsx`, `SuccessOverlay.tsx`, `GlitchText.tsx`, `EngineSimulation.tsx`, `WordFadeIn.tsx`, `FadeIn.tsx` | Mostly tied to dormant experience components | Low | Low | Safe isolated work; low immediate app risk |
-| `public` | Static media assets | Low | Low | Usually isolated unless an active page starts referencing them |
-| `tests`, `scripts` | Validation, smoke coverage, audits | Low runtime risk | Medium contract risk | Safe parallel work if tests track existing contracts rather than redefine them |
-| `docs`, `maps`, empty `contracts`, empty `runbooks` | Documentation and planning | None | Low | Best zone for analysis-only work |
-| `package.json`, `next.config.mjs`, `setup.sh` | Repo-wide build/runtime/config | Very High | Very High | Never split casually; single-owner changes only |
-| `backend/ml-sharp`, `backend/TripoSR` | Vendored model repos used by local backend | High local impact | Medium | Avoid concurrent edits unless doing model integration work only |
+This matrix reflects the clean split for this cycle and reserves viewer-first HUD redesign files as hard stop-signs.
 
-## Highest-Risk Shared Files
+Base reference:
 
-If two threads touch any of these, expect rebasing and behavior drift:
+- `/Users/amirboz/gauset-app/docs/post-merge-truth-freeze-baseline.md`
 
-- `src/app/api/mvp/[...path]/route.ts`
-- `src/lib/mvp-product.ts`
+## Freeze Stop-Sign Surfaces
+
+- `src/app/mvp/_components/MVPWorkspaceRuntime.tsx`
+- `src/components/Editor/ViewerPanel.tsx`
 - `src/components/Editor/LeftPanel.tsx`
 - `src/components/Editor/RightPanel.tsx`
 - `src/components/Editor/ThreeOverlay.tsx`
-- `src/app/mvp/page.tsx`
-- `backend/api/routes.py`
-- `vercel-backend/app.py`
+- `src/app/api/mvp/[...path]/route.ts`
+- `src/components/Editor/useThreeOverlayViewerRuntimeController.ts`
+- `src/components/Editor/useThreeOverlaySurfaceController.ts` (when shell semantics are touched)
+- `src/components/Editor/useViewerPanelController.ts` (when toolbar action semantics are touched)
+- `package.json`
+- `next.config.mjs`
+- `tsconfig.json`
+- `src/app/layout.tsx`
+- `src/app/globals.css`
 
-## Best Non-Overlapping Thread Lanes
+If any of these files change, the clean freeze must be recreated before continuation.
 
-Use these lanes when splitting work:
+## Pre-Freeze Green Zone
 
-1. MVP frontend lane
-   - Owns: `src/app/mvp`, `src/components/Editor`, `src/lib/mvp-*`
-   - Avoids: both Python backends unless a contract change is explicitly coordinated
+Until the truth-freeze commit lands, only these parallel tasks are green-lit:
 
-2. Local backend lane
-   - Owns: `backend/server.py`, `backend/api`, `backend/models`
-   - Avoids: `vercel-backend`, frontend UI files
+- Docs/maps ownership fixes in the freeze document set.
+- Read-only overlap scans against the stop-sign set.
+- Read-only contract/runtime gap reports.
+- Read-only backend parity maps.
+- Isolated baseline captures, artifact packets, and runbook notes created outside reserved shell files.
 
-3. Vercel backend lane
-   - Owns: `vercel-backend`
-   - Avoids: local backend internals unless intentionally syncing contracts
+If the shared tree already carries stop-sign edits, new implementation lanes must start from fresh worktrees cut from the freeze commit.
 
-4. Pro workspace lane
-   - Owns: `src/app/pro`, `src/components/Viewfinder`, mock API routes under `src/app/api/{generate,agent,interrogate}`
-   - Avoids: MVP proxy and Python backend
+## Ownership Matrix
 
-5. Auth/waitlist lane
-   - Owns: login/dashboard/waitlist/actions/db/supabase
-   - Avoids: MVP stack
+| Zone | Purpose | Runtime Critical | Conflict Risk | Isolation Guidance |
+| --- | --- | --- | --- | --- |
+| Viewer-first HUD redesign stop-sign set | `MVPWorkspaceRuntime` composition, viewer HUD shell, transport entrypoint | Very High | Stop-sign | Single owner only. No phase 2 closeout edits through these files. |
+| Contracts + validation | Product contracts, scenario tests, schema validation | High | High | Keep contracts aligned with runtime behavior; no shell ownership changes. |
+| `backend`, `backend/api` | local backend truth and ingest pipelines | High | High | Coordinate payloads via contracts and scenario tests. |
+| `vercel-backend` | public backend parity and deployment runtime | High | High | Own parity independently from local backend internals. |
+| `src/server/projects`, `src/server/review-shares` | project/world links and review-share runtime | High | High | Keep scene-document provenance truth and delivery fields. |
+| `src/app/api/projects`, `src/app/api/review-shares`, `src/components/worlds` | project/review API and UI glue | Medium | Medium-High | Avoid touching shell stop-sign files. |
+| `src/app/mvp/_hooks`, `src/lib/scene-graph`, `src/state` | scene-document-first editor behavior, save/version/review plumbing | High | High | Work only on persistence/review/export document shape; do not edit design shell files. |
+| `docs`, `maps`, `tests/platform`, `scripts/test_*` | protocol and verification surface | Low | Medium | Safe to update for new gates, branch split, and runbooks. |
+| Shared generated/runtime folders | `uploads`, `assets`, `scenes`, `captures`, `reconstruction_cache` | State impact only | Medium | Treat outputs as non-authoritative and avoid editing as truth sources. |
 
-6. Validation and docs lane
-   - Owns: `tests`, `scripts`, `docs`, `maps`
-   - Avoids: product code unless fixing broken tests
+## Lane Ownership Map
 
-## Areas That Look Isolated But Are Not
+- Freeze/docs lane owns `docs/post-merge-truth-freeze-baseline.md`, `docs/parallel-thread-start-pack.md`, and `maps/file-ownership.md`.
+- Contracts + validation lane owns `contracts/**`, `src/server/contracts/**`, and platform validation scripts.
+- Editor/document lane owns `src/app/mvp/_hooks/**`, `src/lib/mvp-review.ts`, `src/lib/scene-graph/**`, and `src/state/**` while avoiding redesign stop-sign shell files.
+- Backend ingest truth lane owns `backend/**` and `api/_mvp_backend/**` compatibility boundaries.
+- Vercel parity lane owns `vercel-backend/**` and public parity normalization surfaces.
+- Projects + handoff lane owns `src/server/projects/**`, `src/server/review-shares/**`, `src/components/worlds/**`, and related APIs.
+- Verification lane owns `docs/core-product-truth-validation-gates.md`, tests, and readiness check coordination.
 
-- `src/lib/mvp-product.ts`: looks like a small helper file but defines the frontend interpretation of backend capabilities and metadata.
-- `src/components/Editor/ViewerPanel.tsx`: looks visual-only but it drives the active scene state presented to save/review flows.
-- `backend/api/routes.py` vs `vercel-backend/app.py`: similar API shape, different implementation details; changing only one creates environment-specific bugs.
-- Runtime data directories: safe to inspect, but generated files can mislead developers if treated as source of truth instead of outputs.
+## Clean Branch Split
 
-## Areas That Are Actually Safe
+- `codex/truth-freeze-baseline`: freeze/docs and lane-contract authoring.
+- `codex/editor-scene-document`: scene-document persistence and editor review/export document-first changes.
+- `codex/contracts-validation-handoff`: contract families, platform scenarios, and acceptance gates.
+- `codex/backend-ingest-truth`: local backend ingest and provenance parity updates.
+- `codex/projects-review-links`: project/world-link and review-share truth expansion.
+- `codex/vercel-backend-parity`: public backend parity and provenance alignment.
 
-- `src/components/Viewfinder/*`
-- `src/app/pro/page.tsx`
-- dormant experience/layout components
-- docs, maps, and test-only automation scripts
+## Exit Condition
 
-Those zones have low direct coupling to the live MVP request spine.
+- Phase 2 closeout can proceed when each active lane is running from the same freeze commit and no edits are made to stop-sign surfaces outside redesign ownership.
