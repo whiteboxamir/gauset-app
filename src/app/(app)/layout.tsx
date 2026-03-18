@@ -27,17 +27,23 @@ export default async function PlatformAppLayout({ children }: { children: ReactN
     const workspaceState = surface.workspaceState ?? emptyWorkspaceState;
     const appNavGroups: PlatformNavGroup[] = [
         {
-            label: "Workspace",
+            label: "World Workflow",
             items: [
-                { href: "/app/dashboard", label: "Dashboard" },
                 { href: "/app/worlds", label: "Worlds" },
-                { href: "/app/billing", label: "Billing" },
+                { href: "/app/dashboard", label: "Operations" },
             ],
         },
         {
-            label: "Studio",
+            label: "Operate",
             items: [
+                { href: "/app/billing", label: "Billing" },
                 { href: "/app/team", label: "Team" },
+                { href: "/app/support", label: "Support" },
+            ],
+        },
+        {
+            label: "Settings",
+            items: [
                 { href: "/app/settings/profile", label: "Profile" },
                 { href: "/app/settings/governance", label: "Governance" },
                 { href: "/app/settings/security", label: "Security" },
@@ -46,7 +52,6 @@ export default async function PlatformAppLayout({ children }: { children: ReactN
                     label: "Notifications",
                     badge: notificationSummary && notificationSummary.unreadCount > 0 ? String(notificationSummary.unreadCount) : undefined,
                 },
-                { href: "/app/support", label: "Support" },
             ],
         },
     ];
@@ -55,10 +60,10 @@ export default async function PlatformAppLayout({ children }: { children: ReactN
         <AppShell
             navGroups={appNavGroups}
             accountLabel={session?.user.displayName ?? session?.user.email ?? "Design partner beta"}
-            environmentLabel="Platform shell"
-            eyebrow="Account platform"
-            title="Gauset control layer"
-            subtitle="Identity, ownership, billing, and support live here. The Phase 2 editor remains isolated until final integration."
+            environmentLabel="World workflow shell"
+            eyebrow="Projects, worlds, review, handoff"
+            title="Project and world workspace"
+            subtitle="Projects own the durable record. Worlds reopen into the workspace, review stays explicit, and handoff posture stays visible."
             statusLabel={
                 workspaceState.activeStudio
                     ? `${workspaceState.activeStudio.role} workspace · ${
@@ -110,9 +115,9 @@ export default async function PlatformAppLayout({ children }: { children: ReactN
             ) : null}
             {children ?? (
                 <EmptyState
-                    eyebrow="Reserved surface"
-                    title="Platform routes will mount here"
-                    body="Use the dedicated account-platform threads to fill this shell without touching the active editor work."
+                    eyebrow="World workflow"
+                    title="World routes mount here"
+                    body="Use this shell for project ownership, world launch, review posture, and handoff readiness around the workspace."
                 />
             )}
         </AppShell>

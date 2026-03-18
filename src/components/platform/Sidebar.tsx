@@ -32,8 +32,8 @@ export function Sidebar({
     return (
         <aside className="flex w-full max-w-xs shrink-0 flex-col border-r border-white/10 bg-black/40 backdrop-blur-xl">
             <div className="border-b border-white/10 px-5 py-5">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.28em] text-cyan-200/70">Gauset platform</p>
-                <h1 className="mt-3 text-xl font-medium tracking-tight text-white">Control layer</h1>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.28em] text-cyan-200/70">Gauset workflow</p>
+                <h1 className="mt-3 text-xl font-medium tracking-tight text-white">World-first shell</h1>
                 <div className="mt-4 flex flex-wrap gap-2">
                     {environmentLabel ? <StatusBadge label={environmentLabel} tone="info" /> : null}
                     {accountLabel ? <StatusBadge label={accountLabel} tone="neutral" /> : null}

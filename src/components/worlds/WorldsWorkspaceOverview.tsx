@@ -56,10 +56,10 @@ export function WorldsWorkspaceOverview({
         <section className="overflow-hidden rounded-[2.2rem] border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(14,165,233,0.18),transparent_34%),radial-gradient(circle_at_bottom_right,rgba(34,197,94,0.14),transparent_28%),linear-gradient(180deg,rgba(255,255,255,0.08),rgba(255,255,255,0.03))] p-6 shadow-[0_28px_90px_rgba(0,0,0,0.28)]">
             <div className="flex flex-wrap items-start justify-between gap-6">
                 <div className="max-w-3xl">
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.28em] text-cyan-200/70">World library</p>
-                    <h1 className="mt-3 text-3xl font-medium tracking-tight text-white">Project home for owned worlds</h1>
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.28em] text-cyan-200/70">Primary workflow</p>
+                    <h1 className="mt-3 text-3xl font-medium tracking-tight text-white">Open a project. Launch a world. Keep review and handoff honest.</h1>
                     <p className="mt-3 text-sm leading-7 text-neutral-300">
-                        Browse the durable project layer, see which worlds are really linked, and reopen owned worlds directly inside the authenticated workspace shell.
+                        This is the authenticated home for the core workflow: project ownership, truthful world linkage, direct workspace launch, and visible review and handoff posture.
                     </p>
                     {resumeProject?.primarySceneId ? (
                         <div className="mt-5 rounded-[1.4rem] border border-white/10 bg-black/20 px-4 py-4">
@@ -87,9 +87,22 @@ export function WorldsWorkspaceOverview({
                         />
                     </div>
                     <div className="mt-6 flex flex-wrap gap-3">
+                        {resumeProject?.primarySceneId ? (
+                            <OpenWorkspaceButton
+                                projectId={resumeProject.projectId}
+                                sceneId={resumeProject.primarySceneId}
+                                label={canAccessMvp ? "Return to last world" : "World workspace unavailable"}
+                                disabled={!canAccessMvp}
+                            />
+                        ) : (
+                            <OpenWorkspaceButton
+                                label={canAccessMvp ? "Open world workspace" : "World workspace unavailable"}
+                                disabled={!canAccessMvp}
+                            />
+                        )}
                         <Link
                             href="#project-library"
-                            className="rounded-2xl bg-white px-4 py-2.5 text-sm font-semibold text-black transition-colors hover:bg-neutral-200"
+                            className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-sm font-medium text-white transition-colors hover:border-white/20 hover:bg-white/[0.08]"
                         >
                             Jump to library
                         </Link>
@@ -99,21 +112,6 @@ export function WorldsWorkspaceOverview({
                         >
                             Create project
                         </Link>
-                        {resumeProject?.primarySceneId ? (
-                            <OpenWorkspaceButton
-                                projectId={resumeProject.projectId}
-                                sceneId={resumeProject.primarySceneId}
-                                label={canAccessMvp ? "Return to last world" : "Workspace shell unavailable"}
-                                disabled={!canAccessMvp}
-                                variant="secondary"
-                            />
-                        ) : (
-                            <OpenWorkspaceButton
-                                label={canAccessMvp ? "Open workspace shell" : "Workspace shell unavailable"}
-                                disabled={!canAccessMvp}
-                                variant="secondary"
-                            />
-                        )}
                     </div>
                 </div>
 

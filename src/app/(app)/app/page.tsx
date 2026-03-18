@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
 
 export default function PlatformAppIndexPage() {
-    redirect("/app/dashboard");
+    redirect("/app/worlds");
 }

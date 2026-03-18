@@ -61,8 +61,8 @@ export default async function PlatformWorldsPage() {
                 />
                 <ReleaseReadinessPanel
                     snapshot={workspaceReadiness}
-                    eyebrow="World release readiness"
-                    title="Can we safely send, share, review, and operate right now?"
+                    eyebrow="Workflow readiness"
+                    title="Can this world workflow safely open, review, and hand off right now?"
                     maxGates={4}
                 />
             </div>
@@ -79,41 +79,41 @@ export default async function PlatformWorldsPage() {
             </div>
 
             <OperationalAttentionStrip
-                eyebrow="Project coordination"
-                title="Project-risk ownership"
+                eyebrow="Supporting operations"
+                title="Project risks that still need follow-through"
                 items={projectItems}
                 viewer={coordinationSnapshot.viewer}
                 operators={coordinationSnapshot.operators}
                 maxSnoozeHours={coordinationSnapshot.workload.maxSnoozeHours}
                 coverage={coordinationSnapshot.coverage}
-                emptyBody="Project operating posture is currently stable across the shared coordination model."
+                emptyBody="The primary world workflow is stable across the current project set."
             />
 
             <div className="grid gap-6 xl:grid-cols-[1.05fr,0.95fr]">
                 <CoverageSurfacePanel
-                    eyebrow="Project coverage"
-                    title="Project-risk owner availability and lane coverage"
+                    eyebrow="Supporting coverage"
+                    title="Owner availability behind the active world workflow"
                     domains={["projects"]}
                     items={projectItems}
                     coverage={coordinationSnapshot.coverage}
                     viewer={coordinationSnapshot.viewer}
                     operators={coordinationSnapshot.operators}
                     maxSnoozeHours={coordinationSnapshot.workload.maxSnoozeHours}
-                    emptyBody="Project-risk ownership is aligned with current availability and capacity."
+                    emptyBody="Coverage is aligned behind the current world workflow."
                 />
                 <ContinuitySurfacePanel
                     snapshot={continuitySnapshot}
                     domains={["projects"]}
-                    eyebrow="Project continuity"
-                    title="Project-risk handoff posture"
-                    emptyBody="No project-risk continuity handoff has been recorded yet."
+                    eyebrow="Supporting continuity"
+                    title="Continuity posture around project-risk work"
+                    emptyBody="No continuity handoff is currently needed for the active world workflow."
                 />
             </div>
 
             <div className="grid gap-6 xl:grid-cols-[1.05fr,0.95fr]">
                 <LaneSubscriptionPanel
-                    title="Follow or mute project-risk routing"
-                    subtitle="Project follows determine whether risky world posture becomes a persistent delivery for this workspace operator."
+                    title="Follow supporting project-risk routing"
+                    subtitle="Use follows for secondary operating signals around worlds rather than as the primary path into the product."
                     subscriptions={notificationSubscriptions}
                     domains={["projects"]}
                     compact
