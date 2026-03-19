@@ -1,6 +1,6 @@
 import * as THREE from "three";
 
-import { DIRECT_ORDER_CULL_SENTINEL, SH_C0, type SharpGaussianPayload } from "./sharpGaussianShared";
+import { DIRECT_ORDER_CULL_SENTINEL, DIRECT_REST_MIN_AXIS_PX, SH_C0, type SharpGaussianPayload } from "./sharpGaussianShared";
 
 export const DIRECT_GAUSSIAN_VERTEX_SHADER = `
 precision highp float;
@@ -26,6 +26,8 @@ flat out vec3 vColorPayload;
 flat out float vAlpha;
 flat out vec3 vViewDirection;
 flat out ivec2 vTextureCoords;
+flat out float vProjectedMajorAxisPx;
+flat out float vProjectedMinorAxisPx;
 out vec2 vLocalCoord;
 
 ivec2 textureCoordsForIndex(uint index, vec2 textureSize) {
@@ -129,6 +131,8 @@ void main() {
     vec2 perpendicularDirection = vec2(-axisDirection.y, axisDirection.x);
     vec2 majorAxis = axisDirection * clamp(sqrt(lambdaMajor) * uCovarianceScale, uMinAxisPx, uMaxAxisPx);
     vec2 minorAxis = perpendicularDirection * clamp(sqrt(lambdaMinor) * uCovarianceScale, uMinAxisPx, uMaxAxisPx);
+    float projectedMajorAxisPx = length(majorAxis);
+    float projectedMinorAxisPx = length(minorAxis);
 
     vec2 pixelOffset = (corner.x * majorAxis) + (corner.y * minorAxis);
     vec2 ndcOffset = pixelOffset / vec2(0.5 * uViewport.x, 0.5 * uViewport.y);
@@ -154,6 +158,8 @@ void main() {
     vAlpha = instanceAlpha;
     vViewDirection = normalize(cameraPosition - worldCenter);
     vTextureCoords = coords;
+    vProjectedMajorAxisPx = projectedMajorAxisPx;
+    vProjectedMinorAxisPx = projectedMinorAxisPx;
     vLocalCoord = corner;
 }
 `;
@@ -165,6 +171,11 @@ precision highp sampler2DArray;
 
 uniform float uOpacityBoost;
 uniform float uColorGain;
+uniform float uColorContrast;
+uniform float uColorSaturation;
+uniform float uShadowLift;
+uniform float uFilmicMix;
+uniform float uCoreHaloMix;
 uniform float uColorPayloadIsLinear;
 uniform float uColorPayloadIsSHDC;
 uniform float uHasSphericalHarmonics;
@@ -175,6 +186,8 @@ flat in vec3 vColorPayload;
 flat in float vAlpha;
 flat in vec3 vViewDirection;
 flat in ivec2 vTextureCoords;
+flat in float vProjectedMajorAxisPx;
+flat in float vProjectedMinorAxisPx;
 in vec2 vLocalCoord;
 
 out vec4 outColor;
@@ -261,21 +274,52 @@ vec3 evaluateViewDependentColor() {
     return max(color, vec3(0.0));
 }
 
+vec3 applyRichColorGrade(vec3 color) {
+    vec3 workingColor = max(color, vec3(0.0));
+    float luma = dot(workingColor, vec3(0.2126, 0.7152, 0.0722));
+    vec3 saturated = mix(vec3(luma), workingColor, uColorSaturation);
+    vec3 contrasted = (saturated - 0.5) * uColorContrast + 0.5;
+    float shadowMask = 1.0 - smoothstep(0.08, 0.42, luma);
+    vec3 lifted = contrasted + vec3(shadowMask * uShadowLift);
+    vec3 filmic = clamp(
+        (lifted * (2.51 * lifted + 0.03)) / max(lifted * (2.43 * lifted + 0.59) + 0.14, vec3(0.14)),
+        vec3(0.0),
+        vec3(1.0)
+    );
+    return clamp(mix(lifted, filmic, clamp(uFilmicMix, 0.0, 1.0)), 0.0, 1.0);
+}
+
+float stableCoverageNoise(ivec2 coords) {
+    vec2 seed = vec2(coords);
+    return fract(sin(dot(seed, vec2(12.9898, 78.233))) * 43758.5453123);
+}
+
 void main() {
     float radiusSquared = dot(vLocalCoord, vLocalCoord);
-    if (radiusSquared > 1.0) {
+    float minorAxisPx = max(vProjectedMinorAxisPx, 0.01);
+    float majorAxisPx = max(vProjectedMajorAxisPx, minorAxisPx);
+    float anisotropy = clamp(majorAxisPx / minorAxisPx, 1.0, 16.0);
+    float subPixelSoftness = clamp((1.2 - minorAxisPx) * 0.4, 0.0, 0.28);
+    float anisotropySoftness = min((anisotropy - 1.0) * 0.025, 0.18);
+    float edgeWidth = max(fwidth(radiusSquared) * (1.35 + subPixelSoftness + anisotropySoftness), 0.012);
+    if (radiusSquared > 1.0 + edgeWidth) {
         discard;
     }
 
-    float gaussian = exp(-8.0 * radiusSquared);
-    float edgeFade = 1.0 - smoothstep(0.96, 1.0, radiusSquared);
+    float gaussianSharpness = mix(6.8, 8.4, clamp(minorAxisPx / 1.35, 0.0, 1.0));
+    float softGaussian = exp(-gaussianSharpness * radiusSquared);
+    float coreGaussian = exp(-(gaussianSharpness + 1.3) * radiusSquared);
+    float haloGaussian = exp(-max(4.4, gaussianSharpness - 1.2) * radiusSquared);
+    float gaussian = mix(softGaussian, max(coreGaussian, haloGaussian * 0.92), clamp(uCoreHaloMix, 0.0, 1.0));
+    float edgeFade = 1.0 - smoothstep(1.0 - edgeWidth, 1.0 + edgeWidth, radiusSquared);
     float alpha = clamp(vAlpha * uOpacityBoost * gaussian * edgeFade, 0.0, 1.0);
+    float alphaDiscardThreshold = mix(0.0011, 0.0018, stableCoverageNoise(vTextureCoords)) * (1.0 + subPixelSoftness * 0.4);
 
-    if (alpha < 0.002) {
+    if (alpha < alphaDiscardThreshold) {
         discard;
     }
 
-    outColor = vec4(clamp(evaluateViewDependentColor() * uColorGain, 0.0, 1.0), alpha);
+    outColor = vec4(clamp(applyRichColorGrade(evaluateViewDependentColor() * uColorGain), 0.0, 1.0), alpha);
 }
 `;
 
@@ -286,6 +330,8 @@ export function createSharpGaussianMaterial({
     payload: SharpGaussianPayload;
     isSingleImagePreview: boolean;
 }) {
+    const richnessEnabled = !isSingleImagePreview;
+    const hasSphericalHarmonics = payload.shBasisCount > 0 && !isSingleImagePreview;
     return new THREE.ShaderMaterial({
         glslVersion: THREE.GLSL3,
         uniforms: {
@@ -298,14 +344,19 @@ export function createSharpGaussianMaterial({
             uOrderTextureSize: { value: new THREE.Vector2(1, 1) },
             uViewport: { value: new THREE.Vector2(1, 1) },
             uCovarianceScale: { value: 1.0 },
-            uMinAxisPx: { value: 0.08 },
+            uMinAxisPx: { value: DIRECT_REST_MIN_AXIS_PX },
             uMaxAxisPx: { value: 96.0 },
             uOpacityBoost: { value: 1.0 },
             uColorGain: { value: 1.0 },
+            uColorContrast: { value: richnessEnabled ? (hasSphericalHarmonics ? 1.07 : 1.04) : 1.0 },
+            uColorSaturation: { value: richnessEnabled ? (hasSphericalHarmonics ? 1.12 : 1.07) : 1.0 },
+            uShadowLift: { value: richnessEnabled ? (hasSphericalHarmonics ? 0.02 : 0.012) : 0.0 },
+            uFilmicMix: { value: richnessEnabled ? (hasSphericalHarmonics ? 0.22 : 0.16) : 0.0 },
+            uCoreHaloMix: { value: richnessEnabled ? 0.28 : 0.14 },
             uShTexture: { value: payload.shTexture },
             uColorPayloadIsLinear: { value: payload.colorPayloadMode === "albedo_linear" ? 1 : 0 },
             uColorPayloadIsSHDC: { value: payload.colorPayloadMode === "sh_dc" ? 1 : 0 },
-            uHasSphericalHarmonics: { value: payload.shBasisCount > 0 && !isSingleImagePreview ? 1 : 0 },
+            uHasSphericalHarmonics: { value: hasSphericalHarmonics ? 1 : 0 },
             uShBasisCount: { value: payload.shBasisCount },
             uOrderTextureReady: { value: 0 },
             uCullSentinel: { value: DIRECT_ORDER_CULL_SENTINEL },
@@ -316,6 +367,7 @@ export function createSharpGaussianMaterial({
         depthWrite: false,
         depthTest: true,
         blending: THREE.NormalBlending,
+        dithering: true,
         toneMapped: false,
     });
 }

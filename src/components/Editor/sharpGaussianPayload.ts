@@ -9,6 +9,9 @@ import {
     DENSE_PREVIEW_POINT_BUDGET_LOW_MEMORY,
     DIRECT_ORDER_CULL_SENTINEL,
     MAX_GPU_SORT_WORKING_SET_BYTES,
+    RECONSTRUCTION_POINT_BUDGET_DESKTOP,
+    RECONSTRUCTION_POINT_BUDGET_HIGH_CAPABILITY,
+    RECONSTRUCTION_POINT_BUDGET_LOW_MEMORY,
     STANDARD_PREVIEW_POINT_BUDGET_DESKTOP,
     STANDARD_PREVIEW_POINT_BUDGET_HIGH_CAPABILITY,
     STANDARD_PREVIEW_POINT_BUDGET_LOW_MEMORY,
@@ -68,10 +71,6 @@ export function resolveSharpPointBudget(
     metadata?: GeneratedEnvironmentMetadata | null,
     maxTextureSize?: number | null,
 ) {
-    if (!isSingleImagePreviewMetadata(metadata)) {
-        return Number.POSITIVE_INFINITY;
-    }
-
     const deviceMemory =
         typeof navigator !== "undefined" && typeof (navigator as NavigatorWithDeviceMemory).deviceMemory === "number"
             ? (navigator as NavigatorWithDeviceMemory).deviceMemory ?? null
@@ -85,13 +84,29 @@ export function resolveSharpPointBudget(
     const metadataBudget = Number(
         metadata?.delivery?.render_targets?.preferred_point_budget ?? metadata?.point_count ?? Number.POSITIVE_INFINITY,
     );
-    const sourcePointCount = resolvePreviewSourcePointCount(metadata);
     const highCapabilityDevice =
         !coarsePointerDevice &&
         !lowMemoryDevice &&
         (deviceMemory === null || deviceMemory >= 8) &&
         (hardwareConcurrency === null || hardwareConcurrency >= 8) &&
         (maxTextureSize === null || maxTextureSize === undefined || maxTextureSize >= 8192);
+
+    if (!isSingleImagePreviewMetadata(metadata)) {
+        const reconstructionBudgetCap =
+            lowMemoryDevice || coarsePointerDevice
+                ? RECONSTRUCTION_POINT_BUDGET_LOW_MEMORY
+                : highCapabilityDevice
+                  ? RECONSTRUCTION_POINT_BUDGET_HIGH_CAPABILITY
+                  : RECONSTRUCTION_POINT_BUDGET_DESKTOP;
+
+        if (Number.isFinite(metadataBudget) && metadataBudget > 0) {
+            return Math.min(metadataBudget, reconstructionBudgetCap);
+        }
+
+        return reconstructionBudgetCap;
+    }
+
+    const sourcePointCount = resolvePreviewSourcePointCount(metadata);
 
     const budgetCap = hasDenseShPreview
         ? lowMemoryDevice || coarsePointerDevice

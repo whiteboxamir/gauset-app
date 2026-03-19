@@ -15,6 +15,9 @@ import {
 } from "@/lib/mvp-viewer";
 import type { FocusRequest } from "@/state/mvpEditorSessionStore.ts";
 import { type CameraPose, type ViewerState, type WorkspaceSceneGraph, fovToLensMm, parseVector3Tuple } from "@/lib/mvp-workspace";
+import { resolveSharpPointBudget } from "./sharpGaussianPayload";
+import { HEAVY_SCENE_POINT_THRESHOLD, type SharpGaussianLoadState } from "./sharpGaussianShared";
+import { resolveViewerQualityPolicy, type ViewerQualityPolicy } from "./viewerQualityPolicy";
 
 const PREVIEW_CAMERA_ORIENTATION_QUATERNION = new THREE.Quaternion(1, 0, 0, 0);
 
@@ -51,7 +54,24 @@ export interface ViewerRuntimeDiagnostics {
     maxTextureSize: number | null;
     label: string;
     detail: string;
+    canvasCreatedAtMs: number | null;
+    viewerReadyAtMs: number | null;
+    firstContextLossAtMs: number | null;
 }
+
+type ViewerDeliveryRuntimeState = {
+    stagedDeliveryObserved: boolean;
+    upgradePending: boolean;
+    activeVariantLabel: string | null;
+    upgradeVariantLabel: string | null;
+};
+
+const DEFAULT_VIEWER_DELIVERY_RUNTIME_STATE: ViewerDeliveryRuntimeState = {
+    stagedDeliveryObserved: false,
+    upgradePending: false,
+    activeVariantLabel: null,
+    upgradeVariantLabel: null,
+};
 
 function isSingleImagePreviewEnvironment(metadata: unknown) {
     return isSingleImagePreviewMetadata(metadata as Parameters<typeof isSingleImagePreviewMetadata>[0]);
@@ -240,7 +260,24 @@ export function useThreeOverlayViewerRuntimeController({
     const previewAutofocusKeyRef = useRef("");
     const [runtimeFallback, setRuntimeFallback] = useState<{ message: string; reason: ViewerFallbackReason } | null>(null);
     const [isViewerReady, setIsViewerReady] = useState(false);
+    const [contextLossCount, setContextLossCount] = useState(0);
+    const contextLossCountRef = useRef(0);
+    const recoveryTimerRef = useRef<number | null>(null);
+    const [canvasRecoveryNonce, setCanvasRecoveryNonce] = useState(0);
+    const [deliveryRuntimeState, setDeliveryRuntimeState] = useState(DEFAULT_VIEWER_DELIVERY_RUNTIME_STATE);
     const [previewAutofocusRequest, setPreviewAutofocusRequest] = useState<FocusRequest>(null);
+    const sessionStartRef = useRef(typeof performance !== "undefined" ? performance.now() : 0);
+    const [canvasCreatedAtMs, setCanvasCreatedAtMs] = useState<number | null>(null);
+    const [viewerReadyAtMs, setViewerReadyAtMs] = useState<number | null>(null);
+    const [firstContextLossAtMs, setFirstContextLossAtMs] = useState<number | null>(null);
+
+    const resolveSessionElapsedMs = useCallback(() => {
+        if (typeof performance === "undefined") {
+            return 0;
+        }
+
+        return Math.max(0, performance.now() - sessionStartRef.current);
+    }, []);
 
     const environmentRenderState = useMemo(() => resolveEnvironmentRenderState(environment), [environment]);
     const environmentViewerUrl = toProxyUrl(environmentRenderState.viewerUrl);
@@ -257,6 +294,19 @@ export function useThreeOverlayViewerRuntimeController({
                 metadata: environmentMetadata,
             }),
         [environmentMetadata, environmentSplatUrl, environmentViewerUrl],
+    );
+    const effectiveSharpPointBudget = useMemo(() => {
+        if (viewerDecision.renderSource.mode !== "sharp") {
+            return null;
+        }
+
+        const pointBudget = resolveSharpPointBudget(environmentMetadata, viewerDecision.capabilities.maxTextureSize);
+        return Number.isFinite(pointBudget) && pointBudget > 0 ? pointBudget : null;
+    }, [environmentMetadata, viewerDecision.capabilities.maxTextureSize, viewerDecision.renderSource.mode]);
+    const prefersPerformanceMode = Boolean(
+        !isSingleImagePreview &&
+            effectiveSharpPointBudget !== null &&
+            effectiveSharpPointBudget >= HEAVY_SCENE_POINT_THRESHOLD,
     );
     const preflightFallback =
         viewerDecision.renderMode === "fallback"
@@ -281,6 +331,35 @@ export function useThreeOverlayViewerRuntimeController({
         previewAutofocusRequest && (!focusRequest || previewAutofocusRequest.token >= focusRequest.token)
             ? previewAutofocusRequest
             : focusRequest ?? null;
+    const qualityPolicy = useMemo<ViewerQualityPolicy>(
+        () =>
+            resolveViewerQualityPolicy({
+                decision: viewerDecision,
+                metadata: environmentMetadata,
+                effectivePointBudget: effectiveSharpPointBudget,
+                isViewerReady,
+                renderMode,
+                renderFallbackReason,
+                renderFallbackMessage: renderError,
+                hasRenderableEnvironment,
+                usesInteractiveFallback,
+                shouldUsePreviewProjectionFallback,
+                isSingleImagePreview,
+            }),
+        [
+            effectiveSharpPointBudget,
+            environmentMetadata,
+            hasRenderableEnvironment,
+            isSingleImagePreview,
+            isViewerReady,
+            renderError,
+            renderFallbackReason,
+            renderMode,
+            shouldUsePreviewProjectionFallback,
+            usesInteractiveFallback,
+            viewerDecision,
+        ],
+    );
     const runtimeDiagnostics = useMemo<ViewerRuntimeDiagnostics>(() => {
         const hostCapabilityLane = resolveHostCapabilityLane(viewerDecision.capabilities);
         const operationalMode = resolveViewerRuntimeMode({
@@ -313,8 +392,13 @@ export function useThreeOverlayViewerRuntimeController({
                 fallbackMessage: renderError,
                 hasRenderableEnvironment,
             }),
+            canvasCreatedAtMs,
+            viewerReadyAtMs,
+            firstContextLossAtMs,
         };
     }, [
+        canvasCreatedAtMs,
+        firstContextLossAtMs,
         hasRenderableEnvironment,
         isSingleImagePreview,
         isViewerReady,
@@ -325,34 +409,65 @@ export function useThreeOverlayViewerRuntimeController({
         renderMode,
         shouldUsePreviewProjectionFallback,
         usesInteractiveFallback,
+        viewerReadyAtMs,
         viewerDecision.capabilities,
         viewerDecision.renderSource.mode,
     ]);
 
+    useEffect(() => {
+        contextLossCountRef.current = contextLossCount;
+    }, [contextLossCount]);
+
+    const clearRecoveryTimer = useCallback(() => {
+        if (recoveryTimerRef.current !== null) {
+            window.clearTimeout(recoveryTimerRef.current);
+            recoveryTimerRef.current = null;
+        }
+    }, []);
+
     const activateViewerFallback = useCallback((message: string, reason: ViewerFallbackReason = "environment_render_failed") => {
+        clearRecoveryTimer();
         setIsViewerReady(false);
         setRuntimeFallback({ message, reason });
-    }, []);
+    }, [clearRecoveryTimer]);
 
     useEffect(() => {
         return () => {
+            clearRecoveryTimer();
             canvasEventCleanupRef.current?.();
             canvasEventCleanupRef.current = null;
             canvasElementRef.current = null;
         };
-    }, []);
+    }, [clearRecoveryTimer]);
 
     useEffect(() => {
         setIsViewerReady(false);
         setRuntimeFallback(null);
+        setContextLossCount(0);
+        contextLossCountRef.current = 0;
+        clearRecoveryTimer();
+        setCanvasRecoveryNonce(0);
+        setDeliveryRuntimeState(DEFAULT_VIEWER_DELIVERY_RUNTIME_STATE);
+        sessionStartRef.current = typeof performance !== "undefined" ? performance.now() : 0;
+        setCanvasCreatedAtMs(null);
+        setViewerReadyAtMs(null);
+        setFirstContextLossAtMs(null);
         canvasEventCleanupRef.current?.();
         canvasEventCleanupRef.current = null;
         canvasElementRef.current = null;
-    }, [environmentSplatUrl, environmentViewerUrl]);
+    }, [clearRecoveryTimer, environmentSplatUrl, environmentViewerUrl]);
 
     useEffect(() => {
         onViewerReadyChange((isViewerReady && renderMode === "webgl") || usesInteractiveFallback);
     }, [isViewerReady, onViewerReadyChange, renderMode, usesInteractiveFallback]);
+
+    useEffect(() => {
+        if (!isViewerReady || viewerReadyAtMs !== null) {
+            return;
+        }
+
+        setViewerReadyAtMs(resolveSessionElapsedMs());
+    }, [isViewerReady, resolveSessionElapsedMs, viewerReadyAtMs]);
 
     useEffect(() => {
         previewAutofocusKeyRef.current = "";
@@ -423,13 +538,36 @@ export function useThreeOverlayViewerRuntimeController({
     const handleCanvasCreated = useCallback(
         (gl: THREE.WebGLRenderer) => {
             canvasEventCleanupRef.current?.();
+            clearRecoveryTimer();
             canvasElementRef.current = gl.domElement;
             const handleContextLost = (event: Event) => {
                 event.preventDefault();
-                activateViewerFallback("WebGL context was lost while rendering the viewer.");
+                const nextContextLossCount = contextLossCountRef.current + 1;
+                contextLossCountRef.current = nextContextLossCount;
+                setContextLossCount(nextContextLossCount);
+                setFirstContextLossAtMs((current) => current ?? resolveSessionElapsedMs());
+                setIsViewerReady(false);
+                if (nextContextLossCount <= 1) {
+                    setRuntimeFallback({
+                        message: "WebGL context was lost. Rebuilding the live renderer with safer guardrails.",
+                        reason: "context_lost",
+                    });
+                    clearRecoveryTimer();
+                    recoveryTimerRef.current = window.setTimeout(() => {
+                        recoveryTimerRef.current = null;
+                        setRuntimeFallback(null);
+                        setIsViewerReady(false);
+                        setCanvasRecoveryNonce((current) => current + 1);
+                    }, 900);
+                    return;
+                }
+                activateViewerFallback("WebGL context was lost while rendering the viewer.", "context_lost");
             };
             const handleContextRestored = () => {
-                setRuntimeFallback(null);
+                if (recoveryTimerRef.current === null && contextLossCountRef.current <= 1) {
+                    setRuntimeFallback(null);
+                    setCanvasRecoveryNonce((current) => current + 1);
+                }
             };
             gl.domElement.addEventListener("webglcontextlost", handleContextLost, false);
             gl.domElement.addEventListener("webglcontextrestored", handleContextRestored, false);
@@ -444,15 +582,38 @@ export function useThreeOverlayViewerRuntimeController({
             gl.outputColorSpace = THREE.SRGBColorSpace;
             gl.toneMapping = THREE.ACESFilmicToneMapping;
             gl.toneMappingExposure = 1;
+            setCanvasCreatedAtMs((current) => current ?? resolveSessionElapsedMs());
             setRuntimeFallback(null);
-            setIsViewerReady(true);
+            if (viewerDecision.renderSource.mode !== "sharp") {
+                setIsViewerReady(true);
+            }
         },
-        [activateViewerFallback, backgroundColor],
+        [activateViewerFallback, backgroundColor, clearRecoveryTimer, resolveSessionElapsedMs, viewerDecision.renderSource.mode],
+    );
+
+    const handleSharpLiveStateChange = useCallback(
+        ({ isLiveReady, loadState }: { isLiveReady: boolean; loadState: SharpGaussianLoadState }) => {
+            if (viewerDecision.renderSource.mode !== "sharp") {
+                return;
+            }
+
+            setIsViewerReady(isLiveReady);
+            setDeliveryRuntimeState((current) => ({
+                stagedDeliveryObserved: current.stagedDeliveryObserved || Boolean(loadState.stagedDelivery),
+                upgradePending: Boolean(loadState.upgradePending),
+                activeVariantLabel: loadState.activeVariantLabel ?? current.activeVariantLabel,
+                upgradeVariantLabel: loadState.upgradePending
+                    ? loadState.upgradeVariantLabel ?? current.upgradeVariantLabel
+                    : loadState.upgradeVariantLabel ?? null,
+            }));
+        },
+        [viewerDecision.renderSource.mode],
     );
 
     return {
         controlsRef,
         canvasElementRef,
+        canvasRecoveryNonce,
         renderMode,
         renderError,
         referenceImage,
@@ -464,11 +625,24 @@ export function useThreeOverlayViewerRuntimeController({
         environmentViewerUrl,
         environmentSplatUrl,
         environmentMetadata,
+        effectiveSharpPointBudget,
+        contextLossCount,
+        deliveryManifestUrl: environmentRenderState.deliveryManifestUrl ?? null,
+        deliveryManifestFirst: Boolean(environmentRenderState.deliveryManifestFirst),
+        deliveryHasProgressiveVariants: Boolean(environmentRenderState.deliveryHasProgressiveVariants),
+        deliveryHasCompressedVariants: Boolean(environmentRenderState.deliveryHasCompressedVariants),
+        deliveryStagedObserved: deliveryRuntimeState.stagedDeliveryObserved,
+        deliveryUpgradePending: deliveryRuntimeState.upgradePending,
+        deliveryActiveVariantLabel: deliveryRuntimeState.activeVariantLabel,
+        deliveryUpgradeVariantLabel: deliveryRuntimeState.upgradeVariantLabel,
+        prefersPerformanceMode,
+        qualityPolicy,
         effectiveFocusRequest,
         handleCanvasError,
         handleEnvironmentFatalError,
         handlePreviewBounds,
         handleCanvasCreated,
+        handleSharpLiveStateChange,
         runtimeDiagnostics,
     };
 }
