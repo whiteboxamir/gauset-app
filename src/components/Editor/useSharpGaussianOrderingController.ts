@@ -7,12 +7,20 @@ import * as THREE from "three";
 import { estimateGpuSortWorkingSetBytes, SharpGaussianGpuSorter } from "./sharpGaussianGpuSort";
 import { syncSharpGaussianOrderTexturePayload } from "./sharpGaussianPayload";
 import {
+    DIRECT_MOTION_MIN_AXIS_PX,
+    DIRECT_MOTION_SORT_MAX_REUSE_FRAMES,
     DIRECT_ORDER_CULL_SENTINEL,
+    DIRECT_REST_MIN_AXIS_PX,
+    DIRECT_ROTATION_SORT_MAX_REUSE_FRAMES,
     DIRECT_SORT_POSITION_EPSILON_SQ,
     DIRECT_SORT_ROTATION_EPSILON,
+    DIRECT_STRESS_MIN_AXIS_PX,
     MAX_GPU_SORT_WORKING_SET_BYTES,
+    PREVIEW_INTERACTION_MIN_AXIS_PX,
     PREVIEW_INTERACTION_MAX_AXIS_PX,
     PREVIEW_INTERACTION_POINT_BUDGET,
+    PREVIEW_INTERACTION_SORT_THRESHOLD_MULTIPLIER,
+    PREVIEW_REST_MIN_AXIS_PX,
     PREVIEW_REST_MAX_AXIS_PX,
     PREVIEW_SORT_THRESHOLD_MULTIPLIER,
     type SharpGaussianOrderTexture,
@@ -48,12 +56,23 @@ function buildVisibleSharpGaussianActiveIndices(payload: SharpGaussianPayload, v
     return activeIndices;
 }
 
+type VisibleSharpGaussianChunkCandidate = {
+    chunkIndex: number;
+    distanceSq: number;
+    sortDepth: number;
+};
+
 function buildDepthOrderedSharpGaussianActiveIndices(
     payload: SharpGaussianPayload,
-    visibleChunkCandidates: Array<{ chunkIndex: number; distanceSq: number }>,
+    visibleChunkCandidates: VisibleSharpGaussianChunkCandidate[],
     visibleCount: number,
 ) {
-    const sortedCandidates = [...visibleChunkCandidates].sort((left, right) => right.distanceSq - left.distanceSq);
+    const sortedCandidates = [...visibleChunkCandidates].sort((left, right) => {
+        if (left.sortDepth !== right.sortDepth) {
+            return right.sortDepth - left.sortDepth;
+        }
+        return right.distanceSq - left.distanceSq;
+    });
     const activeIndices = new Uint32Array(visibleCount);
     let offset = 0;
 
@@ -144,10 +163,12 @@ export function useSharpGaussianOrderingController({
     const frustumRef = useRef(new THREE.Frustum());
     const frustumMatrixRef = useRef(new THREE.Matrix4());
     const worldChunkSphereRef = useRef(new THREE.Sphere());
+    const cameraSpaceChunkCenterRef = useRef(new THREE.Vector3());
     const lastSortedCameraPositionRef = useRef(new THREE.Vector3(Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY));
     const lastSortedCameraQuaternionRef = useRef(new THREE.Quaternion());
     const lastFrameCameraPositionRef = useRef(new THREE.Vector3(Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY));
     const lastFrameCameraQuaternionRef = useRef(new THREE.Quaternion());
+    const sortReuseFrameCountRef = useRef(0);
 
     useEffect(() => {
         if (!material) {
@@ -190,8 +211,10 @@ export function useSharpGaussianOrderingController({
         cpuOrderTextureRef.current?.texture.dispose();
         cpuOrderTextureRef.current = null;
         material.uniforms.uOrderTextureReady.value = 0;
+        material.uniforms.uMinAxisPx.value = isSingleImagePreview ? PREVIEW_REST_MIN_AXIS_PX : DIRECT_REST_MIN_AXIS_PX;
         material.uniforms.uMaxAxisPx.value = isSingleImagePreview ? PREVIEW_REST_MAX_AXIS_PX : 96.0;
         hasSortedRef.current = false;
+        sortReuseFrameCountRef.current = 0;
         lastSortedCameraPositionRef.current.set(Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY);
         lastSortedCameraQuaternionRef.current.identity();
         lastFrameCameraPositionRef.current.set(Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY);
@@ -203,10 +226,12 @@ export function useSharpGaussianOrderingController({
             cpuOrderTextureRef.current?.texture.dispose();
             cpuOrderTextureRef.current = null;
             material.uniforms.uOrderTextureReady.value = 0;
+            material.uniforms.uMinAxisPx.value = DIRECT_REST_MIN_AXIS_PX;
             material.uniforms.uMaxAxisPx.value = 96.0;
             payload.geometry.instanceCount = 0;
             visibleChunkIndicesRef.current = [];
             hasSortedRef.current = false;
+            sortReuseFrameCountRef.current = 0;
             lastSortedCameraPosition.set(Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY);
             lastSortedCameraQuaternion.identity();
             lastFrameCameraPosition.set(Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY);
@@ -226,22 +251,35 @@ export function useSharpGaussianOrderingController({
             return;
         }
 
-        let previewInteractionActive = false;
-        if (isSingleImagePreview) {
-            if (!Number.isFinite(lastFrameCameraPositionRef.current.x)) {
-                lastFrameCameraPositionRef.current.copy(camera.position);
-                lastFrameCameraQuaternionRef.current.copy(camera.quaternion);
-            } else {
-                const frameTranslationDelta = lastFrameCameraPositionRef.current.distanceTo(camera.position);
-                const frameQuaternionAlignment = Math.min(1, Math.abs(lastFrameCameraQuaternionRef.current.dot(camera.quaternion)));
-                const frameAngularDelta = 2 * Math.acos(frameQuaternionAlignment);
-                const frameTranslationThreshold = Math.max(0.0002, payload.sceneRadius * 0.0002);
-                const frameAngularThreshold = 0.0012;
-                previewInteractionActive =
-                    frameTranslationDelta > frameTranslationThreshold || frameAngularDelta > frameAngularThreshold;
-            }
+        let frameTranslationDelta = 0;
+        let frameAngularDelta = 0;
+        if (!Number.isFinite(lastFrameCameraPositionRef.current.x)) {
+            lastFrameCameraPositionRef.current.copy(camera.position);
+            lastFrameCameraQuaternionRef.current.copy(camera.quaternion);
+        } else {
+            frameTranslationDelta = lastFrameCameraPositionRef.current.distanceTo(camera.position);
+            const frameQuaternionAlignment = Math.min(1, Math.abs(lastFrameCameraQuaternionRef.current.dot(camera.quaternion)));
+            frameAngularDelta = 2 * Math.acos(frameQuaternionAlignment);
         }
 
+        const frameTranslationThreshold = Math.max(0.0002, payload.sceneRadius * (isSingleImagePreview ? 0.0002 : 0.00008));
+        const frameAngularThreshold = isSingleImagePreview ? 0.0012 : 0.00075;
+        const interactionActive = frameTranslationDelta > frameTranslationThreshold || frameAngularDelta > frameAngularThreshold;
+        const previewInteractionActive = isSingleImagePreview && interactionActive;
+        const stressedMotion =
+            !isSingleImagePreview &&
+            (frameTranslationDelta > frameTranslationThreshold * 4 || frameAngularDelta > frameAngularThreshold * 3);
+        const targetMinAxisPx = isSingleImagePreview
+            ? previewInteractionActive
+                ? PREVIEW_INTERACTION_MIN_AXIS_PX
+                : PREVIEW_REST_MIN_AXIS_PX
+            : stressedMotion
+              ? DIRECT_STRESS_MIN_AXIS_PX
+              : interactionActive
+                ? DIRECT_MOTION_MIN_AXIS_PX
+                : DIRECT_REST_MIN_AXIS_PX;
+        const currentMinAxisPx = material.uniforms.uMinAxisPx.value as number;
+        material.uniforms.uMinAxisPx.value = THREE.MathUtils.lerp(currentMinAxisPx, targetMinAxisPx, interactionActive ? 0.28 : 0.14);
         material.uniforms.uMaxAxisPx.value =
             isSingleImagePreview && previewInteractionActive ? PREVIEW_INTERACTION_MAX_AXIS_PX : PREVIEW_REST_MAX_AXIS_PX;
         lastFrameCameraPositionRef.current.copy(camera.position);
@@ -251,7 +289,7 @@ export function useSharpGaussianOrderingController({
         frustumMatrixRef.current.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
         frustumRef.current.setFromProjectionMatrix(frustumMatrixRef.current);
 
-        const visibleChunkCandidates: Array<{ chunkIndex: number; distanceSq: number }> = [];
+        const visibleChunkCandidates: VisibleSharpGaussianChunkCandidate[] = [];
 
         for (let chunkIndex = 0; chunkIndex < payload.chunks.length; chunkIndex += 1) {
             const chunk = payload.chunks[chunkIndex];
@@ -261,9 +299,11 @@ export function useSharpGaussianOrderingController({
                 continue;
             }
 
+            cameraSpaceChunkCenterRef.current.copy(worldChunkSphereRef.current.center).applyMatrix4(camera.matrixWorldInverse);
             visibleChunkCandidates.push({
                 chunkIndex,
                 distanceSq: worldChunkSphereRef.current.center.distanceToSquared(camera.position),
+                sortDepth: -cameraSpaceChunkCenterRef.current.z + worldChunkSphereRef.current.radius,
             });
         }
 
@@ -292,17 +332,21 @@ export function useSharpGaussianOrderingController({
             cpuOrderTextureRef.current = null;
             material.uniforms.uOrderTextureReady.value = 0;
             hasSortedRef.current = false;
+            sortReuseFrameCountRef.current = 0;
             return;
         }
 
         const visibleChunkDistanceMap = new Map<number, number>();
+        const visibleChunkSortDepthMap = new Map<number, number>();
         for (let candidateIndex = 0; candidateIndex < visibleChunkCandidates.length; candidateIndex += 1) {
             const candidate = visibleChunkCandidates[candidateIndex];
             visibleChunkDistanceMap.set(candidate.chunkIndex, candidate.distanceSq);
+            visibleChunkSortDepthMap.set(candidate.chunkIndex, candidate.sortDepth);
         }
-        const orderedVisibleChunkCandidates = nextVisibleChunkIndices.map((chunkIndex) => ({
+        const orderedVisibleChunkCandidates: VisibleSharpGaussianChunkCandidate[] = nextVisibleChunkIndices.map((chunkIndex) => ({
             chunkIndex,
             distanceSq: visibleChunkDistanceMap.get(chunkIndex) ?? Number.POSITIVE_INFINITY,
+            sortDepth: visibleChunkSortDepthMap.get(chunkIndex) ?? Number.POSITIVE_INFINITY,
         }));
         const useCpuOrdering =
             isSingleImagePreview || shouldUseCpuOrderingForSharpGaussian(visibleCount, gl.capabilities.maxTextureSize);
@@ -331,6 +375,7 @@ export function useSharpGaussianOrderingController({
                 lastSortedCameraPositionRef.current.copy(camera.position);
                 lastSortedCameraQuaternionRef.current.copy(camera.quaternion);
                 hasSortedRef.current = true;
+                sortReuseFrameCountRef.current = 0;
                 return;
             }
         } else if (visibilityChanged || !gpuSorterRef.current) {
@@ -369,6 +414,7 @@ export function useSharpGaussianOrderingController({
             lastSortedCameraPositionRef.current.copy(camera.position);
             lastSortedCameraQuaternionRef.current.copy(camera.quaternion);
             hasSortedRef.current = true;
+            sortReuseFrameCountRef.current = 0;
             return;
         }
 
@@ -382,14 +428,32 @@ export function useSharpGaussianOrderingController({
         const quaternionAlignment = Math.min(1, Math.abs(lastSortedCameraQuaternionRef.current.dot(camera.quaternion)));
         const angularDelta = 2 * Math.acos(quaternionAlignment);
         const pureRotationDelta = positionDeltaSq <= DIRECT_SORT_POSITION_EPSILON_SQ;
-        const sortThresholdMultiplier = isSingleImagePreview ? PREVIEW_SORT_THRESHOLD_MULTIPLIER : 1;
+        const sortThresholdMultiplier =
+            isSingleImagePreview && previewInteractionActive
+                ? PREVIEW_INTERACTION_SORT_THRESHOLD_MULTIPLIER
+                : isSingleImagePreview
+                  ? PREVIEW_SORT_THRESHOLD_MULTIPLIER
+                  : 1;
         const pureRotationAngleThreshold = Math.max(DIRECT_SORT_ROTATION_EPSILON * 48, 0.004363323129985824) * sortThresholdMultiplier;
         const viewMotionThreshold = Math.max(0.001, payload.sceneRadius * 0.00075) * sortThresholdMultiplier;
+        const motionForcedResortFrameBudget =
+            !useCpuOrdering && !isSingleImagePreview && interactionActive
+                ? frameAngularDelta > frameAngularThreshold * 1.5
+                    ? DIRECT_ROTATION_SORT_MAX_REUSE_FRAMES
+                    : DIRECT_MOTION_SORT_MAX_REUSE_FRAMES
+                : Number.POSITIVE_INFINITY;
+        const reachedReuseFrameBudget = sortReuseFrameCountRef.current >= motionForcedResortFrameBudget;
         const canReuseSort =
             hasSortedRef.current &&
-            ((pureRotationDelta && angularDelta <= pureRotationAngleThreshold) || translationDelta + payload.sceneRadius * angularDelta <= viewMotionThreshold);
+            ((pureRotationDelta && angularDelta <= pureRotationAngleThreshold) || translationDelta + payload.sceneRadius * angularDelta <= viewMotionThreshold) &&
+            !reachedReuseFrameBudget;
 
         if (canReuseSort) {
+            if (interactionActive && Number.isFinite(motionForcedResortFrameBudget)) {
+                sortReuseFrameCountRef.current += 1;
+            } else {
+                sortReuseFrameCountRef.current = 0;
+            }
             return;
         }
 
@@ -411,6 +475,7 @@ export function useSharpGaussianOrderingController({
             lastSortedCameraPositionRef.current.copy(camera.position);
             lastSortedCameraQuaternionRef.current.copy(camera.quaternion);
             hasSortedRef.current = true;
+            sortReuseFrameCountRef.current = 0;
             return;
         }
 
@@ -424,6 +489,7 @@ export function useSharpGaussianOrderingController({
         lastSortedCameraPositionRef.current.copy(camera.position);
         lastSortedCameraQuaternionRef.current.copy(camera.quaternion);
         hasSortedRef.current = true;
+        sortReuseFrameCountRef.current = 0;
     });
 
     return meshRef;

@@ -1,3 +1,5 @@
+import { normalizeSplatDeliveryState } from "./mvp-splat-delivery";
+
 export type BackendMode = "checking" | "ready" | "degraded" | "offline";
 
 export type GenerationLane = "preview" | "reconstruction" | "asset";
@@ -238,6 +240,24 @@ export interface EnvironmentRenderingMetadata {
     viewer_source?: string;
     apply_preview_orientation?: boolean;
     preview_density_multiplier?: number;
+    manifest_url?: string;
+    manifest_id?: string;
+    manifest_first?: boolean;
+    runtime_variant?: string;
+    runtime_variants?: EnvironmentRuntimeVariant[] | Record<string, EnvironmentRuntimeVariant>;
+    runtime_codecs?: string[];
+}
+
+export interface EnvironmentRuntimeVariant {
+    id?: string;
+    label?: string;
+    role?: string;
+    url?: string;
+    codec?: string;
+    progressive?: boolean;
+    preferred?: boolean;
+    fallback?: boolean;
+    bytes?: number;
 }
 
 export interface EnvironmentDeliveryAxis {
@@ -254,6 +274,12 @@ export interface EnvironmentDeliveryProfile {
     recommended_viewer_mode?: string;
     blocking_issues?: string[];
     next_actions?: string[];
+    manifest_url?: string;
+    manifest_id?: string;
+    manifest_first?: boolean;
+    runtime_variant?: string;
+    runtime_variants?: EnvironmentRuntimeVariant[] | Record<string, EnvironmentRuntimeVariant>;
+    runtime_codecs?: string[];
     axes?: {
         geometry?: EnvironmentDeliveryAxis;
         color?: EnvironmentDeliveryAxis;
@@ -426,8 +452,16 @@ export interface GeneratedEnvironmentMetadata {
     release_gates?: EnvironmentReleaseGates;
     quality?: EnvironmentQualityMetrics;
     delivery?: EnvironmentDeliveryProfile;
+    manifest_url?: string;
+    manifest_id?: string;
+    manifest_first?: boolean;
+    runtime_variant?: string;
+    runtime_variants?: EnvironmentRuntimeVariant[] | Record<string, EnvironmentRuntimeVariant>;
+    runtime_codecs?: string[];
     ingest_record?: Record<string, unknown>;
     downstream_handoff?: Record<string, unknown>;
+    manifest?: Record<string, unknown>;
+    splat_manifest?: Record<string, unknown>;
     preview_enhancement?: EnvironmentPreviewEnhancement;
     source_camera?: {
         position?: [number, number, number];
@@ -476,10 +510,15 @@ export function resolveEnvironmentRenderState(environment: any) {
     const rendering = metadata?.rendering && typeof metadata.rendering === "object" ? metadata.rendering : null;
     const quality = metadata?.quality && typeof metadata.quality === "object" ? metadata.quality : null;
     const delivery = metadata?.delivery && typeof metadata.delivery === "object" ? metadata.delivery : null;
+    const splatDelivery = normalizeSplatDeliveryState(environment);
     const warnings = Array.isArray(quality?.warnings) ? quality.warnings : [];
 
-    const viewerUrl = normalizeEnvironmentString(urls?.viewer) || normalizeEnvironmentString(rendering?.viewer_source);
-    const splatUrl = normalizeEnvironmentString(urls?.splats);
+    const directViewerUrl = normalizeEnvironmentString(urls?.viewer) || normalizeEnvironmentString(rendering?.viewer_source);
+    const directSplatUrl = normalizeEnvironmentString(urls?.splats);
+    const manifestRuntimeUrl = splatDelivery.manifestUrl ? normalizeEnvironmentString(splatDelivery.manifestUrl) : "";
+    const useManifestPrimary = Boolean(splatDelivery.manifestFirst && manifestRuntimeUrl && !directViewerUrl);
+    const viewerUrl = directViewerUrl;
+    const splatUrl = useManifestPrimary ? manifestRuntimeUrl : directSplatUrl || manifestRuntimeUrl;
     const truthLabel = normalizeEnvironmentString(metadata?.truth_label).toLowerCase();
     const qualityTier = normalizeEnvironmentString(metadata?.quality_tier).toLowerCase();
     const sourceFormat = normalizeEnvironmentString(rendering?.source_format).toLowerCase();
@@ -518,6 +557,15 @@ export function resolveEnvironmentRenderState(environment: any) {
     return {
         viewerUrl,
         splatUrl,
+        deliveryManifestUrl: splatDelivery.manifestUrl,
+        deliveryManifestId: splatDelivery.manifestId,
+        deliveryManifestFirst: splatDelivery.manifestFirst,
+        deliveryRuntimeVariant: splatDelivery.runtimeVariant,
+        deliveryRuntimeCodecs: splatDelivery.runtimeCodecs,
+        deliveryRuntimeVariants: splatDelivery.runtimeVariants,
+        deliveryPreferredRuntimeVariant: splatDelivery.preferredRuntimeVariant,
+        deliveryHasProgressiveVariants: splatDelivery.hasProgressiveVariants,
+        deliveryHasCompressedVariants: splatDelivery.hasCompressedVariants,
         previewProjectionImage: previewProjectionImage || null,
         referenceImage: referenceImage || null,
         hasRenderableOutput,
@@ -743,6 +791,9 @@ export function describeEnvironment(environment: any) {
     }
     if (deliveryLabel) {
         detailParts.push(deliveryLabel);
+    }
+    if (renderState.deliveryManifestUrl) {
+        detailParts.push("manifest-first delivery");
     }
     if (qualityBand) {
         detailParts.push(qualityBand);

@@ -1,0 +1,20 @@
+[
+  {
+    "scene_id": "scene_benchmark_5m",
+    "label": "5M Stability Fixture",
+    "expectation": "stability",
+    "fixture_kind": "synthetic_benchmark"
+  },
+  {
+    "scene_id": "scene_gold_cinematic_ribbons",
+    "label": "Cinematic Ribbons",
+    "expectation": "beauty",
+    "fixture_kind": "synthetic_gold"
+  },
+  {
+    "scene_id": "scene_gold_luminous_atrium",
+    "label": "Luminous Atrium",
+    "expectation": "beauty",
+    "fixture_kind": "synthetic_gold"
+  }
+]

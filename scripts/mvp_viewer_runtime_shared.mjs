@@ -18,6 +18,9 @@ function normalizeString(value, fallback = null) {
 }
 
 function normalizeNumber(value) {
+    if (value === "" || value === null || value === undefined) {
+        return null;
+    }
     const next = Number(value);
     return Number.isFinite(next) ? next : null;
 }
@@ -139,12 +142,32 @@ export async function collectViewerDiagnostics(page) {
         const viewerSurface = document.querySelector('[data-testid="mvp-viewer-surface"]');
         const surfaceDiagnostics = document.querySelector('[data-testid="mvp-viewer-surface-diagnostics"]');
         const runtimeDiagnostics = document.querySelector('[data-testid="mvp-viewer-runtime-diagnostics"]');
+        const deliveryStatus = document.querySelector('[data-testid="mvp-sharp-gaussian-delivery-status"]');
         const canvas = viewerSurface?.querySelector("canvas") ?? null;
         const statusRoot = viewerSurface?.previousElementSibling ?? null;
         const webglProbe = document.createElement("canvas");
         const webgl2Context = webglProbe.getContext("webgl2");
         const webglContext = webgl2Context ?? webglProbe.getContext("webgl") ?? webglProbe.getContext("experimental-webgl");
         const runtimeBadge = document.querySelector('[data-testid="mvp-viewer-runtime-badge"]');
+        const viewerRect = viewerSurface?.getBoundingClientRect() ?? null;
+        const canvasRect = canvas?.getBoundingClientRect() ?? null;
+        const devicePixelRatio = window.devicePixelRatio || 1;
+        const viewerCssArea = viewerRect ? viewerRect.width * viewerRect.height : null;
+        const canvasCssArea = canvasRect ? canvasRect.width * canvasRect.height : null;
+        const canvasIntrinsicArea = canvas ? canvas.width * canvas.height : null;
+        const canvasResolutionScaleX = canvasRect && canvasRect.width > 0 ? canvas.width / canvasRect.width : null;
+        const canvasResolutionScaleY = canvasRect && canvasRect.height > 0 ? canvas.height / canvasRect.height : null;
+        const canvasEffectiveDpr =
+            canvasResolutionScaleX !== null && canvasResolutionScaleY !== null
+                ? (canvasResolutionScaleX + canvasResolutionScaleY) / 2 / devicePixelRatio
+                : null;
+        const canvasFillRatio = viewerCssArea && canvasCssArea ? canvasCssArea / viewerCssArea : null;
+        const canvasAspectRatio =
+            canvasRect && canvasRect.height > 0 ? canvasRect.width / canvasRect.height : null;
+        const viewerAspectRatio =
+            viewerRect && viewerRect.height > 0 ? viewerRect.width / viewerRect.height : null;
+        const canvasAspectRatioDelta =
+            canvasAspectRatio !== null && viewerAspectRatio !== null ? Math.abs(canvasAspectRatio - viewerAspectRatio) : null;
 
         return {
             hasViewerSurface: Boolean(viewerSurface),
@@ -173,8 +196,31 @@ export async function collectViewerDiagnostics(page) {
                           clientHeight: canvas.clientHeight,
                       }
                     : null,
+            canvasMetrics:
+                canvas && canvasRect
+                    ? {
+                          devicePixelRatio,
+                          viewerCssWidth: viewerRect?.width ?? null,
+                          viewerCssHeight: viewerRect?.height ?? null,
+                          viewerCssArea,
+                          canvasCssWidth: canvasRect.width,
+                          canvasCssHeight: canvasRect.height,
+                          canvasCssArea,
+                          canvasIntrinsicWidth: canvas.width,
+                          canvasIntrinsicHeight: canvas.height,
+                          canvasIntrinsicArea,
+                          canvasResolutionScaleX,
+                          canvasResolutionScaleY,
+                          canvasEffectiveDpr,
+                          canvasFillRatio,
+                          canvasAspectRatio,
+                          viewerAspectRatio,
+                          canvasAspectRatioDelta,
+                      }
+                    : null,
             runtimeBadgeText: runtimeBadge?.textContent?.replace(/\s+/g, " ").trim() ?? null,
             statusSnippet: statusRoot?.textContent?.replace(/\s+/g, " ").trim().slice(0, 240) ?? null,
+            deliveryStatusText: deliveryStatus?.textContent?.replace(/\s+/g, " ").trim() ?? null,
             surfaceDiagnostics: surfaceDiagnostics
                 ? {
                       surfaceMode: attr(surfaceDiagnostics, "data-surface-mode"),
@@ -204,6 +250,52 @@ export async function collectViewerDiagnostics(page) {
                       maxTextureSize: attr(runtimeDiagnostics, "data-max-texture-size"),
                       label: attr(runtimeDiagnostics, "data-label"),
                       detail: attr(runtimeDiagnostics, "data-detail"),
+                      qualityMode: attr(runtimeDiagnostics, "data-quality-mode"),
+                      qualityTier: attr(runtimeDiagnostics, "data-quality-tier"),
+                      qualityLabel: attr(runtimeDiagnostics, "data-quality-label"),
+                      qualitySummary: attr(runtimeDiagnostics, "data-quality-summary"),
+                      qualityPremiumEffectsEnabled: attr(runtimeDiagnostics, "data-quality-premium-effects-enabled"),
+                      qualityCautiousMode: attr(runtimeDiagnostics, "data-quality-cautious-mode"),
+                      effectivePointBudget: attr(runtimeDiagnostics, "data-effective-point-budget"),
+                      prefersPerformanceMode: attr(runtimeDiagnostics, "data-prefers-performance-mode"),
+                      adaptiveQualityTier: attr(runtimeDiagnostics, "data-adaptive-quality-tier"),
+                      lowestAdaptiveQualityTier: attr(runtimeDiagnostics, "data-lowest-adaptive-quality-tier"),
+                      contextLossCount: attr(runtimeDiagnostics, "data-context-loss-count"),
+                      deliveryManifestUrl: attr(runtimeDiagnostics, "data-delivery-manifest-url"),
+                      deliveryManifestFirst: attr(runtimeDiagnostics, "data-delivery-manifest-first"),
+                      deliveryHasProgressiveVariants: attr(runtimeDiagnostics, "data-delivery-has-progressive-variants"),
+                      deliveryHasCompressedVariants: attr(runtimeDiagnostics, "data-delivery-has-compressed-variants"),
+                      deliveryStagedObserved: attr(runtimeDiagnostics, "data-delivery-staged-observed"),
+                      deliveryUpgradePending: attr(runtimeDiagnostics, "data-delivery-upgrade-pending"),
+                      deliveryActiveVariantLabel: attr(runtimeDiagnostics, "data-delivery-active-variant-label"),
+                      deliveryUpgradeVariantLabel: attr(runtimeDiagnostics, "data-delivery-upgrade-variant-label"),
+                      canvasCreatedAtMs: attr(runtimeDiagnostics, "data-canvas-created-at-ms"),
+                      viewerReadyAtMs: attr(runtimeDiagnostics, "data-viewer-ready-at-ms"),
+                      firstContextLossAtMs: attr(runtimeDiagnostics, "data-first-context-loss-at-ms"),
+                      frameCount: attr(runtimeDiagnostics, "data-frame-count"),
+                      frameAvgMs: attr(runtimeDiagnostics, "data-frame-avg-ms"),
+                      frameP95Ms: attr(runtimeDiagnostics, "data-frame-p95-ms"),
+                      frameWorstMs: attr(runtimeDiagnostics, "data-frame-worst-ms"),
+                      frameOver33MsRatio: attr(runtimeDiagnostics, "data-frame-over-33ms-ratio"),
+                      frameOver50MsRatio: attr(runtimeDiagnostics, "data-frame-over-50ms-ratio"),
+                      adaptiveTransitionCount: attr(runtimeDiagnostics, "data-adaptive-transition-count"),
+                      adaptiveFullMs: attr(runtimeDiagnostics, "data-adaptive-full-ms"),
+                      adaptiveBalancedMs: attr(runtimeDiagnostics, "data-adaptive-balanced-ms"),
+                      adaptiveSafeMs: attr(runtimeDiagnostics, "data-adaptive-safe-ms"),
+                      adaptiveSafeEntries: attr(runtimeDiagnostics, "data-adaptive-safe-entries"),
+                      firstFrameAtMs: attr(runtimeDiagnostics, "data-first-frame-at-ms"),
+                      firstStableFrameAtMs: attr(runtimeDiagnostics, "data-first-stable-frame-at-ms"),
+                      posterCurtainStage: attr(runtimeDiagnostics, "data-poster-curtain-stage"),
+                      posterCurtainVisible: attr(runtimeDiagnostics, "data-poster-curtain-visible"),
+                      renderMegapixels: attr(runtimeDiagnostics, "data-render-megapixels"),
+                  }
+                : null,
+            deliveryDiagnostics: deliveryStatus
+                ? {
+                      stagedDelivery: attr(deliveryStatus, "data-staged-delivery"),
+                      upgradePending: attr(deliveryStatus, "data-upgrade-pending"),
+                      activeVariantLabel: attr(deliveryStatus, "data-active-variant-label"),
+                      upgradeVariantLabel: attr(deliveryStatus, "data-upgrade-variant-label"),
                   }
                 : null,
         };
@@ -238,6 +330,73 @@ export async function collectViewerDiagnostics(page) {
               maxTextureSize: normalizeNumber(diagnostics.runtimeDiagnostics.maxTextureSize),
               label: normalizeString(diagnostics.runtimeDiagnostics.label),
               detail: normalizeString(diagnostics.runtimeDiagnostics.detail, ""),
+              qualityMode: normalizeString(diagnostics.runtimeDiagnostics.qualityMode),
+              qualityTier: normalizeString(diagnostics.runtimeDiagnostics.qualityTier),
+              qualityLabel: normalizeString(diagnostics.runtimeDiagnostics.qualityLabel),
+              qualitySummary: normalizeString(diagnostics.runtimeDiagnostics.qualitySummary, ""),
+              qualityPremiumEffectsEnabled: normalizeBoolean(diagnostics.runtimeDiagnostics.qualityPremiumEffectsEnabled),
+              qualityCautiousMode: normalizeBoolean(diagnostics.runtimeDiagnostics.qualityCautiousMode),
+              effectivePointBudget: normalizeNumber(diagnostics.runtimeDiagnostics.effectivePointBudget),
+              prefersPerformanceMode: normalizeBoolean(diagnostics.runtimeDiagnostics.prefersPerformanceMode),
+              adaptiveQualityTier: normalizeString(diagnostics.runtimeDiagnostics.adaptiveQualityTier),
+              lowestAdaptiveQualityTier: normalizeString(diagnostics.runtimeDiagnostics.lowestAdaptiveQualityTier),
+              contextLossCount: normalizeNumber(diagnostics.runtimeDiagnostics.contextLossCount),
+              deliveryManifestUrl: normalizeString(diagnostics.runtimeDiagnostics.deliveryManifestUrl),
+              deliveryManifestFirst: normalizeBoolean(diagnostics.runtimeDiagnostics.deliveryManifestFirst),
+              deliveryHasProgressiveVariants: normalizeBoolean(diagnostics.runtimeDiagnostics.deliveryHasProgressiveVariants),
+              deliveryHasCompressedVariants: normalizeBoolean(diagnostics.runtimeDiagnostics.deliveryHasCompressedVariants),
+              deliveryStagedObserved: normalizeBoolean(diagnostics.runtimeDiagnostics.deliveryStagedObserved),
+              deliveryUpgradePending: normalizeBoolean(diagnostics.runtimeDiagnostics.deliveryUpgradePending),
+              deliveryActiveVariantLabel: normalizeString(diagnostics.runtimeDiagnostics.deliveryActiveVariantLabel),
+              deliveryUpgradeVariantLabel: normalizeString(diagnostics.runtimeDiagnostics.deliveryUpgradeVariantLabel),
+              canvasCreatedAtMs: normalizeNumber(diagnostics.runtimeDiagnostics.canvasCreatedAtMs),
+              viewerReadyAtMs: normalizeNumber(diagnostics.runtimeDiagnostics.viewerReadyAtMs),
+              firstContextLossAtMs: normalizeNumber(diagnostics.runtimeDiagnostics.firstContextLossAtMs),
+              frameCount: normalizeNumber(diagnostics.runtimeDiagnostics.frameCount),
+              frameAvgMs: normalizeNumber(diagnostics.runtimeDiagnostics.frameAvgMs),
+              frameP95Ms: normalizeNumber(diagnostics.runtimeDiagnostics.frameP95Ms),
+              frameWorstMs: normalizeNumber(diagnostics.runtimeDiagnostics.frameWorstMs),
+              frameOver33MsRatio: normalizeNumber(diagnostics.runtimeDiagnostics.frameOver33MsRatio),
+              frameOver50MsRatio: normalizeNumber(diagnostics.runtimeDiagnostics.frameOver50MsRatio),
+              adaptiveTransitionCount: normalizeNumber(diagnostics.runtimeDiagnostics.adaptiveTransitionCount),
+              adaptiveFullMs: normalizeNumber(diagnostics.runtimeDiagnostics.adaptiveFullMs),
+              adaptiveBalancedMs: normalizeNumber(diagnostics.runtimeDiagnostics.adaptiveBalancedMs),
+              adaptiveSafeMs: normalizeNumber(diagnostics.runtimeDiagnostics.adaptiveSafeMs),
+              adaptiveSafeEntries: normalizeNumber(diagnostics.runtimeDiagnostics.adaptiveSafeEntries),
+              firstFrameAtMs: normalizeNumber(diagnostics.runtimeDiagnostics.firstFrameAtMs),
+              firstStableFrameAtMs: normalizeNumber(diagnostics.runtimeDiagnostics.firstStableFrameAtMs),
+              posterCurtainStage: normalizeString(diagnostics.runtimeDiagnostics.posterCurtainStage),
+              posterCurtainVisible: normalizeBoolean(diagnostics.runtimeDiagnostics.posterCurtainVisible),
+              renderMegapixels: normalizeNumber(diagnostics.runtimeDiagnostics.renderMegapixels),
+          }
+        : null;
+    const normalizedCanvasMetrics = diagnostics.canvasMetrics
+        ? {
+              devicePixelRatio: normalizeNumber(diagnostics.canvasMetrics.devicePixelRatio),
+              viewerCssWidth: normalizeNumber(diagnostics.canvasMetrics.viewerCssWidth),
+              viewerCssHeight: normalizeNumber(diagnostics.canvasMetrics.viewerCssHeight),
+              viewerCssArea: normalizeNumber(diagnostics.canvasMetrics.viewerCssArea),
+              canvasCssWidth: normalizeNumber(diagnostics.canvasMetrics.canvasCssWidth),
+              canvasCssHeight: normalizeNumber(diagnostics.canvasMetrics.canvasCssHeight),
+              canvasCssArea: normalizeNumber(diagnostics.canvasMetrics.canvasCssArea),
+              canvasIntrinsicWidth: normalizeNumber(diagnostics.canvasMetrics.canvasIntrinsicWidth),
+              canvasIntrinsicHeight: normalizeNumber(diagnostics.canvasMetrics.canvasIntrinsicHeight),
+              canvasIntrinsicArea: normalizeNumber(diagnostics.canvasMetrics.canvasIntrinsicArea),
+              canvasResolutionScaleX: normalizeNumber(diagnostics.canvasMetrics.canvasResolutionScaleX),
+              canvasResolutionScaleY: normalizeNumber(diagnostics.canvasMetrics.canvasResolutionScaleY),
+              canvasEffectiveDpr: normalizeNumber(diagnostics.canvasMetrics.canvasEffectiveDpr),
+              canvasFillRatio: normalizeNumber(diagnostics.canvasMetrics.canvasFillRatio),
+              canvasAspectRatio: normalizeNumber(diagnostics.canvasMetrics.canvasAspectRatio),
+              viewerAspectRatio: normalizeNumber(diagnostics.canvasMetrics.viewerAspectRatio),
+              canvasAspectRatioDelta: normalizeNumber(diagnostics.canvasMetrics.canvasAspectRatioDelta),
+          }
+        : null;
+    const normalizedDeliveryDiagnostics = diagnostics.deliveryDiagnostics
+        ? {
+              stagedDelivery: normalizeBoolean(diagnostics.deliveryDiagnostics.stagedDelivery),
+              upgradePending: normalizeBoolean(diagnostics.deliveryDiagnostics.upgradePending),
+              activeVariantLabel: normalizeString(diagnostics.deliveryDiagnostics.activeVariantLabel),
+              upgradeVariantLabel: normalizeString(diagnostics.deliveryDiagnostics.upgradeVariantLabel),
           }
         : null;
 
@@ -245,10 +404,200 @@ export async function collectViewerDiagnostics(page) {
         ...diagnostics,
         surfaceDiagnostics: normalizedSurfaceDiagnostics,
         runtimeDiagnostics: normalizedRuntimeDiagnostics,
+        canvasMetrics: normalizedCanvasMetrics,
+        deliveryDiagnostics: normalizedDeliveryDiagnostics,
         classification: classifyViewerDiagnostics({
             ...diagnostics,
             surfaceDiagnostics: normalizedSurfaceDiagnostics,
             runtimeDiagnostics: normalizedRuntimeDiagnostics,
         }),
+    };
+}
+
+export async function collectCanvasVisualSample(page) {
+    return page.evaluate(() => {
+        const viewerSurface = document.querySelector('[data-testid="mvp-viewer-surface"]');
+        const canvas = viewerSurface?.querySelector("canvas") ?? null;
+        if (!canvas || !("width" in canvas) || !("height" in canvas) || canvas.width <= 0 || canvas.height <= 0) {
+            return {
+                available: false,
+                reason: "missing_canvas",
+            };
+        }
+
+        const gl = canvas.getContext("webgl2") ?? canvas.getContext("webgl") ?? canvas.getContext("experimental-webgl");
+        if (!gl || typeof gl.readPixels !== "function") {
+            return {
+                available: false,
+                reason: "missing_webgl_context",
+            };
+        }
+
+        const width = canvas.width;
+        const height = canvas.height;
+        const samplePositions = [
+            [0.5, 0.5],
+            [0.25, 0.25],
+            [0.75, 0.25],
+            [0.25, 0.75],
+            [0.75, 0.75],
+        ];
+        const pixel = new Uint8Array(4);
+        const samples = [];
+        let fingerprint = 2166136261;
+        let lumaSum = 0;
+        let alphaSum = 0;
+        let spreadSum = 0;
+        let minLuma = 255;
+        let maxLuma = 0;
+        let opaqueCount = 0;
+        let sampleSource = "webgl_read_pixels";
+        let sampleReader = null;
+
+        try {
+            const compositedCanvas = document.createElement("canvas");
+            compositedCanvas.width = width;
+            compositedCanvas.height = height;
+            const compositedContext = compositedCanvas.getContext("2d", { willReadFrequently: true });
+            if (compositedContext) {
+                compositedContext.drawImage(canvas, 0, 0, width, height);
+                sampleSource = "canvas_draw_image";
+                sampleReader = (x, y) => compositedContext.getImageData(x, y, 1, 1).data;
+            }
+        } catch {
+            sampleReader = null;
+        }
+
+        if (!sampleReader) {
+            if (typeof gl.finish === "function") {
+                gl.finish();
+            }
+            sampleReader = (x, y) => {
+                gl.readPixels(x, y, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
+                return pixel;
+            };
+        }
+
+        for (const [nx, ny] of samplePositions) {
+            const x = Math.max(0, Math.min(width - 1, Math.round((width - 1) * nx)));
+            const y = Math.max(0, Math.min(height - 1, Math.round((height - 1) * ny)));
+
+            try {
+                const rgba = sampleReader(x, y);
+                pixel[0] = rgba[0];
+                pixel[1] = rgba[1];
+                pixel[2] = rgba[2];
+                pixel[3] = rgba[3];
+            } catch (error) {
+                return {
+                    available: false,
+                    reason: "read_pixels_failed",
+                    message: error instanceof Error ? error.message : String(error),
+                };
+            }
+
+            const r = pixel[0];
+            const g = pixel[1];
+            const b = pixel[2];
+            const a = pixel[3];
+            const luma = Math.round(0.2126 * r + 0.7152 * g + 0.0722 * b);
+            const spread = Math.max(r, g, b) - Math.min(r, g, b);
+
+            samples.push({
+                x,
+                y,
+                r,
+                g,
+                b,
+                a,
+                luma,
+                spread,
+            });
+            lumaSum += luma;
+            alphaSum += a;
+            spreadSum += spread;
+            minLuma = Math.min(minLuma, luma);
+            maxLuma = Math.max(maxLuma, luma);
+            if (a > 16) {
+                opaqueCount += 1;
+            }
+
+            fingerprint ^= r;
+            fingerprint = Math.imul(fingerprint, 16777619);
+            fingerprint ^= g;
+            fingerprint = Math.imul(fingerprint, 16777619);
+            fingerprint ^= b;
+            fingerprint = Math.imul(fingerprint, 16777619);
+            fingerprint ^= a;
+            fingerprint = Math.imul(fingerprint, 16777619);
+        }
+
+        const sampleCount = samples.length || 1;
+        const meanLuma = lumaSum / sampleCount;
+        const meanAlpha = alphaSum / (sampleCount * 255);
+        const meanColorSpread = spreadSum / sampleCount;
+        const lumaVariance = samples.reduce((sum, sample) => sum + (sample.luma - meanLuma) ** 2, 0) / sampleCount;
+        const lumaStdDev = Math.sqrt(lumaVariance);
+        return {
+            available: true,
+            reason: null,
+            sampleSource,
+            fingerprint: fingerprint >>> 0,
+            sampleCount,
+            meanLuma,
+            lumaStdDev,
+            lumaRange: maxLuma - minLuma,
+            meanAlpha,
+            opaqueRatio: opaqueCount / sampleCount,
+            meanColorSpread,
+            samples,
+        };
+    });
+}
+
+export async function probeCanvasStillness(page, idleDelayMs = 120) {
+    const first = await collectCanvasVisualSample(page);
+    await page.waitForTimeout(idleDelayMs);
+    const second = await collectCanvasVisualSample(page);
+
+    if (!first?.available || !second?.available) {
+        return {
+            available: false,
+            reason: first?.reason ?? second?.reason ?? "missing_visual_sample",
+            idleDelayMs,
+            first,
+            second,
+        };
+    }
+
+    const fingerprintChanged = first.fingerprint !== second.fingerprint;
+    const meanLumaDelta = Math.abs(second.meanLuma - first.meanLuma);
+    const lumaStdDevDelta = Math.abs(second.lumaStdDev - first.lumaStdDev);
+    const meanAlphaDelta = Math.abs(second.meanAlpha - first.meanAlpha);
+    const meanColorSpreadDelta = Math.abs(second.meanColorSpread - first.meanColorSpread);
+    const opaqueRatioDelta = Math.abs(second.opaqueRatio - first.opaqueRatio);
+    const combinedDelta =
+        meanLumaDelta / 12 +
+        lumaStdDevDelta / 16 +
+        meanAlphaDelta / 0.08 +
+        meanColorSpreadDelta / 24 +
+        opaqueRatioDelta / 0.1 +
+        (fingerprintChanged ? 0.5 : 0);
+    const isStill = combinedDelta <= 1;
+
+    return {
+        available: true,
+        reason: null,
+        idleDelayMs,
+        first,
+        second,
+        fingerprintChanged,
+        meanLumaDelta,
+        lumaStdDevDelta,
+        meanAlphaDelta,
+        meanColorSpreadDelta,
+        opaqueRatioDelta,
+        combinedDelta,
+        isStill,
     };
 }

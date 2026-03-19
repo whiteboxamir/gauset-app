@@ -3,6 +3,7 @@ import { GPUComputationRenderer } from "three/examples/jsm/misc/GPUComputationRe
 
 const SORT_CULL_SENTINEL = 65504;
 const GPU_SORT_PAIR_TARGET_COUNT = 2;
+const GPU_SORT_ACTIVE_INDEX_TEXTURE_COUNT = 1;
 const GPU_SORT_BYTES_PER_RGBA32F_TEXEL = 16;
 
 const GPU_SORT_INIT_SHADER = `
@@ -135,7 +136,7 @@ function resolveGpuSortTextureSize(count: number, maxTextureSize: number) {
 
 export function estimateGpuSortWorkingSetBytes(count: number, maxTextureSize: number) {
     const sortSize = resolveGpuSortTextureSize(Math.max(1, count), maxTextureSize);
-    return sortSize.capacity * GPU_SORT_BYTES_PER_RGBA32F_TEXEL * GPU_SORT_PAIR_TARGET_COUNT;
+    return sortSize.capacity * GPU_SORT_BYTES_PER_RGBA32F_TEXEL * (GPU_SORT_PAIR_TARGET_COUNT + GPU_SORT_ACTIVE_INDEX_TEXTURE_COUNT);
 }
 
 function configureSortTarget(target: THREE.WebGLRenderTarget) {

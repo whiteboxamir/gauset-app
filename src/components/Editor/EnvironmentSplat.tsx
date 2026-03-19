@@ -5,7 +5,7 @@ import { resolveEnvironmentRenderSource, type ViewerFallbackReason } from "@/lib
 
 import { LumaEnvironmentSplat } from "./LumaEnvironmentSplat";
 import { SharpGaussianEnvironmentSplat } from "./SharpGaussianEnvironmentSplat";
-import type { PreviewBounds } from "./sharpGaussianShared";
+import type { PreviewBounds, SharpGaussianLoadState } from "./sharpGaussianShared";
 
 type EnvironmentSplatProps = {
     plyUrl?: string | null;
@@ -13,6 +13,7 @@ type EnvironmentSplatProps = {
     metadata?: GeneratedEnvironmentMetadata | null;
     onPreviewBounds?: (bounds: PreviewBounds) => void;
     onFatalError?: (message: string, reason: ViewerFallbackReason) => void;
+    onSharpLiveStateChange?: (state: { isLiveReady: boolean; loadState: SharpGaussianLoadState }) => void;
 };
 
 export default function EnvironmentSplat(props: EnvironmentSplatProps) {
@@ -29,6 +30,7 @@ export default function EnvironmentSplat(props: EnvironmentSplatProps) {
                 metadata={props.metadata}
                 onPreviewBounds={props.onPreviewBounds}
                 onFatalError={props.onFatalError}
+                onLiveStateChange={props.onSharpLiveStateChange}
             />
         );
     }

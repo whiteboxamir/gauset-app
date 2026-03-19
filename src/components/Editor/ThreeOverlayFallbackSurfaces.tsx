@@ -23,6 +23,111 @@ const INTERACTIVE_FALLBACK_WORLD_HALF_HEIGHT = 3;
 const INTERACTIVE_FALLBACK_CAMERA_HEIGHT = 1.6;
 const INTERACTIVE_FALLBACK_CAMERA_DISTANCE = 6;
 
+type FallbackSurfaceVariant = "recovery" | "compatibility" | "scale" | "generic";
+
+function classifyFallbackSurfaceVariant(message?: string): FallbackSurfaceVariant {
+    const normalized = (message ?? "").trim().toLowerCase();
+
+    if (normalized.includes("context was lost") || normalized.includes("context lost")) {
+        return "recovery";
+    }
+    if (normalized.includes("webgl2") || normalized.includes("webgl")) {
+        return "compatibility";
+    }
+    if (normalized.includes("texture size") || normalized.includes("too large")) {
+        return "scale";
+    }
+    return "generic";
+}
+
+function resolveFallbackSurfaceCopy(message?: string, referenceImage?: string | null) {
+    const variant = classifyFallbackSurfaceVariant(message);
+    const hasReferenceImage = Boolean(referenceImage);
+
+    if (variant === "recovery") {
+        return {
+            eyebrow: "Recovery mode",
+            title: "The live viewer lost its GPU context",
+            body: message || "We switched to a safe fallback so the scene stays inspectable while the browser recovers.",
+            footnote: hasReferenceImage
+                ? "The reference image remains visible, and a refresh after freeing GPU memory may bring the live canvas back."
+                : "Try closing GPU-heavy tabs or refreshing after a short pause to give the browser a better recovery path.",
+        };
+    }
+
+    if (variant === "compatibility") {
+        return {
+            eyebrow: "Compatibility mode",
+            title: "This browser could not start the live viewer",
+            body: message || "We kept the workspace honest by showing a safe fallback instead of a broken canvas.",
+            footnote: "A Chromium-based browser with WebGL2 and a current graphics stack usually gives the best result.",
+        };
+    }
+
+    if (variant === "scale") {
+        return {
+            eyebrow: "Scale limit reached",
+            title: "This scene exceeded the local GPU budget",
+            body: message || "The viewer stepped down to a safer surface instead of risking an unstable render.",
+            footnote: "Reducing the export size or using a stronger GPU should restore live 3D rendering.",
+        };
+    }
+
+    return {
+        eyebrow: "Viewer fallback",
+        title: "Live 3D is unavailable right now",
+        body: message || "We stayed honest and kept the workspace usable without pretending the live renderer is active.",
+        footnote: hasReferenceImage
+            ? "The reference image is still available for review, comments, and export work."
+            : "Review, export, and the rest of the workspace remain available while the viewer is in fallback.",
+    };
+}
+
+function FallbackStatusPanel({
+    eyebrow,
+    title,
+    body,
+    footnote,
+    chips,
+    centered = false,
+}: {
+    eyebrow: string;
+    title: string;
+    body: string;
+    footnote?: string;
+    chips?: string[];
+    centered?: boolean;
+}) {
+    return (
+        <div
+            className={
+                centered
+                    ? "relative flex h-full items-center justify-center p-6"
+                    : "pointer-events-none absolute left-5 top-5 z-10 w-[min(26rem,calc(100%-2.5rem))]"
+            }
+        >
+            <div className="w-full rounded-[24px] border border-white/12 bg-[linear-gradient(180deg,rgba(10,14,21,0.96),rgba(7,10,14,0.94))] p-4 text-left shadow-[0_20px_60px_rgba(0,0,0,0.42)] backdrop-blur-xl">
+                <div className="flex flex-wrap gap-2">
+                    <span className="inline-flex items-center rounded-full border border-cyan-100/18 bg-cyan-100/10 px-2.5 py-1 text-[10px] uppercase tracking-[0.24em] text-cyan-100/90">
+                        {eyebrow}
+                    </span>
+                    {chips?.map((chip) => (
+                        <span
+                            key={chip}
+                            className="inline-flex items-center rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[10px] uppercase tracking-[0.2em] text-white/70"
+                        >
+                            {chip}
+                        </span>
+                    ))}
+                </div>
+                <p className="mt-3 text-[15px] font-medium text-white">{title}</p>
+                <p className="mt-2 text-sm leading-6 text-neutral-200">{body}</p>
+                {footnote ? <p className="mt-3 text-[11px] leading-5 text-neutral-300">{footnote}</p> : null}
+            </div>
+        </div>
+    );
+}
+
 function clamp01(value: number) {
     return Math.max(0, Math.min(1, value));
 }
@@ -53,6 +158,7 @@ export const ThreeOverlayFallback = React.memo(function ThreeOverlayFallback({
     message?: string;
     referenceImage?: string | null;
 }) {
+    const copy = resolveFallbackSurfaceCopy(message, referenceImage);
     return (
         <div
             className="absolute inset-0 z-20 overflow-hidden rounded-[32px] bg-[radial-gradient(circle_at_top,rgba(56,189,248,0.08),transparent_22%),linear-gradient(180deg,#06080b_0%,#040507_100%)]"
@@ -65,18 +171,14 @@ export const ThreeOverlayFallback = React.memo(function ThreeOverlayFallback({
                 />
             ) : null}
             <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(4,6,9,0.72),rgba(4,5,7,0.94))]" />
-            <div className="relative flex h-full items-center justify-center p-6">
-                <div className="w-full max-w-lg rounded-[28px] border border-white/12 bg-[linear-gradient(180deg,rgba(10,14,21,0.94),rgba(7,10,14,0.94))] p-5 text-center shadow-[0_24px_70px_rgba(0,0,0,0.4)] backdrop-blur-xl">
-                    <p className="text-[10px] uppercase tracking-[0.28em] text-cyan-100/80">Viewer fallback</p>
-                    <p className="mt-3 text-lg font-medium text-white">3D viewer unavailable</p>
-                    <p className="mt-2 text-sm leading-6 text-neutral-200">
-                        {message || "This browser or environment could not initialize the WebGL viewer. Import, review, export, and other non-3D controls remain available."}
-                    </p>
-                    <p className="mt-3 text-[11px] leading-5 text-neutral-300">
-                        Camera capture, scene-note placement, and path recording stay disabled until the viewer can create a render context.
-                    </p>
-                </div>
-            </div>
+            <FallbackStatusPanel
+                centered
+                eyebrow={copy.eyebrow}
+                title={copy.title}
+                body={copy.body}
+                footnote={copy.footnote}
+                chips={referenceImage ? ["Reference image"] : ["Live 3D off"]}
+            />
         </div>
     );
 });
@@ -94,6 +196,13 @@ export const SingleImagePreviewSurface = React.memo(function SingleImagePreviewS
                 alt=""
                 className="h-full w-full object-contain"
                 draggable={false}
+            />
+            <FallbackStatusPanel
+                eyebrow="Reference preview"
+                title="Projected image"
+                body="This is the source image projected into the viewer while the live 3D surface is unavailable or intentionally skipped."
+                footnote="It keeps the scene legible without pretending the live renderer is active."
+                chips={["Preview", "Reference"]}
             />
         </div>
     );
@@ -221,6 +330,21 @@ export const InteractiveSingleImageFallbackSurface = React.memo(function Interac
             data-testid="mvp-interactive-fallback-surface"
         >
             <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(56,189,248,0.08),transparent_24%)]" />
+            <FallbackStatusPanel
+                eyebrow="Interactive preview"
+                title={readOnly ? "Review-only directing surface" : "Direct from the reference image"}
+                body={
+                    readOnly
+                        ? "You can inspect the scene, select pins, and review framing while the live renderer stays in fallback."
+                        : "You can reframe the scene and place pins from the reference image while we stay honest about the live renderer being unavailable."
+                }
+                footnote={
+                    isRecordingPath
+                        ? "Path recording is active and will capture the fallback camera pose."
+                        : "Path recording is off for this session, but pin placement and camera framing still work."
+                }
+                chips={readOnly ? ["View only", "Reference"] : ["Pins enabled", "Reference"]}
+            />
             <canvas
                 ref={canvasRef}
                 data-testid="mvp-interactive-fallback-canvas"
