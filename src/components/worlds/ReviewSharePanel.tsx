@@ -285,7 +285,7 @@ export function ReviewSharePanel({
           : "Save a version in /mvp before publishing a secure review link.";
     const createActionLabel =
         pendingAction === "create"
-            ? "Signing link..."
+            ? "Creating review link..."
             : selectedReadiness?.state === "review_only"
               ? "Create review-only link"
               : "Create secure review link";
@@ -433,7 +433,7 @@ export function ReviewSharePanel({
                     <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-cyan-200/70">Secure review sharing</p>
                     <h3 className="mt-2 text-lg font-medium text-white">Operator-grade review links</h3>
                     <p className="mt-3 max-w-3xl text-sm leading-7 text-neutral-400">
-                        Signed review links now persist in the platform database, can be revoked immediately, and report real access history without broadening anonymous access to `/api/mvp`.
+                        Signed review links now persist in the platform database, stay pinned to one saved world version, and can be revoked immediately without broadening anonymous access to `/api/mvp`.
                     </p>
                     <p className="mt-2 max-w-3xl text-sm leading-7 text-neutral-500">
                         If the signing secret or MVP entitlement is missing in the current environment, share creation fails explicitly instead of pretending review delivery is live.
@@ -631,7 +631,7 @@ export function ReviewSharePanel({
                                         rel="noreferrer"
                                         className="rounded-2xl border border-white/10 bg-white/[0.04] px-5 py-3 text-sm font-medium text-white transition-colors hover:border-white/20 hover:bg-white/[0.08]"
                                     >
-                                        Open latest review
+                                        Open review
                                     </a>
                                 ) : null}
                             </div>
@@ -641,17 +641,17 @@ export function ReviewSharePanel({
                             <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-neutral-500">Current share posture</p>
                             <div className="mt-4 grid gap-3 sm:grid-cols-3">
                                 <article className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                                    <p className="text-xs uppercase tracking-[0.18em] text-neutral-500">Primary scene</p>
+                                    <p className="text-xs uppercase tracking-[0.18em] text-neutral-500">Saved-world anchor</p>
                                     <p className="mt-3 text-sm font-medium text-white">{selectedWorldLink?.sceneId ?? "No linked scene"}</p>
                                     <p className="mt-1 text-sm text-neutral-500">{selectedWorldLink?.environmentLabel ?? "No environment label"}</p>
                                 </article>
                                 <article className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                                    <p className="text-xs uppercase tracking-[0.18em] text-neutral-500">Selected anchor</p>
+                                    <p className="text-xs uppercase tracking-[0.18em] text-neutral-500">Saved version anchor</p>
                                     <p className="mt-3 text-sm font-medium text-white">{selectedVersion ? "Version-locked" : "Awaiting save"}</p>
                                     <p className="mt-1 text-sm text-neutral-500">{selectedVersionSummary}</p>
                                 </article>
                                 <article className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                                    <p className="text-xs uppercase tracking-[0.18em] text-neutral-500">Latest persisted link</p>
+                                    <p className="text-xs uppercase tracking-[0.18em] text-neutral-500">Current persisted link</p>
                                     <p className="mt-3 text-sm font-medium text-white">{shareUrl ? "Ready" : "No new link this session"}</p>
                                     <p className="mt-1 text-sm text-neutral-500">
                                         {expiresAt ? `Expires ${formatDate(expiresAt)}` : "Create a share to publish the next version-locked review link."}
@@ -794,7 +794,7 @@ export function ReviewSharePanel({
                                                                 disabled={isPending && pendingShareId === share.id}
                                                                 className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs font-medium text-white transition-colors hover:border-white/20 hover:bg-white/[0.08] disabled:opacity-60"
                                                             >
-                                                                {pendingAction === "copy" && pendingShareId === share.id ? "Copying..." : "Copy"}
+                                                                {pendingAction === "copy" && pendingShareId === share.id ? "Copying..." : "Copy link"}
                                                             </button>
                                                             <a
                                                                 href={share.sharePath}
@@ -802,7 +802,7 @@ export function ReviewSharePanel({
                                                                 rel="noreferrer"
                                                                 className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs font-medium text-white transition-colors hover:border-white/20 hover:bg-white/[0.08]"
                                                             >
-                                                                Open
+                                                                Open review
                                                             </a>
                                                             <button
                                                                 type="button"
@@ -810,7 +810,7 @@ export function ReviewSharePanel({
                                                                 disabled={isPending && pendingShareId === share.id}
                                                                 className="rounded-full border border-rose-400/25 bg-rose-500/10 px-3 py-1.5 text-xs font-medium text-rose-100 transition-colors hover:border-rose-300/40 hover:bg-rose-500/20 disabled:opacity-60"
                                                             >
-                                                                {pendingAction === "revoke" && pendingShareId === share.id ? "Revoking..." : "Revoke"}
+                                                                {pendingAction === "revoke" && pendingShareId === share.id ? "Revoking..." : "Revoke link"}
                                                             </button>
                                                         </>
                                                     ) : null}

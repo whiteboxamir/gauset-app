@@ -176,6 +176,29 @@ async function detectWebgl2Support(page) {
 test.describe.configure({ mode: "serial" });
 test.setTimeout(240000);
 
+test("wave0 focused preview drops project-led starts straight into workspace and locks advanced density", async ({ page }) => {
+    await page.goto(`${BASE}/mvp/preview?project=11111111-1111-4111-8111-111111111111&source_kind=upload`, { waitUntil: "domcontentloaded" });
+    await expect(page.getByTestId("mvp-preview-back-to-start")).toBeVisible();
+    await expect(page.getByText(/Project launch/i)).toBeVisible();
+    await expect(page.getByText(/^Import scout stills$/)).toBeVisible();
+    await expect(page.getByRole("link", { name: /Continue to world start/i })).toHaveCount(0);
+    await expect(page.getByText(/Review and handoff/i)).toHaveCount(0);
+    await expect(page.getByText(/Studio view on|Studio view off/i)).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /Open demo world/i })).toHaveCount(0);
+});
+
+test("wave0 worlds local preview fallback stays inspectable without auth env", async ({ page }) => {
+    await page.goto(`${BASE}/app/worlds`, { waitUntil: "domcontentloaded" });
+    await expect(page.getByText(/^Local preview$/i).first()).toBeVisible();
+    await expect(page.getByText(/Choose a project\. Build one world\. Save it once\./i)).toBeVisible();
+    await expect(page.getByRole("link", { name: /Project home/i }).first()).toBeVisible();
+
+    await page.getByRole("link", { name: /Project home/i }).first().click();
+    await expect(page).toHaveURL(/\/app\/worlds\/11111111-1111-4111-8111-111111111111$/);
+    await expect(page.getByRole("heading", { name: "Backlot Scout" })).toBeVisible();
+    await expect(page.getByRole("link", { name: /Import real source/i })).toBeVisible();
+});
+
 test("wave1 local shell and backend state", async ({ page }) => {
     await page.goto(`${BASE}/mvp`, { waitUntil: "domcontentloaded" });
     await waitForBackendReady(page);
@@ -305,7 +328,7 @@ test("wave6 capture set progress", async ({ page }) => {
 });
 
 test("wave7 local preview shell", async ({ page }) => {
-    await page.goto(`${BASE}/mvp/preview?ts=${Date.now()}`, { waitUntil: "networkidle" });
+    await page.goto(`${BASE}/mvp/preview?ts=${Date.now()}`, { waitUntil: "domcontentloaded" });
     await expect(page.getByText(/Bring one image\./i)).toBeVisible();
     await expectDeploymentFingerprintBadge(page);
     await expect(page.getByRole("button", { name: /See the demo world/i })).toBeVisible();
@@ -419,6 +442,19 @@ test("wave12 duplicate-heavy capture set is blocked", async ({ page }) => {
     await page.screenshot({ path: "/tmp/qa-wave12-reconstruction-blocked.png", fullPage: true });
 });
 
+test("wave13 focused preview stays simple before save and keeps advanced density locked", async ({ page }) => {
+    await page.goto(`${BASE}/mvp/preview?ts=${Date.now()}`, { waitUntil: "domcontentloaded" });
+    await expect(page.getByText(/Build one world\./i)).toBeVisible();
+    await expect(page.getByRole("button", { name: /Open demo world/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Resume local draft/i })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /Studio view on|Studio view off/i })).toHaveCount(0);
+    await expect(page.getByText(/Richer direction, review, and handoff unlock after the first save\./i)).toBeVisible();
+
+    await page.getByRole("button", { name: /Open demo world/i }).click();
+    await expect(page.getByTestId("mvp-viewer-surface")).toBeVisible();
+    await expect(page.getByRole("button", { name: /Studio view on|Studio view off/i })).toHaveCount(0);
+});
+
 test("wave13 classic route keeps viewer area on laptop viewports", async ({ browser }) => {
     for (const viewport of [
         { width: 1366, height: 768 },
@@ -444,15 +480,15 @@ test("wave14 preview demo stays static and keeps the viewer tray closed", async 
     const page = await context.newPage();
 
     await page.goto(`${BASE}/mvp/preview`, { waitUntil: "networkidle" });
-    await page.getByRole("button", { name: /See the demo world/i }).click();
+    await page.getByRole("button", { name: /Open demo world/i }).click();
 
     await expect(page.getByTestId("mvp-preview-back-to-start")).toBeVisible({ timeout: 15000 });
     await expect(page.getByRole("button", { name: /Show left HUD/i })).toBeVisible({ timeout: 15000 });
     await expect(page.getByText(/Demo world loaded/i)).toBeVisible({ timeout: 15000 });
     await expect(page.getByText(/^Demo world$/i).first()).toBeVisible({ timeout: 15000 });
-    await expect(page.getByTestId("mvp-preview-route-badge")).toContainText("/mvp/preview");
+    await expect(page.getByTestId("mvp-preview-route-badge")).toContainText(/Preview safe/i);
     await expect(page.getByText(/Preview Loaded/i)).toHaveCount(0);
-    await expect(page.getByTestId("mvp-viewer-selection-tray")).toContainText(/0 saved views · 0 notes/i);
+    await expect(page.getByTestId("mvp-viewer-selection-tray")).toHaveCount(0);
 
     const viewerBox = await page.getByTestId("mvp-viewer-surface").boundingBox();
     expect(viewerBox?.height ?? 0).toBeGreaterThan(520);
@@ -463,16 +499,16 @@ test("wave14 preview demo stays static and keeps the viewer tray closed", async 
 
 test("wave15 preview workspace can return to start and resume the same session", async ({ page }) => {
     await page.goto(`${BASE}/mvp/preview`, { waitUntil: "networkidle" });
-    await page.getByRole("button", { name: /See the demo world/i }).click();
+    await page.getByRole("button", { name: /Open demo world/i }).click();
     await expect(page.getByTestId("mvp-preview-back-to-start")).toBeVisible({ timeout: 15000 });
     await expect.poll(async () => Boolean(await readLocalDraft(page)), { timeout: 15000 }).toBe(true);
     await expect.poll(async () => await listLocalDraftKeys(page), { timeout: 15000 }).toContainEqual(expect.stringContaining(":preview:"));
 
     await page.getByTestId("mvp-preview-back-to-start").click();
-    await expect(page.getByText(/Bring one image\./i)).toBeVisible({ timeout: 15000 });
-    await expect(page.getByRole("button", { name: /Return to my last world/i })).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText(/Build one world\./i)).toBeVisible({ timeout: 15000 });
+    await expect(page.getByRole("button", { name: /Resume local draft/i })).toBeVisible({ timeout: 15000 });
 
-    await page.getByRole("button", { name: /Return to my last world/i }).click();
+    await page.getByRole("button", { name: /Resume local draft/i }).click();
     await expect(page.getByTestId("mvp-preview-back-to-start")).toBeVisible({ timeout: 15000 });
     await expect(page.getByText(/Demo world loaded/i)).toBeVisible({ timeout: 15000 });
     await expect(page.getByText(/^Demo world$/i).first()).toBeVisible({ timeout: 15000 });

@@ -4,12 +4,15 @@ import {
     createDefaultReviewRecord,
     createEmptyWorkspaceSceneGraph,
     createId,
+    defaultWorldContinuityRecord,
     defaultViewerState,
+    normalizeWorldContinuityRecord,
     parseQuaternionTuple,
     parseVector3Tuple,
     type QuaternionTuple,
     type SceneReviewRecord,
     type SpatialPin,
+    type WorldContinuityRecord,
     type WorkspaceSceneGraph,
 } from "../mvp-workspace.ts";
 import { Euler, Matrix4, Quaternion, Vector3 } from "three";
@@ -67,6 +70,7 @@ export function createEmptySceneDocumentV2(review: SceneReviewRecord | null = nu
             directorPath: workspace.director_path,
             directorBrief: workspace.director_brief,
         },
+        continuity: defaultWorldContinuityRecord(),
         review: review ?? null,
         viewer: createViewerDocumentState(),
     };
@@ -74,6 +78,12 @@ export function createEmptySceneDocumentV2(review: SceneReviewRecord | null = nu
 
 export function cloneSceneDocument(document: SceneDocumentV2): SceneDocumentV2 {
     return structuredClone(document);
+}
+
+export function normalizeSceneDocumentDefaults(document: SceneDocumentV2): SceneDocumentV2 {
+    const nextDocument = cloneSceneDocument(document);
+    nextDocument.continuity = normalizeWorldContinuityRecord((document as { continuity?: unknown }).continuity);
+    return nextDocument;
 }
 
 export function createGroupNodeRecord(id = createSceneNodeId("group"), name = "Group"): SceneNodeRecord {
@@ -642,6 +652,27 @@ export function setDirectorBriefOnSceneDocument(document: SceneDocumentV2, direc
 
     const nextDocument = cloneSceneDocument(document);
     nextDocument.direction.directorBrief = directorBrief;
+    return nextDocument;
+}
+
+export function patchSceneContinuityOnSceneDocument(document: SceneDocumentV2, patch: Partial<WorldContinuityRecord>): SceneDocumentV2 {
+    const currentContinuity = normalizeWorldContinuityRecord((document as { continuity?: unknown }).continuity);
+    const nextContinuity = {
+        ...currentContinuity,
+        ...patch,
+    };
+
+    if (
+        nextContinuity.worldBible === currentContinuity.worldBible &&
+        nextContinuity.castContinuity === currentContinuity.castContinuity &&
+        nextContinuity.lookDevelopment === currentContinuity.lookDevelopment &&
+        nextContinuity.shotPlan === currentContinuity.shotPlan
+    ) {
+        return document;
+    }
+
+    const nextDocument = cloneSceneDocument(document);
+    nextDocument.continuity = nextContinuity;
     return nextDocument;
 }
 

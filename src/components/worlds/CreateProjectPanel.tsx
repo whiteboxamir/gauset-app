@@ -27,10 +27,9 @@ export function CreateProjectPanel({
             <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                     <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-cyan-200/70">Create project</p>
-                    <h3 className="mt-2 text-lg font-medium text-white">Start the ownership layer</h3>
+                    <h3 className="mt-2 text-lg font-medium text-white">Start a world record</h3>
                     <p className="mt-3 max-w-2xl text-sm leading-7 text-neutral-400">
-                        Optional initial scene links must respect existing scene ownership. If a world is already attached to another project, the API rejects the conflicting
-                        link instead of minting duplicate ownership.
+                        Start the durable record first. Then build one world, save it once, and keep review, reopen, and handoff attached to that same project-bound source of truth.
                     </p>
                 </div>
             </div>
@@ -65,7 +64,7 @@ export function CreateProjectPanel({
                             setDescription("");
                             setSceneId("");
                             setEnvironmentLabel("");
-                            setMessage("Project created.");
+                            setMessage("Project record created. Opening the saved-world home...");
                             router.push(`/app/worlds/${payload.projectId}`);
                             router.refresh();
                         } catch (projectError) {
@@ -81,7 +80,7 @@ export function CreateProjectPanel({
                             value={name}
                             onChange={(event) => setName(event.target.value)}
                             required
-                            placeholder="Barcelona hotel interior scout"
+                            placeholder="Barcelona hotel interior world"
                             disabled={isPending}
                             className="w-full rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white outline-none transition-colors placeholder:text-neutral-600 focus:border-cyan-300/40"
                         />
@@ -92,7 +91,7 @@ export function CreateProjectPanel({
                         <textarea
                             value={description}
                             onChange={(event) => setDescription(event.target.value)}
-                            placeholder="What this world is for, who it belongs to, and what phase it is in."
+                            placeholder="What this world is for, what must stay continuous, and who owns it."
                             disabled={isPending}
                             rows={compact ? 3 : 4}
                             className="w-full rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white outline-none transition-colors placeholder:text-neutral-600 focus:border-cyan-300/40"
@@ -100,7 +99,7 @@ export function CreateProjectPanel({
                     </div>
 
                     <div className="space-y-2">
-                        <label className="text-[11px] font-semibold uppercase tracking-[0.22em] text-neutral-400">Initial scene ID</label>
+                        <label className="text-[11px] font-semibold uppercase tracking-[0.22em] text-neutral-400">Optional saved world ID</label>
                         <input
                             value={sceneId}
                             onChange={(event) => setSceneId(event.target.value)}
@@ -111,7 +110,7 @@ export function CreateProjectPanel({
                     </div>
 
                     <div className="space-y-2">
-                        <label className="text-[11px] font-semibold uppercase tracking-[0.22em] text-neutral-400">Environment label</label>
+                        <label className="text-[11px] font-semibold uppercase tracking-[0.22em] text-neutral-400">World label</label>
                         <input
                             value={environmentLabel}
                             onChange={(event) => setEnvironmentLabel(event.target.value)}
@@ -127,7 +126,7 @@ export function CreateProjectPanel({
                     disabled={isPending}
                     className="rounded-2xl bg-white px-5 py-3 text-sm font-semibold text-black transition-colors hover:bg-neutral-200 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                    {isPending ? "Creating..." : "Create project"}
+                    {isPending ? "Creating project record..." : "Create world record"}
                 </button>
             </form>
 

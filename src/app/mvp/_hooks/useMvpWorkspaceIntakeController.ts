@@ -114,6 +114,13 @@ export function useMvpWorkspaceIntakeController({
                 : ({
                       lane: fallbackLane,
                   } as Record<string, unknown>);
+            const ingestMetadata =
+                nextMetadata && typeof nextMetadata === "object"
+                    ? structuredClone(nextMetadata as Record<string, unknown>)
+                    : null;
+            if (ingestMetadata && "ingest_record" in ingestMetadata) {
+                delete (ingestMetadata as Record<string, unknown>).ingest_record;
+            }
             const ingestRecord = deriveWorldIngestRecord({
                 sceneId,
                 projectId: launchProjectId,
@@ -123,7 +130,7 @@ export function useMvpWorkspaceIntakeController({
                         lane: (nextMetadata as { lane?: string }).lane ?? fallbackLane,
                         sourceLabel: launchBrief ?? launchReferences ?? null,
                         urls,
-                        metadata: nextMetadata,
+                        metadata: ingestMetadata,
                     },
                 },
                 fallbackLabel: launchBrief ?? launchReferences ?? null,

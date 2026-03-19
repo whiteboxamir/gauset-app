@@ -19,6 +19,7 @@ import {
 } from "@/state/mvpSceneWorkspaceSelectors.ts";
 
 import { RightPanelHeader } from "./RightPanelHeader";
+import { RightPanelContinuityRecordSection } from "./RightPanelContinuityRecordSection";
 import { RightPanelLocalAssetsSection } from "./RightPanelLocalAssetsSection";
 import { RightPanelNodeInspectorSection } from "./RightPanelNodeInspectorSection";
 import { RightPanelReviewIssuesSection } from "./RightPanelReviewIssuesSection";
@@ -58,6 +59,10 @@ export default function RightPanel({ clarityMode = false }: RightPanelProps) {
         versions,
         workspaceOrigin,
         workspaceOriginDetail,
+        journeyStage,
+        hasSavedVersion,
+        isAdvancedDensityEnabled,
+        canUseAdvancedDensity,
         manualSave: onManualSave,
         restoreVersion: onRestoreVersion,
         handleExport: onExport,
@@ -194,12 +199,22 @@ export default function RightPanel({ clarityMode = false }: RightPanelProps) {
         },
         [onRestoreVersion, selectVersion],
     );
+    const patchContinuity = useCallback(
+        (patch: Partial<typeof sceneDocument.continuity>) => {
+            sceneStoreActions.patchContinuity(patch);
+        },
+        [sceneDocument.continuity, sceneStoreActions],
+    );
 
     return (
         <div className="flex h-full flex-col overflow-y-auto bg-transparent">
             <RightPanelHeader
                 activeScene={activeScene}
+                canUseAdvancedDensity={canUseAdvancedDensity}
                 clarityMode={clarityMode}
+                hasSavedVersion={hasSavedVersion}
+                isAdvancedDensityEnabled={isAdvancedDensityEnabled}
+                journeyStage={journeyStage}
                 onManualSave={onManualSave}
                 saveState={saveState}
             />
@@ -229,11 +244,21 @@ export default function RightPanel({ clarityMode = false }: RightPanelProps) {
                 selectedVersion={selectedVersion}
                 shareStatus={shareStatus}
                 versions={versions}
+                viewCount={cameraViews.length}
+                noteCount={pins.length}
                 workspaceOrigin={workspaceOrigin}
                 workspaceOriginDetail={workspaceOriginDetail}
+                journeyStage={journeyStage}
+                isAdvancedDensityEnabled={isAdvancedDensityEnabled}
             />
 
-            {activeScene ? (
+            <RightPanelContinuityRecordSection
+                continuity={sceneDocument.continuity}
+                journeyStage={journeyStage}
+                onPatchContinuity={patchContinuity}
+            />
+
+            {activeScene && hasSavedVersion ? (
                 <div className="space-y-3 border-b border-neutral-800/80 p-4">
                     <RightPanelReviewSection
                         activeScene={activeScene}
@@ -281,7 +306,7 @@ export default function RightPanel({ clarityMode = false }: RightPanelProps) {
                 </div>
             ) : null}
 
-            {activeScene ? (
+            {activeScene && isAdvancedDensityEnabled ? (
                 <div className="px-4 pb-4 pt-3">
                     <details className="group rounded-[1.05rem] border border-white/8 bg-white/[0.02]">
                         <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-3 text-white marker:content-none">

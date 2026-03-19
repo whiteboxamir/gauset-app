@@ -50,14 +50,16 @@ export function shouldScheduleAutosave({
     hasHydrated,
     entryMode,
     hasContent,
+    autosaveUnlocked,
     persistenceFingerprint,
     lastSavedFingerprint,
 }: {
     hasHydrated: boolean;
     entryMode: WorkspaceEntryMode;
     hasContent: boolean;
+    autosaveUnlocked: boolean;
     persistenceFingerprint: string;
     lastSavedFingerprint: string;
 }) {
-    return hasHydrated && entryMode === "workspace" && hasContent && persistenceFingerprint !== lastSavedFingerprint;
+    return hasHydrated && entryMode === "workspace" && hasContent && autosaveUnlocked && persistenceFingerprint !== lastSavedFingerprint;
 }

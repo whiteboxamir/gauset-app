@@ -40,10 +40,14 @@ type LeftPanelCaptureWorkspaceProps = Pick<
     | "startReconstruction"
     | "statusText"
     | "uploads"
->;
+> & {
+    allowAssetActions?: boolean;
+    previewButtonLabel?: string;
+};
 
 export function LeftPanelCaptureWorkspace({
     addSelectedToCaptureSet,
+    allowAssetActions = false,
     assetCapability,
     backendMode,
     backendWritesDisabled,
@@ -73,6 +77,7 @@ export function LeftPanelCaptureWorkspace({
     startReconstruction,
     statusText,
     uploads,
+    previewButtonLabel = "Build world preview",
 }: LeftPanelCaptureWorkspaceProps) {
     const reconstructionTruth =
         reconstructionCapability?.truth ??
@@ -192,16 +197,7 @@ export function LeftPanelCaptureWorkspace({
                             className="w-full py-3.5 px-4 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-black font-medium flex items-center justify-center gap-2 transition-all disabled:opacity-50 disabled:hover:bg-emerald-500 shadow-lg shadow-emerald-950/20"
                         >
                             {isGeneratingPreview ? <Loader2 className="animate-spin h-5 w-5" /> : <ImageIcon className="h-5 w-5" />}
-                            {isGeneratingPreview ? "Building world preview..." : "Build world preview"}
-                        </button>
-
-                        <button
-                            onClick={generateAsset}
-                            disabled={!selectedUpload || isGeneratingPreview || isGeneratingAsset || backendMode === "offline" || backendWritesDisabled || !assetCapability?.available}
-                            className="w-full py-3.5 px-4 rounded-2xl bg-sky-500 hover:bg-sky-400 text-black font-medium flex items-center justify-center gap-2 transition-all disabled:opacity-50 disabled:hover:bg-sky-500 shadow-lg shadow-sky-950/20"
-                        >
-                            {isGeneratingAsset ? <Loader2 className="animate-spin h-5 w-5" /> : <Box className="h-5 w-5" />}
-                            {isGeneratingAsset ? "Extracting 3D asset..." : "Extract 3D asset"}
+                            {isGeneratingPreview ? "Building world preview..." : previewButtonLabel}
                         </button>
 
                         <button
@@ -212,6 +208,21 @@ export function LeftPanelCaptureWorkspace({
                             {isUpdatingCapture ? <Loader2 className="animate-spin h-5 w-5" /> : <Upload className="h-5 w-5" />}
                             {isUpdatingCapture ? "Adding frame to capture set..." : "Add frame to capture set"}
                         </button>
+
+                        {allowAssetActions ? (
+                            <button
+                                onClick={generateAsset}
+                                disabled={!selectedUpload || isGeneratingPreview || isGeneratingAsset || backendMode === "offline" || backendWritesDisabled || !assetCapability?.available}
+                                className="w-full py-3.5 px-4 rounded-2xl bg-sky-500 hover:bg-sky-400 text-black font-medium flex items-center justify-center gap-2 transition-all disabled:opacity-50 disabled:hover:bg-sky-500 shadow-lg shadow-sky-950/20"
+                            >
+                                {isGeneratingAsset ? <Loader2 className="animate-spin h-5 w-5" /> : <Box className="h-5 w-5" />}
+                                {isGeneratingAsset ? "Extracting 3D asset..." : "Extract 3D asset"}
+                            </button>
+                        ) : (
+                            <div className="rounded-2xl border border-white/8 bg-black/20 px-4 py-3 text-[11px] leading-5 text-neutral-400">
+                                Asset extraction stays out of the primary path until the first saved world unlocks studio controls.
+                            </div>
+                        )}
                     </div>
 
                     <div className="rounded-[28px] border border-white/10 bg-[linear-gradient(180deg,rgba(18,24,38,0.76),rgba(10,14,19,0.9))] p-4">
@@ -370,7 +381,7 @@ export function LeftPanelCaptureWorkspace({
                 </div>
             ) : (
                 <div className="rounded-[28px] border border-white/10 bg-[linear-gradient(180deg,rgba(18,24,38,0.7),rgba(10,14,19,0.86))] p-4 text-xs text-neutral-400">
-                    Import or generate a hero still for a fast scout pass, or build a small overlapping capture set for a faithful reconstruction run.
+                    Start with one clear still or a small overlapping capture orbit. Build the first world first, then unlock deeper studio actions after the first save.
                 </div>
             )}
         </>

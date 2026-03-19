@@ -66,6 +66,18 @@ export function LeftPanelImportSection({
                 <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1.5">QC + lane routing</span>
             </div>
 
+            {isUploading ? (
+                <div className="mt-4 rounded-[1rem] border border-sky-400/20 bg-sky-500/8 px-3 py-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-[10px] uppercase tracking-[0.16em] text-sky-100/80">Upload in progress</p>
+                        <p className="text-[11px] text-sky-100">Importing scout stills into the world record intake tray.</p>
+                    </div>
+                    <div className="mt-3 overflow-hidden rounded-full bg-white/[0.06]">
+                        <div className="h-1.5 w-1/2 animate-pulse rounded-full bg-sky-300/70" />
+                    </div>
+                </div>
+            ) : null}
+
             <div className="mt-5 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-2 text-[11px] uppercase tracking-[0.18em] text-neutral-200">
                 {backendMode === "offline" ? "Backend required" : backendWritesDisabled ? "Uploads disabled" : "Import scout stills"}
                 <ArrowRight className="h-3.5 w-3.5" />

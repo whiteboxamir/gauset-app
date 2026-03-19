@@ -1,6 +1,6 @@
 "use client";
 
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
 
 import { useRouter } from "next/navigation";
 
@@ -16,8 +16,8 @@ const variantClasses: Record<OpenWorkspaceButtonVariant, string> = {
 export function OpenWorkspaceButton({
     projectId,
     sceneId,
-    label = "Open workspace shell",
-    pendingLabel = "Opening...",
+    label = "Open saved world",
+    pendingLabel = "Opening saved world record...",
     variant = "primary",
     className,
     disabled = false,
@@ -32,48 +32,70 @@ export function OpenWorkspaceButton({
 }) {
     const router = useRouter();
     const [isPending, startTransition] = useTransition();
+    const [error, setError] = useState<string | null>(null);
 
     return (
-        <button
-            type="button"
-            disabled={disabled || isPending}
-            onClick={() => {
-                startTransition(async () => {
-                    if (projectId && sceneId) {
-                        try {
-                            await fetch(`/api/projects/${projectId}/world-links`, {
-                                method: "POST",
-                                headers: {
-                                    "Content-Type": "application/json",
-                                },
-                                body: JSON.stringify({
-                                    sceneId,
-                                    markOpened: true,
-                                }),
-                            });
-                        } catch {
-                            // Best-effort activity tracking. Launching the authenticated workspace shell still matters most here.
+        <div className="inline-flex flex-col items-start gap-1">
+            <button
+                type="button"
+                disabled={disabled || isPending}
+                onClick={() => {
+                    setError(null);
+                    startTransition(async () => {
+                        if (projectId && sceneId) {
+                            try {
+                                const response = await fetch(`/api/projects/${projectId}/world-links`, {
+                                    method: "POST",
+                                    headers: {
+                                        "Content-Type": "application/json",
+                                    },
+                                    body: JSON.stringify({
+                                        sceneId,
+                                        markOpened: true,
+                                    }),
+                                });
+                                const payload = (await response.json()) as { success?: boolean; message?: string };
+                                if (!response.ok || !payload.success) {
+                                    throw new Error(payload.message || "Could not record the reopen against the project world record.");
+                                }
+                            } catch (reopenError) {
+                                setError(
+                                    reopenError instanceof Error ? reopenError.message : "Could not record the reopen against the project world record.",
+                                );
+                                return;
+                            }
                         }
-                    }
 
-                    const searchParams = new URLSearchParams();
-                    if (sceneId) {
-                        searchParams.set("scene", sceneId);
-                    }
-                    if (projectId) {
-                        searchParams.set("project", projectId);
-                    }
+                        const searchParams = new URLSearchParams();
+                        if (sceneId) {
+                            searchParams.set("scene", sceneId);
+                        }
+                        if (projectId) {
+                            searchParams.set("project", projectId);
+                        }
 
-                    router.push(searchParams.size > 0 ? `/mvp?${searchParams.toString()}` : "/mvp");
-                });
-            }}
-            className={cn(
-                "rounded-2xl px-4 py-2.5 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60",
-                variantClasses[variant],
-                className,
-            )}
-        >
-            {isPending ? pendingLabel : label}
-        </button>
+                        if (sceneId) {
+                            router.push(`/mvp?${searchParams.toString()}`);
+                            return;
+                        }
+
+                        if (projectId) {
+                            router.push(`/app/worlds/${projectId}`);
+                            return;
+                        }
+
+                        router.push("/app/worlds");
+                    });
+                }}
+                className={cn(
+                    "rounded-2xl px-4 py-2.5 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60",
+                    variantClasses[variant],
+                    className,
+                )}
+            >
+                {isPending ? pendingLabel : label}
+            </button>
+            {error ? <p className="max-w-xs text-[11px] leading-5 text-rose-200">{error}</p> : null}
+        </div>
     );
 }

@@ -24,7 +24,7 @@ export default function RootLayout({
 }) {
     return (
         <html lang="en" className={GeistSans.className}>
-            <body className="antialiased selection:bg-white/20 selection:text-white bg-black text-[#ebebeb]">
+            <body className="bg-[var(--background)] text-[var(--foreground)] antialiased selection:bg-white/20 selection:text-white">
                 {children}
             </body>
         </html>

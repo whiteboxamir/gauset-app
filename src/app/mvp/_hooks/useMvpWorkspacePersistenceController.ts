@@ -40,6 +40,7 @@ interface UseMvpWorkspacePersistenceControllerOptions {
     clarityMode?: boolean;
     routeVariant: WorkspaceRouteVariant;
     launchSceneId?: string | null;
+    startInWorkspace?: boolean;
     demoPreset: ReturnType<typeof createDemoWorldPreset>;
     sceneDocument: SceneDocumentV2;
     setSceneDocument: (sceneDocument: SceneDocumentV2) => void;
@@ -138,6 +139,7 @@ export function useMvpWorkspacePersistenceController({
     clarityMode = false,
     routeVariant,
     launchSceneId = null,
+    startInWorkspace = false,
     demoPreset,
     sceneDocument,
     setSceneDocument,
@@ -145,15 +147,16 @@ export function useMvpWorkspacePersistenceController({
     editorSessionActions,
     markProgrammaticSceneChange,
 }: UseMvpWorkspacePersistenceControllerOptions) {
-    const [entryMode, setEntryMode] = useState<WorkspaceEntryMode>(clarityMode ? "launchpad" : "workspace");
+    const [entryMode, setEntryMode] = useState<WorkspaceEntryMode>(clarityMode && !startInWorkspace ? "launchpad" : "workspace");
     const [activeScene, setActiveScene] = useState<string | null>(null);
     const [assetsList, setAssetsList] = useState<any[]>([]);
     const [saveState, setSaveState] = useState<SaveState>("idle");
     const [saveMessage, setSaveMessage] = useState(
-        clarityMode ? "Open the demo world or upload a still to begin." : "Scene is empty.",
+        clarityMode ? "Open the demo world or choose one source to begin the world record." : "Scene is empty.",
     );
     const [saveError, setSaveError] = useState("");
     const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
+    const [autosaveUnlocked, setAutosaveUnlocked] = useState(false);
     const [versions, setVersions] = useState<SceneVersion[]>([]);
     const [storedDraft, setStoredDraft] = useState<StoredDraft | null>(null);
     const [workspaceOrigin, setWorkspaceOrigin] = useState<WorkspaceOrigin>("blank");
@@ -167,6 +170,7 @@ export function useMvpWorkspacePersistenceController({
     const [draftStorageKey, setDraftStorageKey] = useState<string | null>(null);
 
     const hasHydratedRef = useRef(false);
+    const lastStartInWorkspaceRef = useRef(startInWorkspace);
     const lastSavedFingerprintRef = useRef("");
     const versionsRequestRef = useRef(0);
     const saveInFlightRef = useRef<Promise<any> | null>(null);
@@ -191,6 +195,14 @@ export function useMvpWorkspacePersistenceController({
     useEffect(() => clearAutosaveTimer, [clearAutosaveTimer]);
 
     useEffect(() => {
+        const previousStartInWorkspace = lastStartInWorkspaceRef.current;
+        if (clarityMode && startInWorkspace !== previousStartInWorkspace) {
+            setEntryMode(startInWorkspace ? "workspace" : "launchpad");
+        }
+        lastStartInWorkspaceRef.current = startInWorkspace;
+    }, [clarityMode, startInWorkspace]);
+
+    useEffect(() => {
         activeSceneRef.current = activeScene;
         if (activeScene) {
             pendingSceneIdRef.current = activeScene;
@@ -211,8 +223,12 @@ export function useMvpWorkspacePersistenceController({
                 throw new Error(`Version history unavailable (${response.status})`);
             }
             const payload = await response.json();
+            const nextVersions = Array.isArray(payload.versions) ? payload.versions : [];
             if (versionsRequestRef.current === requestId) {
-                setVersions(Array.isArray(payload.versions) ? payload.versions : []);
+                setVersions(nextVersions);
+                if (sceneId === activeSceneRef.current && nextVersions.length > 0) {
+                    setAutosaveUnlocked(true);
+                }
             }
         } catch {
             if (versionsRequestRef.current === requestId) {
@@ -257,6 +273,7 @@ export function useMvpWorkspacePersistenceController({
             setSaveError("");
             setSaveMessage(snapshot.saveMessage);
             setLastSavedAt(snapshot.lastSavedAt ?? null);
+            setAutosaveUnlocked(Boolean(snapshot.activeScene && snapshot.lastSavedAt));
             setCurrentInputLabel(snapshot.currentInputLabel ?? null);
             setLastOutputLabel(snapshot.lastOutputLabel ?? "Current workspace");
             setWorkspaceOrigin(options?.origin ?? "blank");
@@ -284,7 +301,7 @@ export function useMvpWorkspacePersistenceController({
                 sceneDocument: demoPreset.sceneDocument,
                 assetsList: demoPreset.assetsList,
                 saveState: "recovered",
-                saveMessage: "Demo world loaded. Update the director brief or export a version when you are ready.",
+                saveMessage: "Demo world loaded. Save a version when you are ready to anchor the world record.",
                 currentInputLabel: demoPreset.inputLabel,
                 lastOutputLabel: "Demo world",
             },
@@ -303,7 +320,7 @@ export function useMvpWorkspacePersistenceController({
                 sceneDocument: createEmptySceneDocumentV2(),
                 assetsList: [],
                 saveState: "idle",
-                saveMessage: "Upload one still to build your first persistent world.",
+                saveMessage: "Upload one still to build your first persistent world record.",
                 currentInputLabel: null,
                 lastOutputLabel: "No world output yet",
             },
@@ -329,8 +346,8 @@ export function useMvpWorkspacePersistenceController({
                 assetsList: storedDraft.assetsList,
                 saveState: "recovered",
                 saveMessage: storedDraft.updatedAt
-                    ? `Recovered local draft from ${formatTimestamp(storedDraft.updatedAt)}`
-                    : "Recovered local draft.",
+                    ? `Recovered local world draft from ${formatTimestamp(storedDraft.updatedAt)}`
+                    : "Recovered local world draft.",
                 currentInputLabel: resolveEnvironmentSourceLabel(normalizedDraft.sceneDocument),
                 lastSavedAt: null,
                 lastOutputLabel: "Recovered draft",
@@ -375,7 +392,7 @@ export function useMvpWorkspacePersistenceController({
 
             setSaveState("saving");
             setSaveError("");
-            setSaveMessage(source === "autosave" ? "Autosaving scene..." : "Saving scene...");
+            setSaveMessage(source === "autosave" ? "Autosaving world record..." : "Saving world record...");
 
             const request = fetch(`${MVP_API_BASE_URL}/scene/save`, {
                 method: "POST",
@@ -401,9 +418,12 @@ export function useMvpWorkspacePersistenceController({
                     setSaveMessage(
                         source === "autosave"
                             ? `Autosaved ${formatTimestamp(savedAt)}`
-                            : `Saved ${nextSceneId} at ${formatTimestamp(savedAt)}`,
+                            : `Saved world ${nextSceneId} at ${formatTimestamp(savedAt)}`,
                     );
                     setLastSavedAt(savedAt);
+                    if (source === "manual") {
+                        setAutosaveUnlocked(true);
+                    }
                     lastSavedFingerprintRef.current = buildPersistenceFingerprint(nextSceneId, nextSceneDocument);
                     void loadVersions(nextSceneId);
                     return payload;
@@ -412,7 +432,7 @@ export function useMvpWorkspacePersistenceController({
                     const message = error instanceof Error ? error.message : "Scene save failed";
                     setSaveState("error");
                     setSaveError(message);
-                    setSaveMessage(source === "autosave" ? "Autosave failed." : "Scene save failed.");
+                    setSaveMessage(source === "autosave" ? "World autosave failed." : "World save failed.");
                     return null;
                 })
                 .finally(() => {
@@ -470,7 +490,7 @@ export function useMvpWorkspacePersistenceController({
             markProgrammaticSceneChange();
             setSaveState("saving");
             setSaveError("");
-            setSaveMessage("Restoring version...");
+            setSaveMessage("Restoring saved world...");
 
             try {
                 const response = await fetch(`${MVP_API_BASE_URL}/scene/${activeScene}/versions/${versionId}`, {
@@ -497,7 +517,7 @@ export function useMvpWorkspacePersistenceController({
                 const message = error instanceof Error ? error.message : "Version restore failed";
                 setSaveState("error");
                 setSaveError(message);
-                setSaveMessage("Version restore failed.");
+                setSaveMessage("Saved world restore failed.");
                 return false;
             }
         },
@@ -513,7 +533,7 @@ export function useMvpWorkspacePersistenceController({
 
             setSaveState("saving");
             setSaveError("");
-            setSaveMessage(`Opening linked world ${normalizedSceneId}...`);
+            setSaveMessage(`Opening saved world ${normalizedSceneId}...`);
 
             try {
                 const versionsResponse = await fetch(`${MVP_API_BASE_URL}/scene/${normalizedSceneId}/versions`, {
@@ -546,10 +566,10 @@ export function useMvpWorkspacePersistenceController({
                             sceneDocument: restoredSceneSnapshot.sceneDocument,
                             assetsList: [],
                             saveState: "recovered",
-                            saveMessage: `Opened linked world from ${formatTimestamp(versionPayload.saved_at) || "saved history"}.`,
+                            saveMessage: `Opened saved world from ${formatTimestamp(versionPayload.saved_at) || "saved history"}.`,
                             currentInputLabel: resolveEnvironmentSourceLabel(restoredSceneSnapshot.sceneDocument),
                             lastSavedAt: versionPayload.saved_at ?? null,
-                            lastOutputLabel: "Linked world",
+                            lastOutputLabel: "Saved world",
                         },
                         {
                             keepAsLastOutput: true,
@@ -583,18 +603,18 @@ export function useMvpWorkspacePersistenceController({
                     metadata,
                 });
                 applyWorkspaceSnapshot(
-                    {
-                        activeScene: normalizedSceneId,
-                        sceneDocument: linkedEnvironmentDocument,
-                        assetsList: [],
-                        saveState: "recovered",
-                        saveMessage: metadata
-                            ? `Opened linked world ${normalizedSceneId} from stored environment artifacts.`
-                            : `Opened linked world ${normalizedSceneId}, but no saved version history exists yet.`,
-                        currentInputLabel: sourceLabel,
-                        lastSavedAt: null,
-                        lastOutputLabel: "Linked world",
-                    },
+                        {
+                            activeScene: normalizedSceneId,
+                            sceneDocument: linkedEnvironmentDocument,
+                            assetsList: [],
+                            saveState: "recovered",
+                            saveMessage: metadata
+                                ? `Opened saved world ${normalizedSceneId} from stored environment artifacts.`
+                                : `Opened saved world ${normalizedSceneId}, but no saved version history exists yet.`,
+                            currentInputLabel: sourceLabel,
+                            lastSavedAt: null,
+                            lastOutputLabel: "Saved world",
+                        },
                     {
                         keepAsLastOutput: true,
                         origin: "linked_environment",
@@ -607,7 +627,7 @@ export function useMvpWorkspacePersistenceController({
                 const message = error instanceof Error ? error.message : "Linked world could not be opened.";
                 setSaveState("error");
                 setSaveError(message);
-                setSaveMessage("Linked world could not be opened.");
+                setSaveMessage("Saved world could not be opened.");
                 return { status: "error" as const, message };
             }
         },
@@ -701,8 +721,8 @@ export function useMvpWorkspacePersistenceController({
                 );
                 setSaveMessage(
                     draft.updatedAt
-                        ? `Recovered local draft from ${formatTimestamp(draft.updatedAt)}`
-                        : "Recovered local draft.",
+                        ? `Recovered local world draft from ${formatTimestamp(draft.updatedAt)}`
+                        : "Recovered local world draft.",
                 );
                 if (restoredSceneId) {
                     void loadVersions(restoredSceneId);
@@ -751,6 +771,7 @@ export function useMvpWorkspacePersistenceController({
                 hasHydrated: hasHydratedRef.current,
                 entryMode,
                 hasContent: hasSceneContent(sceneDocument),
+                autosaveUnlocked,
                 persistenceFingerprint,
                 lastSavedFingerprint: lastSavedFingerprintRef.current,
             })
@@ -779,7 +800,7 @@ export function useMvpWorkspacePersistenceController({
         return () => {
             clearAutosaveTimer();
         };
-    }, [clearAutosaveTimer, entryMode, getSceneDocumentSnapshot, persistenceFingerprint, requestSave, sceneDocument]);
+    }, [autosaveUnlocked, clearAutosaveTimer, entryMode, getSceneDocumentSnapshot, persistenceFingerprint, requestSave, sceneDocument]);
 
     const returnToLaunchpad = useCallback(() => {
         setEntryMode("launchpad");

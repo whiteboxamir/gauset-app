@@ -6,7 +6,7 @@ import type { SceneDocumentV2 } from "@/lib/scene-graph/types.ts";
 
 import { trackMvpEvent } from "../_lib/analytics";
 import { MvpActivityEntry, buildChangeSummary, createActivityEntry } from "../_lib/clarity";
-import { hasSceneContent, type GenerationTelemetry, type StepStatus, type WorkspaceEntryMode } from "./mvpWorkspaceSessionShared";
+import { hasSceneContent, type GenerationTelemetry, type StepStatus, type WorkspaceEntryMode, type WorkspaceLaunchSourceKind } from "./mvpWorkspaceSessionShared";
 
 interface UseMvpWorkspaceTelemetryControllerOptions {
     clarityMode?: boolean;
@@ -14,6 +14,8 @@ interface UseMvpWorkspaceTelemetryControllerOptions {
     assetsList: any[];
     entryMode: WorkspaceEntryMode;
     sceneDocument: SceneDocumentV2;
+    launchProjectId?: string | null;
+    launchSourceKind?: WorkspaceLaunchSourceKind | null;
     getSceneDocumentSnapshot: () => SceneDocumentV2;
     currentInputLabel: string | null;
     setCurrentInputLabel: Dispatch<SetStateAction<string | null>>;
@@ -32,6 +34,8 @@ export function useMvpWorkspaceTelemetryController({
     assetsList,
     entryMode,
     sceneDocument,
+    launchProjectId = null,
+    launchSourceKind = null,
     getSceneDocumentSnapshot,
     currentInputLabel,
     setCurrentInputLabel,
@@ -48,6 +52,7 @@ export function useMvpWorkspaceTelemetryController({
     const [activityLog, setActivityLog] = useState<MvpActivityEntry[]>([]);
 
     const previousSceneFingerprintRef = useRef("");
+    const firstWorldTrackedRef = useRef(false);
     const sessionAnalyticsRef = useRef({
         firstEdit: false,
         firstGenerate: false,
@@ -83,9 +88,24 @@ export function useMvpWorkspaceTelemetryController({
     useEffect(() => {
         trackMvpEvent("mvp_landed", {
             flow: flowName,
-            entry_mode: clarityMode ? "launchpad" : "workspace",
+            entry_mode: entryMode,
+            launch_project_id: launchProjectId ?? "",
+            launch_source_kind: launchSourceKind ?? "",
         });
-    }, [clarityMode, flowName]);
+    }, [entryMode, flowName, launchProjectId, launchSourceKind]);
+
+    useEffect(() => {
+        if (firstWorldTrackedRef.current || !hasSceneContent(sceneDocument)) {
+            return;
+        }
+        firstWorldTrackedRef.current = true;
+        trackMvpEvent("mvp_first_world_loaded", {
+            flow: flowName,
+            launch_project_id: launchProjectId ?? "",
+            launch_source_kind: launchSourceKind ?? "",
+            active_scene: activeScene ?? "",
+        });
+    }, [activeScene, flowName, launchProjectId, launchSourceKind, sceneDocument]);
 
     useEffect(() => {
         const handlePageHide = () => {

@@ -30,21 +30,21 @@ export function Sidebar({
     footerSlot?: ReactNode;
 }) {
     return (
-        <aside className="flex w-full max-w-xs shrink-0 flex-col border-r border-white/10 bg-black/40 backdrop-blur-xl">
-            <div className="border-b border-white/10 px-5 py-5">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.28em] text-cyan-200/70">Gauset workflow</p>
-                <h1 className="mt-3 text-xl font-medium tracking-tight text-white">World-first shell</h1>
+        <aside className="flex w-full shrink-0 flex-col overflow-hidden border-b border-[var(--border-soft)] bg-[#13181d]/88 backdrop-blur-xl lg:h-full lg:max-w-xs lg:border-b-0 lg:border-r">
+            <div className="shrink-0 border-b border-[var(--border-soft)] px-5 py-5">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-[#bfd6de]/80">Gauset</p>
+                <h1 className="mt-2 text-xl font-medium tracking-tight text-[var(--foreground)]">Worlds</h1>
                 <div className="mt-4 flex flex-wrap gap-2">
                     {environmentLabel ? <StatusBadge label={environmentLabel} tone="info" /> : null}
                     {accountLabel ? <StatusBadge label={accountLabel} tone="neutral" /> : null}
                 </div>
             </div>
 
-            <nav className="flex-1 overflow-y-auto px-4 py-5">
+            <nav className="min-h-0 flex-1 overflow-y-auto px-4 py-5 [-webkit-overflow-scrolling:touch]">
                 <div className="space-y-6">
                     {groups.map((group) => (
                         <section key={group.label}>
-                            <p className="px-2 text-[10px] font-semibold uppercase tracking-[0.24em] text-neutral-500">{group.label}</p>
+                            <p className="px-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-[#9d978f]">{group.label}</p>
                             <div className="mt-2 space-y-1">
                                 {group.items.map((item) => {
                                     const content = (
@@ -58,7 +58,7 @@ export function Sidebar({
                                         return (
                                             <div
                                                 key={item.href}
-                                                className="flex items-center gap-3 rounded-2xl border border-white/5 bg-white/[0.02] px-3 py-3 text-sm text-neutral-500"
+                                                className="flex items-center gap-3 rounded-2xl border border-[var(--border-soft)] bg-[var(--surface-soft)] px-3 py-3 text-sm text-[#9d978f]"
                                             >
                                                 {content}
                                             </div>
@@ -71,7 +71,7 @@ export function Sidebar({
                                             href={item.href}
                                             className={cn(
                                                 "flex items-center gap-3 rounded-2xl border border-transparent px-3 py-3 text-sm text-neutral-300 transition-all duration-200",
-                                                "hover:border-white/10 hover:bg-white/[0.04] hover:text-white",
+                                                "hover:border-[var(--border-soft)] hover:bg-[var(--surface-soft)] hover:text-[var(--foreground)]",
                                             )}
                                         >
                                             {content}

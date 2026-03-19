@@ -1,8 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useRouter } from "next/navigation";
 
 import type { MvpEditorSessionStoreActions } from "@/state/mvpEditorSessionStore.ts";
+import { patchSceneContinuityOnSceneDocument } from "@/lib/scene-graph/document.ts";
 import { createRenderableSceneDocumentSnapshotGetter } from "@/state/mvpRenderableSceneDocument.ts";
 import type { MvpSceneStore } from "@/state/mvpSceneStore.ts";
 
@@ -10,10 +12,12 @@ import { trackMvpEvent } from "../_lib/analytics";
 import { createDemoWorldPreset } from "../_lib/clarity";
 import {
     PROGRAMMATIC_CHANGE_RESET_MS,
+    hasSceneContent,
     type GenerationTelemetry,
     type SceneVersion,
     type StepStatus,
     type WorkspaceHudState,
+    type WorkspaceLaunchSourceKind,
     type WorkspaceRouteVariant,
 } from "./mvpWorkspaceSessionShared";
 import { useMvpWorkspaceHudController } from "./useMvpWorkspaceHudController";
@@ -25,12 +29,18 @@ interface UseMvpWorkspaceSessionControllerOptions {
     routeVariant?: WorkspaceRouteVariant;
     launchSceneId?: string | null;
     launchProjectId?: string | null;
+    launchEntryMode?: "workspace" | null;
     launchIntent?: "generate" | "capture" | "import" | null;
     launchBrief?: string | null;
     launchReferences?: string | null;
     launchProviderId?: string | null;
+    launchSourceKind?: WorkspaceLaunchSourceKind | null;
     sceneStore: MvpSceneStore;
     editorSessionActions: MvpEditorSessionStoreActions;
+}
+
+function hasSeededLaunchContinuity(worldBible?: string | null, lookDevelopment?: string | null) {
+    return Boolean(worldBible?.trim() || lookDevelopment?.trim());
 }
 
 export function useMvpWorkspaceSessionController({
@@ -38,15 +48,18 @@ export function useMvpWorkspaceSessionController({
     routeVariant = "workspace",
     launchSceneId = null,
     launchProjectId = null,
+    launchEntryMode = null,
     launchIntent = null,
     launchBrief = null,
     launchReferences = null,
     launchProviderId = null,
+    launchSourceKind = null,
     sceneStore,
     editorSessionActions,
 }: UseMvpWorkspaceSessionControllerOptions) {
     const demoPreset = useMemo(() => createDemoWorldPreset(), []);
     const flowName = clarityMode ? "clarity_preview" : "classic";
+    const router = useRouter();
     const getRenderableSceneDocumentSnapshot = useMemo(() => createRenderableSceneDocumentSnapshotGetter(sceneStore), [sceneStore]);
     const renderableSceneDocument = useSyncExternalStore(
         sceneStore.subscribe,
@@ -57,6 +70,8 @@ export function useMvpWorkspaceSessionController({
     const programmaticSceneChangeRef = useRef(false);
     const handledLaunchSceneIdRef = useRef<string | null>(null);
     const linkedProjectSceneIdsRef = useRef<Set<string>>(new Set());
+    const canonicalizedPreviewSceneIdsRef = useRef<Set<string>>(new Set());
+    const seededLaunchContinuityRef = useRef(false);
     const [linkedLaunchStatus, setLinkedLaunchStatus] = useState<"idle" | "opening" | "opened" | "unavailable">(
         routeVariant === "workspace" && launchSceneId ? "opening" : "idle",
     );
@@ -77,11 +92,13 @@ export function useMvpWorkspaceSessionController({
         },
         [sceneStore],
     );
+    const startInWorkspace = (routeVariant === "workspace" && Boolean(launchSceneId)) || launchEntryMode === "workspace";
 
     const workspacePersistence = useMvpWorkspacePersistenceController({
         clarityMode,
         routeVariant,
         launchSceneId,
+        startInWorkspace,
         demoPreset,
         sceneDocument: renderableSceneDocument,
         setSceneDocument: replaceSceneDocument,
@@ -96,6 +113,8 @@ export function useMvpWorkspaceSessionController({
         assetsList: workspacePersistence.assetsList,
         entryMode: workspacePersistence.entryMode,
         sceneDocument: renderableSceneDocument,
+        launchProjectId,
+        launchSourceKind,
         getSceneDocumentSnapshot: getRenderableSceneDocumentSnapshot,
         currentInputLabel: workspacePersistence.currentInputLabel,
         setCurrentInputLabel: workspacePersistence.setCurrentInputLabel,
@@ -107,6 +126,43 @@ export function useMvpWorkspaceSessionController({
         setLastOutputLabel: workspacePersistence.setLastOutputLabel,
         programmaticSceneChangeRef,
     });
+    const hasWorldContent = useMemo(() => hasSceneContent(renderableSceneDocument), [renderableSceneDocument]);
+    const hasSavedVersion = useMemo(
+        () => Boolean(workspacePersistence.activeScene && (workspacePersistence.versions.length > 0 || workspacePersistence.lastSavedAt)),
+        [workspacePersistence.activeScene, workspacePersistence.lastSavedAt, workspacePersistence.versions.length],
+    );
+    const canUseAdvancedDensity = hasSavedVersion;
+    const isAdvancedDensityEnabled = canUseAdvancedDensity && workspaceHud.hudState.advancedMode;
+    const journeyStage: "start" | "unsaved" | "saved" = !hasWorldContent ? "start" : hasSavedVersion ? "saved" : "unsaved";
+
+    const toggleAdvancedDensity = useCallback(() => {
+        if (!canUseAdvancedDensity) {
+            return;
+        }
+        workspaceHud.toggleAdvancedMode();
+    }, [canUseAdvancedDensity, workspaceHud]);
+
+    useEffect(() => {
+        if (seededLaunchContinuityRef.current) {
+            return;
+        }
+        if (!hasSeededLaunchContinuity(launchBrief, launchReferences)) {
+            seededLaunchContinuityRef.current = true;
+            return;
+        }
+        if (hasSeededLaunchContinuity(renderableSceneDocument.continuity.worldBible, renderableSceneDocument.continuity.lookDevelopment)) {
+            seededLaunchContinuityRef.current = true;
+            return;
+        }
+
+        seededLaunchContinuityRef.current = true;
+        replaceSceneDocument(
+            patchSceneContinuityOnSceneDocument(renderableSceneDocument, {
+                worldBible: renderableSceneDocument.continuity.worldBible || launchBrief || "",
+                lookDevelopment: renderableSceneDocument.continuity.lookDevelopment || launchReferences || "",
+            }),
+        );
+    }, [launchBrief, launchReferences, renderableSceneDocument, replaceSceneDocument]);
 
     useEffect(() => {
         if (routeVariant !== "workspace" || !launchSceneId) {
@@ -169,7 +225,25 @@ export function useMvpWorkspaceSessionController({
     }, [launchSceneId, routeVariant]);
 
     useEffect(() => {
-        if (routeVariant !== "workspace" || !launchProjectId || !workspacePersistence.activeScene) {
+        if (routeVariant !== "preview" || !launchProjectId || !workspacePersistence.activeScene || !hasSavedVersion) {
+            return;
+        }
+
+        const canonicalKey = `${launchProjectId}:${workspacePersistence.activeScene}`;
+        if (canonicalizedPreviewSceneIdsRef.current.has(canonicalKey)) {
+            return;
+        }
+
+        canonicalizedPreviewSceneIdsRef.current.add(canonicalKey);
+        const searchParams = new URLSearchParams({
+            project: launchProjectId,
+            scene: workspacePersistence.activeScene,
+        });
+        router.replace(`/mvp?${searchParams.toString()}`);
+    }, [hasSavedVersion, launchProjectId, routeVariant, router, workspacePersistence.activeScene]);
+
+    useEffect(() => {
+        if (!launchProjectId || !workspacePersistence.activeScene || !hasSavedVersion) {
             return;
         }
 
@@ -179,19 +253,38 @@ export function useMvpWorkspaceSessionController({
         }
 
         linkedProjectSceneIdsRef.current.add(autoLinkKey);
-        void fetch(`/api/projects/${launchProjectId}/world-links`, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-                sceneId: workspacePersistence.activeScene,
-                environmentLabel: workspacePersistence.currentInputLabel ?? undefined,
-            }),
-        }).catch(() => {
-            linkedProjectSceneIdsRef.current.delete(autoLinkKey);
-        });
-    }, [launchProjectId, routeVariant, workspacePersistence.activeScene, workspacePersistence.currentInputLabel]);
+        void (async () => {
+            try {
+                const response = await fetch(`/api/projects/${launchProjectId}/world-links`, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({
+                        sceneId: workspacePersistence.activeScene,
+                        environmentLabel: workspacePersistence.currentInputLabel ?? undefined,
+                    }),
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Project link failed (${response.status})`);
+                }
+
+                workspaceTelemetry.appendActivity(
+                    "Project world linked",
+                    `Attached saved world ${workspacePersistence.activeScene} back to project ${launchProjectId}.`,
+                    "success",
+                );
+            } catch (error) {
+                linkedProjectSceneIdsRef.current.delete(autoLinkKey);
+                workspaceTelemetry.appendActivity(
+                    "Project link unavailable",
+                    error instanceof Error ? error.message : "Project world linking failed.",
+                    "warning",
+                );
+            }
+        })();
+    }, [hasSavedVersion, launchProjectId, routeVariant, workspacePersistence.activeScene, workspacePersistence.currentInputLabel]);
 
     const openDemoWorld = useCallback(() => {
         workspacePersistence.openDemoWorld();
@@ -220,9 +313,15 @@ export function useMvpWorkspaceSessionController({
         const payload = await workspacePersistence.manualSave();
         if (payload) {
             workspaceTelemetry.appendActivity("Version saved", "Saved the current world and director state.", "success");
+            trackMvpEvent("mvp_first_world_saved", {
+                flow: flowName,
+                launch_project_id: launchProjectId ?? "",
+                launch_source_kind: launchSourceKind ?? "",
+                active_scene: workspacePersistence.activeScene ?? "",
+            });
         }
         return payload;
-    }, [workspacePersistence, workspaceTelemetry]);
+    }, [flowName, launchProjectId, launchSourceKind, workspacePersistence, workspaceTelemetry]);
 
     const restoreVersion = useCallback(
         async (versionId: string) => {
@@ -253,6 +352,7 @@ export function useMvpWorkspaceSessionController({
         launchBrief,
         launchReferences,
         launchProviderId,
+        launchSourceKind,
         linkedLaunchStatus,
         linkedLaunchMessage,
         workspaceOrigin: workspacePersistence.workspaceOrigin,
@@ -262,6 +362,11 @@ export function useMvpWorkspaceSessionController({
         lastOutputLabel: workspacePersistence.lastOutputLabel,
         changeSummary: workspaceTelemetry.changeSummary,
         hudState: workspaceHud.hudState,
+        hasWorldContent,
+        hasSavedVersion,
+        canUseAdvancedDensity,
+        isAdvancedDensityEnabled,
+        journeyStage,
         setActiveScene: workspacePersistence.setActiveScene,
         setAssetsList: workspacePersistence.setAssetsList,
         markProgrammaticSceneChange,
@@ -280,6 +385,7 @@ export function useMvpWorkspaceSessionController({
         toggleLeftRail: workspaceHud.toggleLeftRail,
         toggleRightRail: workspaceHud.toggleRightRail,
         toggleDirectorHud: workspaceHud.toggleDirectorHud,
+        toggleAdvancedDensity,
     };
 }
 

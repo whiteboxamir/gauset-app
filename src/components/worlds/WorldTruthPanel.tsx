@@ -1,7 +1,6 @@
 import Link from "next/link";
 
 import { StatusBadge } from "@/components/platform/StatusBadge";
-import { OpenWorkspaceButton } from "@/components/worlds/OpenWorkspaceButton";
 
 export function WorldTruthPanel({
     hasStudio,
@@ -23,19 +22,19 @@ export function WorldTruthPanel({
             <div className="flex flex-wrap items-start justify-between gap-4">
                 <div className="max-w-3xl">
                     <p className="text-[10px] font-semibold uppercase tracking-[0.28em] text-cyan-200/70">World-link truth</p>
-                    <h3 className="mt-3 text-2xl font-medium tracking-tight text-white">What this layer is actually responsible for</h3>
+                    <h3 className="mt-3 text-2xl font-medium tracking-tight text-white">What this saved-world layer actually owns</h3>
                     <p className="mt-3 text-sm leading-7 text-neutral-300">
-                        Projects own the durable account-layer record. Linked worlds attach real <code className="text-white">scene_id</code> values to that record. Secure
-                        review shares stay signed, persisted, and revocable without broadening anonymous MVP access.
+                        Projects own the durable world record. Linked worlds attach real <code className="text-white">scene_id</code> values to that record so continuity memory, cast notes,
+                        look development, review, and handoff stay attached to one persistent source of truth.
                     </p>
                     <p className="mt-2 text-sm leading-7 text-neutral-400">
-                        When the current account can inspect saved MVP history, project and world-link surfaces now show source, lane, and delivery posture directly. If they cannot inspect
-                        that history, they say so instead of implying reconstruction or production readiness.
+                        When the current account can inspect saved history, project and world-link surfaces show only what the runtime truly knows. If they cannot inspect that history, they say so
+                        instead of faking production readiness.
                     </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                    <StatusBadge label={hasStudio ? "Workspace mounted" : "Workspace required"} tone={hasStudio ? "success" : "warning"} />
-                    <StatusBadge label={canAccessMvp ? "Workspace shell available" : "Workspace shell blocked"} tone={canAccessMvp ? "success" : "warning"} />
+                    <StatusBadge label={hasStudio ? "Project layer mounted" : "Workspace required"} tone={hasStudio ? "success" : "warning"} />
+                    <StatusBadge label={canAccessMvp ? "Saved-world workspace available" : "Saved-world workspace blocked"} tone={canAccessMvp ? "success" : "warning"} />
                     <StatusBadge
                         label={activeReviewShareCount > 0 ? `${activeReviewShareCount} live review links` : "No live review links"}
                         tone={activeReviewShareCount > 0 ? "success" : "neutral"}
@@ -45,29 +44,28 @@ export function WorldTruthPanel({
 
             <div className={`mt-6 grid gap-4 ${compact ? "lg:grid-cols-1" : "xl:grid-cols-3"}`}>
                 <article className="rounded-[1.45rem] border border-white/10 bg-black/25 p-4">
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-neutral-500">Ownership</p>
-                    <p className="mt-3 text-sm text-white">A scene can only be linked once across project ownership without reusing the existing project.</p>
-                    <p className="mt-2 text-sm leading-6 text-neutral-400">The project layer now rejects manual links that would bypass existing scene ownership.</p>
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-neutral-500">Continuity memory</p>
+                    <p className="mt-3 text-sm text-white">The saved world is where the world bible, cast continuity, look development, and shot direction are supposed to live.</p>
+                    <p className="mt-2 text-sm leading-6 text-neutral-400">That memory should reopen with the same world instead of being rebuilt from prompts or chat history.</p>
                 </article>
                 <article className="rounded-[1.45rem] border border-white/10 bg-black/25 p-4">
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-neutral-500">Launch path</p>
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-neutral-500">Reopen path</p>
                     <p className="mt-3 text-sm text-white">
-                        Opening a linked world now carries its <code className="text-white">scene_id</code> into the authenticated <code className="text-white">/mvp</code> shell.
+                        Opening a linked world carries its <code className="text-white">scene_id</code> through the project-bound workspace path.
                     </p>
                     <p className="mt-2 text-sm leading-6 text-neutral-400">
-                        Plain <code className="text-white">/mvp</code> still opens the general workspace entry, while project and world surfaces reopen the owned world directly and only
-                        record reopen activity for scenes the project already owns.
+                        The world library and project pages own the front door. Reopens stay project-bound so continuity and ownership remain explicit instead of dropping into a generic shell.
                     </p>
                 </article>
                 <article className="rounded-[1.45rem] border border-white/10 bg-black/25 p-4">
                     <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-neutral-500">Operational posture</p>
                     <p className="mt-3 text-sm text-white">
                         {linkedWorldCount > 0
-                            ? `${linkedWorldCount} linked worlds are already recorded in the platform layer.`
-                            : "No linked worlds are recorded yet."}
+                            ? `${linkedWorldCount} saved worlds are already recorded in the platform layer.`
+                            : "No saved worlds are recorded yet."}
                     </p>
                     <p className="mt-2 text-sm leading-6 text-neutral-400">
-                        Authenticated staging proof still depends on real env and fixture inputs. This surface only reports what the current runtime and stored data actually know.
+                        This surface only reports what the current runtime and stored data actually know. It does not invent readiness, reconstruction, or delivery certainty.
                     </p>
                 </article>
             </div>
@@ -79,11 +77,11 @@ export function WorldTruthPanel({
                 >
                     Open project library
                 </Link>
-                <OpenWorkspaceButton
-                    label={canAccessMvp ? "Open workspace shell" : "Workspace shell unavailable"}
-                    disabled={!canAccessMvp}
-                    variant="secondary"
-                />
+                {!canAccessMvp ? (
+                    <span className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-sm font-medium text-neutral-500">
+                        Saved-world workspace unavailable
+                    </span>
+                ) : null}
             </div>
         </section>
     );

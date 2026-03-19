@@ -7,6 +7,7 @@ import {
     setDirectorBriefOnSceneDocument,
 } from "@/lib/scene-graph/document.ts";
 import { describeEnvironment, resolveEnvironmentRenderState } from "@/lib/mvp-product";
+import { countWorldContinuityFields } from "@/lib/mvp-workspace";
 import type { SceneDocumentV2 } from "@/lib/scene-graph/types.ts";
 
 export type MvpActivityTone = "neutral" | "info" | "success" | "warning";
@@ -160,6 +161,7 @@ export function describeWorkspaceContinuity(sceneDocument: SceneDocumentV2): Wor
     const pinCount = sceneDocument.direction.pins.length;
     const directorPathCount = sceneDocument.direction.directorPath.length;
     const hasDirectorBrief = Boolean(readDirectorBrief(sceneDocument));
+    const continuityFieldCount = countWorldContinuityFields(sceneDocument.continuity);
     const worldTitle =
         (typeof environment?.name === "string" && environment.name) ||
         environmentState.label;
@@ -175,13 +177,15 @@ export function describeWorkspaceContinuity(sceneDocument: SceneDocumentV2): Wor
                 ? "Renderable world output is available."
                 : "World output is still pending.");
     const worldSummary = !environment
-        ? "No persistent world loaded yet. Open the demo, import a still, or recover a saved draft."
+        ? continuityFieldCount > 0
+            ? "No persistent world is loaded yet, but continuity memory is already being recorded for the first save."
+            : "No persistent world loaded yet. Open the demo, import a still, or recover a saved draft."
         : renderState.isReferenceOnlyDemo
           ? "Reference imagery is visible, but this state is only for shell onboarding and fallback direction."
           : renderState.isLegacyDemoWorld
             ? "A legacy demo world is loaded. Replace it with a real preview or saved world before review handoff."
             : renderState.hasRenderableOutput
-              ? `${formatPlural(assetCount, "placed asset")} stay attached to this world across scene revisions.`
+              ? `${formatPlural(assetCount, "placed asset")} stay attached to this world across scene revisions. ${continuityFieldCount > 0 ? `${continuityFieldCount} continuity block${continuityFieldCount === 1 ? "" : "s"} are already recorded.` : "Continuity memory is ready to be recorded against the saved world."}`
               : "The world source is present, but renderable output has not finished loading yet.";
     const directionStatusLabel =
         cameraViewCount || pinCount || directorPathCount || hasDirectorBrief ? "Scene direction in progress" : "Scene direction idle";
@@ -258,6 +262,22 @@ export function buildChangeSummary(
     const currentDirection = readDirectorBrief(currentSceneDocument);
     if (baselineDirection !== currentDirection) {
         sceneDirection.push(currentDirection ? "Director brief updated" : "Director brief cleared");
+    }
+
+    if (currentSceneDocument.continuity.worldBible !== baselineSceneDocument.continuity.worldBible) {
+        persistent.push(currentSceneDocument.continuity.worldBible.trim() ? "World bible updated" : "World bible cleared");
+    }
+
+    if (currentSceneDocument.continuity.castContinuity !== baselineSceneDocument.continuity.castContinuity) {
+        persistent.push(currentSceneDocument.continuity.castContinuity.trim() ? "Cast continuity updated" : "Cast continuity cleared");
+    }
+
+    if (currentSceneDocument.continuity.lookDevelopment !== baselineSceneDocument.continuity.lookDevelopment) {
+        persistent.push(currentSceneDocument.continuity.lookDevelopment.trim() ? "Look development updated" : "Look development cleared");
+    }
+
+    if (currentSceneDocument.continuity.shotPlan !== baselineSceneDocument.continuity.shotPlan) {
+        sceneDirection.push(currentSceneDocument.continuity.shotPlan.trim() ? "Shot list updated" : "Shot list cleared");
     }
 
     const cameraViewDelta = formatCountDelta(

@@ -11,6 +11,7 @@ import { getPlatformShellSurfaceForSession } from "@/server/platform/surface-she
 
 export default async function PlatformAppLayout({ children }: { children: ReactNode }) {
     const session = await getCurrentAuthSession();
+    const isLocalPreviewShell = !session;
     const emptyWorkspaceState = {
         activeStudio: null,
         accessibleStudios: [],
@@ -25,71 +26,66 @@ export default async function PlatformAppLayout({ children }: { children: ReactN
           };
     const { coordinationSnapshot, governanceSnapshot, notificationSummary } = surface;
     const workspaceState = surface.workspaceState ?? emptyWorkspaceState;
-    const appNavGroups: PlatformNavGroup[] = [
-        {
-            label: "World Workflow",
-            items: [
-                { href: "/app/worlds", label: "Worlds" },
-                { href: "/app/dashboard", label: "Operations" },
-            ],
-        },
-        {
-            label: "Operate",
-            items: [
-                { href: "/app/billing", label: "Billing" },
-                { href: "/app/team", label: "Team" },
-                { href: "/app/support", label: "Support" },
-            ],
-        },
-        {
-            label: "Settings",
-            items: [
-                { href: "/app/settings/profile", label: "Profile" },
-                { href: "/app/settings/governance", label: "Governance" },
-                { href: "/app/settings/security", label: "Security" },
-                {
-                    href: "/app/settings/notifications",
-                    label: "Notifications",
-                    badge: notificationSummary && notificationSummary.unreadCount > 0 ? String(notificationSummary.unreadCount) : undefined,
-                },
-            ],
-        },
-    ];
+    const appNavGroups: PlatformNavGroup[] = isLocalPreviewShell
+        ? [
+              {
+                  label: "Primary flow",
+                  items: [{ href: "/app/worlds", label: "Worlds" }],
+              },
+          ]
+        : [
+              {
+                  label: "Primary flow",
+                  items: [{ href: "/app/worlds", label: "Worlds" }],
+              },
+              {
+                  label: "Studio admin",
+                  items: [
+                      { href: "/app/dashboard", label: "Operations" },
+                      { href: "/app/billing", label: "Billing" },
+                      { href: "/app/team", label: "Team" },
+                      { href: "/app/support", label: "Support" },
+                  ],
+              },
+              {
+                  label: "Settings",
+                  items: [
+                      { href: "/app/settings/profile", label: "Profile" },
+                      { href: "/app/settings/governance", label: "Governance" },
+                      { href: "/app/settings/security", label: "Security" },
+                      {
+                          href: "/app/settings/notifications",
+                          label: "Notifications",
+                          badge: notificationSummary && notificationSummary.unreadCount > 0 ? String(notificationSummary.unreadCount) : undefined,
+                      },
+                  ],
+              },
+          ];
 
     return (
         <AppShell
             navGroups={appNavGroups}
-            accountLabel={session?.user.displayName ?? session?.user.email ?? "Design partner beta"}
-            environmentLabel="World workflow shell"
-            eyebrow="Projects, worlds, review, handoff"
-            title="Project and world workspace"
-            subtitle="Projects own the durable record. Worlds reopen into the workspace, review stays explicit, and handoff posture stays visible."
+            accountLabel={isLocalPreviewShell ? undefined : session?.user.displayName ?? session?.user.email ?? undefined}
+            environmentLabel={isLocalPreviewShell ? "Local preview" : "World workflow"}
+            eyebrow={isLocalPreviewShell ? "World-first workflow" : "Project-first workflow"}
+            title="Worlds"
+            subtitle={
+                isLocalPreviewShell
+                    ? "Pick a sample project and move straight into the world-first flow."
+                    : "Open a project, start or reopen the world, then save once before sharing or exporting."
+            }
             statusLabel={
-                workspaceState.activeStudio
+                isLocalPreviewShell
+                    ? "Local preview"
+                    : workspaceState.activeStudio
                     ? `${workspaceState.activeStudio.role} workspace · ${
                           coordinationSnapshot
-                              ? coordinationSnapshot.coverage.health === "stable"
-                                  ? coordinationSnapshot.operations.urgentCount > 0
-                                      ? `${coordinationSnapshot.operations.urgentCount} urgent / ${coordinationSnapshot.operations.watchCount} watch`
-                                      : coordinationSnapshot.operations.watchCount > 0
-                                        ? `${coordinationSnapshot.operations.watchCount} watch`
-                                        : "stable"
-                                  : coordinationSnapshot.coverage.health
-                              : "stable"
-                      }${
-                          coordinationSnapshot && coordinationSnapshot.coverage.summary.undercoveredLaneCount > 0
-                              ? ` · ${coordinationSnapshot.coverage.summary.undercoveredLaneCount} lane gaps`
-                              : coordinationSnapshot && coordinationSnapshot.coverage.summary.unavailableOwnerItemCount > 0
-                                ? ` · ${coordinationSnapshot.coverage.summary.unavailableOwnerItemCount} unavailable-owner`
-                                : ""
-                      }${
-                          governanceSnapshot
-                              ? governanceSnapshot.pendingApprovalCount > 0
-                                  ? ` · ${governanceSnapshot.pendingApprovalCount} approvals`
-                                  : governanceSnapshot.overallStatus === "aligned"
-                                    ? " · governed"
-                                    : ` · ${governanceSnapshot.exceptionCount} exceptions`
-                              : ""
+                              ? coordinationSnapshot.operations.urgentCount > 0
+                                  ? `${coordinationSnapshot.operations.urgentCount} workflow blocker${coordinationSnapshot.operations.urgentCount === 1 ? "" : "s"}`
+                                  : coordinationSnapshot.operations.watchCount > 0
+                                    ? `${coordinationSnapshot.operations.watchCount} workflow watch item${coordinationSnapshot.operations.watchCount === 1 ? "" : "s"}`
+                                    : "workflow stable"
+                              : "world workflow active"
                       }`
                     : "Workspace bootstrap"
             }

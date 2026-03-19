@@ -62,8 +62,12 @@ export const RightPanelWorkspaceOverviewSection = React.memo(function RightPanel
     selectedVersion,
     shareStatus,
     versions,
+    viewCount,
+    noteCount,
     workspaceOrigin,
     workspaceOriginDetail,
+    journeyStage,
+    isAdvancedDensityEnabled,
 }: {
     activityLog: RightPanelActivityEntry[];
     activeScene: string | null;
@@ -89,10 +93,15 @@ export const RightPanelWorkspaceOverviewSection = React.memo(function RightPanel
     selectedVersion: SceneVersion | null;
     shareStatus: string;
     versions: SceneVersion[];
+    viewCount: number;
+    noteCount: number;
     workspaceOrigin: "blank" | "demo" | "draft" | "linked_version" | "linked_environment";
     workspaceOriginDetail: string;
+    journeyStage: "start" | "unsaved" | "saved";
+    isAdvancedDensityEnabled: boolean;
 }) {
-    const isAnchored = Boolean(activeScene);
+    const hasSavedVersion = versions.length > 0 || Boolean(lastSavedAt);
+    const isAnchored = hasSavedVersion;
     const continuity = useMemo(() => describeWorkspaceContinuity(sceneDocument), [sceneDocument]);
     const environmentState = useMemo(() => describeEnvironment(environment), [environment]);
     const environmentMetadata = useMemo(() => (environment?.metadata ?? null) as GeneratedEnvironmentMetadata | null, [environment]);
@@ -117,14 +126,14 @@ export const RightPanelWorkspaceOverviewSection = React.memo(function RightPanel
           ]
               .filter(Boolean)
               .join(" · ")
-        : "Save once to anchor review links, restore points, and delivery.";
+        : "Save once to anchor review links, continuity memory, restore points, and delivery.";
     const reviewDeliverySummary = isAnchored
         ? selectedVersion
             ? "Copy review link and export both stay pinned to the selected saved version."
             : versions.length > 0
               ? "Select a saved version before creating a secure review link or version-locked handoff."
               : "Save again before expecting a version-locked review handoff."
-        : "Export can still produce a draft package, but persisted review delivery starts after the first save.";
+        : "Review share and downstream handoff stay locked until the first saved version exists.";
     const primaryReviewItems = isAnchored
         ? [
               {
@@ -247,9 +256,40 @@ export const RightPanelWorkspaceOverviewSection = React.memo(function RightPanel
                     </>
                 ) : (
                     <div className="mt-4 border-t border-white/8 pt-4">
-                        <p className="text-sm leading-6 text-neutral-300">
-                            Save once to unlock review links, version history, restore points, and shareable delivery.
-                        </p>
+                        <div className="rounded-[0.95rem] border border-amber-400/15 bg-amber-500/8 px-3 py-3">
+                            <p className="text-[10px] uppercase tracking-[0.16em] text-amber-100/75">Next action</p>
+                            <p className="mt-2 text-sm text-white">Save the first version of this world.</p>
+                            <p className="mt-2 text-[11px] leading-5 text-neutral-300">
+                                Review share, durable reopen, continuity memory, and downstream handoff stay locked until the world is anchored to a saved version.
+                            </p>
+                        </div>
+                        <div className="mt-3 grid grid-cols-1 gap-2">
+                            <div className="inline-flex items-center justify-center rounded-xl border border-white/8 bg-white/[0.03] px-3 py-3 text-xs font-medium text-neutral-500">
+                                Review share locked until save
+                            </div>
+                            <div className="inline-flex items-center justify-center rounded-xl border border-white/8 bg-white/[0.03] px-3 py-3 text-xs font-medium text-neutral-500">
+                                Handoff locked until save
+                            </div>
+                        </div>
+                        <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                            <div className="rounded-[0.85rem] border border-white/8 bg-black/15 px-3 py-3">
+                                <p className="text-[10px] uppercase tracking-[0.16em] text-neutral-500">Saved framings</p>
+                                <p className="mt-2 text-sm text-white">{viewCount}</p>
+                            </div>
+                            <div className="rounded-[0.85rem] border border-white/8 bg-black/15 px-3 py-3">
+                                <p className="text-[10px] uppercase tracking-[0.16em] text-neutral-500">Notes</p>
+                                <p className="mt-2 text-sm text-white">{noteCount}</p>
+                            </div>
+                            <div className="rounded-[0.85rem] border border-white/8 bg-black/15 px-3 py-3">
+                                <p className="text-[10px] uppercase tracking-[0.16em] text-neutral-500">First save</p>
+                                <p className="mt-2 text-sm text-white">{saveState === "saving" ? "Saving world record..." : "Pending"}</p>
+                                {saveState === "saving" ? (
+                                    <div className="mt-3 overflow-hidden rounded-full bg-white/[0.06]">
+                                        <div className="h-1.5 w-1/2 animate-pulse rounded-full bg-sky-300/70" />
+                                    </div>
+                                ) : null}
+                            </div>
+                        </div>
                         {saveState === "error" && saveMessage ? <p className="mt-3 text-[11px] leading-5 text-rose-200">{saveMessage}</p> : null}
                     </div>
                 )}
@@ -297,7 +337,11 @@ export const RightPanelWorkspaceOverviewSection = React.memo(function RightPanel
                     <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm text-white marker:content-none">
                         <div>
                             <p className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">Diagnostics</p>
-                            <p className="mt-1 text-[12px] leading-5 text-neutral-400">Continuity, readiness, and quality gates stay here when you need the deeper trail.</p>
+                            <p className="mt-1 text-[12px] leading-5 text-neutral-400">
+                                {isAdvancedDensityEnabled
+                                    ? "Continuity, readiness, and quality gates are available here when you need the deeper trail."
+                                    : "Diagnostic depth stays collapsed until the world is saved and you choose the richer studio view."}
+                            </p>
                         </div>
                         <ChevronDown className="h-4 w-4 text-neutral-500 transition-transform group-open:rotate-180" />
                     </summary>
@@ -353,8 +397,8 @@ export const RightPanelWorkspaceOverviewSection = React.memo(function RightPanel
                                         <p className="text-neutral-500">{continuity.directionSummary}</p>
                                         <p className="mt-1 text-neutral-400">
                                             {directorBrief.trim()
-                                                ? "Director brief stays attached only to the current scene package."
-                                                : "Views, notes, and brief stay scoped to this scene."}
+                                                ? "Director brief stays attached alongside the saved world record."
+                                                : "Views, notes, and the continuity record stay scoped to this world."}
                                         </p>
                                     </div>
                                 </div>

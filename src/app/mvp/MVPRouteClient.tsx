@@ -9,6 +9,7 @@ import { createMvpSceneStore } from "@/state/mvpSceneStore.ts";
 import { MvpEditorSessionStoreProvider } from "@/state/mvpEditorSessionStoreContext.tsx";
 import { MvpSceneStoreProvider } from "@/state/mvpSceneStoreContext.tsx";
 
+import type { WorkspaceLaunchSourceKind } from "./_hooks/mvpWorkspaceSessionShared";
 import MVPWorkspaceRuntime from "./_components/MVPWorkspaceRuntime";
 import { useMvpWorkspaceShellController } from "./_hooks/useMvpWorkspaceShellController";
 import { useMvpWorkspaceSessionController } from "./_hooks/useMvpWorkspaceSessionController";
@@ -22,20 +23,28 @@ export default function MVPRouteClient({
     routeVariant = "workspace",
     launchSceneId = null,
     launchProjectId = null,
+    launchEntryMode = null,
     launchIntent = null,
     launchBrief = null,
     launchReferences = null,
     launchProviderId = null,
+    launchSourceKind = null,
+    launchWorkspaceHref = null,
+    launchPreviewHref = null,
     deploymentFingerprint,
 }: {
     clarityMode?: boolean;
     routeVariant?: MvpRouteVariant;
     launchSceneId?: string | null;
     launchProjectId?: string | null;
+    launchEntryMode?: "workspace" | null;
     launchIntent?: "generate" | "capture" | "import" | null;
     launchBrief?: string | null;
     launchReferences?: string | null;
     launchProviderId?: string | null;
+    launchSourceKind?: WorkspaceLaunchSourceKind | null;
+    launchWorkspaceHref?: string | null;
+    launchPreviewHref?: string | null;
     deploymentFingerprint: MvpDeploymentFingerprint;
 }) {
     const sceneStoreRef = useRef(createMvpSceneStore(createEmptySceneDocumentV2()));
@@ -47,10 +56,12 @@ export default function MVPRouteClient({
         routeVariant,
         launchSceneId,
         launchProjectId,
+        launchEntryMode,
         launchIntent,
         launchBrief,
         launchReferences,
         launchProviderId,
+        launchSourceKind,
         sceneStore: sceneStoreRef.current,
         editorSessionActions,
     });
@@ -66,6 +77,8 @@ export default function MVPRouteClient({
                         <MVPWorkspaceRuntime
                             clarityMode={clarityMode}
                             routeVariant={routeVariant}
+                            launchWorkspaceHref={launchWorkspaceHref}
+                            launchPreviewHref={launchPreviewHref}
                             deploymentFingerprint={deploymentFingerprint}
                         />
                     </MvpWorkspaceShellProvider>

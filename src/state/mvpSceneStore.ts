@@ -29,6 +29,7 @@ import {
     renameSceneNode,
     replaceEnvironmentOnSceneDocument,
     reparentSceneNode,
+    patchSceneContinuityOnSceneDocument,
     setSceneNodeLocked,
     setSceneNodeVisibility,
     setDirectorBriefOnSceneDocument,
@@ -36,7 +37,7 @@ import {
     upsertNodeTransform,
 } from "../lib/scene-graph/document.ts";
 import { migrateSceneGraphToSceneDocument } from "../lib/scene-graph/migrate.ts";
-import type { CameraPathFrame, CameraView, SpatialPin } from "../lib/mvp-workspace";
+import type { CameraPathFrame, CameraView, SpatialPin, WorldContinuityRecord } from "../lib/mvp-workspace";
 import type {
     CameraNodeData,
     LightNodeData,
@@ -117,6 +118,7 @@ export interface MvpSceneStoreActions {
     removeCameraView: (viewId: string) => void;
     setDirectorPath: (path: CameraPathFrame[]) => void;
     setDirectorBrief: (directorBrief: string) => void;
+    patchContinuity: (patch: Partial<WorldContinuityRecord>) => void;
     patchViewer: (patch: Partial<ViewerDocumentState>) => void;
     undo: () => void;
     redo: () => void;
@@ -600,6 +602,13 @@ export function createMvpSceneStore(initialDocument?: SceneDocumentV2) {
             setDirectorBrief: (directorBrief) => {
                 const state = get();
                 const nextState = commitDocumentMutation(state, (document) => setDirectorBriefOnSceneDocument(document, directorBrief));
+                if (nextState) {
+                    set(nextState);
+                }
+            },
+            patchContinuity: (patch) => {
+                const state = get();
+                const nextState = commitDocumentMutation(state, (document) => patchSceneContinuityOnSceneDocument(document, patch));
                 if (nextState) {
                     set(nextState);
                 }

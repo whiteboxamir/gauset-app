@@ -25,12 +25,21 @@ export type SaveState = "idle" | "saving" | "saved" | "recovered" | "error";
 export type WorkspaceEntryMode = "launchpad" | "workspace";
 export type WorkspaceRouteVariant = "workspace" | "preview";
 export type WorkspaceOrigin = "blank" | "demo" | "draft" | "linked_version" | "linked_environment";
+export type WorkspaceLaunchSourceKind =
+    | "upload"
+    | "provider_generated_still"
+    | "capture_session"
+    | "demo_world"
+    | "linked_scene_version"
+    | "external_world_package"
+    | "third_party_world_model_output";
 export type CompatibilityPersistedSceneGraph = PersistedSceneGraphV1 & { __scene_document_v2?: SceneDocumentV2 };
 
 export interface WorkspaceHudState {
     leftRailCollapsed: boolean;
     rightRailCollapsed: boolean;
     directorHudCompact: boolean;
+    advancedMode: boolean;
 }
 
 export interface SceneVersion {
@@ -177,14 +186,16 @@ export const formatTimestamp = (value?: string | null) => {
 export const createDefaultHudState = (routeVariant: WorkspaceRouteVariant): WorkspaceHudState =>
     routeVariant === "preview"
         ? {
-              leftRailCollapsed: true,
+              leftRailCollapsed: false,
               rightRailCollapsed: true,
               directorHudCompact: true,
+              advancedMode: false,
           }
         : {
               leftRailCollapsed: false,
               rightRailCollapsed: false,
               directorHudCompact: false,
+              advancedMode: false,
           };
 
 export const normalizeHudState = (routeVariant: WorkspaceRouteVariant, value: unknown): WorkspaceHudState => {
@@ -198,6 +209,7 @@ export const normalizeHudState = (routeVariant: WorkspaceRouteVariant, value: un
         leftRailCollapsed: typeof input.leftRailCollapsed === "boolean" ? input.leftRailCollapsed : fallback.leftRailCollapsed,
         rightRailCollapsed: typeof input.rightRailCollapsed === "boolean" ? input.rightRailCollapsed : fallback.rightRailCollapsed,
         directorHudCompact: typeof input.directorHudCompact === "boolean" ? input.directorHudCompact : fallback.directorHudCompact,
+        advancedMode: typeof input.advancedMode === "boolean" ? input.advancedMode : fallback.advancedMode,
     };
 };
 

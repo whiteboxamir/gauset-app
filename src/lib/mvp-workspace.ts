@@ -47,6 +47,13 @@ export interface ViewerState {
     lens_mm: number;
 }
 
+export interface WorldContinuityRecord {
+    worldBible: string;
+    castContinuity: string;
+    lookDevelopment: string;
+    shotPlan: string;
+}
+
 export interface ReviewMetadata {
     project_name: string;
     scene_title: string;
@@ -208,6 +215,37 @@ export function defaultViewerState(): ViewerState {
         fov: DEFAULT_FOV,
         lens_mm: DEFAULT_LENS_MM,
     };
+}
+
+export function defaultWorldContinuityRecord(): WorldContinuityRecord {
+    return {
+        worldBible: "",
+        castContinuity: "",
+        lookDevelopment: "",
+        shotPlan: "",
+    };
+}
+
+export function normalizeWorldContinuityRecord(input: unknown): WorldContinuityRecord {
+    const record = input && typeof input === "object" ? (input as Partial<WorldContinuityRecord>) : {};
+    return {
+        worldBible: typeof record.worldBible === "string" ? record.worldBible : "",
+        castContinuity: typeof record.castContinuity === "string" ? record.castContinuity : "",
+        lookDevelopment: typeof record.lookDevelopment === "string" ? record.lookDevelopment : "",
+        shotPlan: typeof record.shotPlan === "string" ? record.shotPlan : "",
+    };
+}
+
+export function countWorldContinuityFields(record: WorldContinuityRecord | null | undefined) {
+    if (!record) {
+        return 0;
+    }
+
+    return [record.worldBible, record.castContinuity, record.lookDevelopment, record.shotPlan].filter((value) => value.trim().length > 0).length;
+}
+
+export function hasWorldContinuityContent(record: WorldContinuityRecord | null | undefined) {
+    return countWorldContinuityFields(record) > 0;
 }
 
 export function createEmptyWorkspaceSceneGraph(): PersistedSceneGraphV1 {

@@ -83,6 +83,7 @@ function testRestoreDoesNotAutosaveWithoutChanges() {
             hasHydrated: true,
             entryMode: "workspace",
             hasContent: true,
+            autosaveUnlocked: true,
             persistenceFingerprint: restoredFingerprint,
             lastSavedFingerprint: restoredFingerprint,
         }),
@@ -94,6 +95,7 @@ function testRestoreDoesNotAutosaveWithoutChanges() {
             hasHydrated: false,
             entryMode: "workspace",
             hasContent: true,
+            autosaveUnlocked: true,
             persistenceFingerprint: restoredFingerprint,
             lastSavedFingerprint: "",
         }),
@@ -105,6 +107,7 @@ function testRestoreDoesNotAutosaveWithoutChanges() {
             hasHydrated: true,
             entryMode: "launchpad",
             hasContent: true,
+            autosaveUnlocked: true,
             persistenceFingerprint: restoredFingerprint,
             lastSavedFingerprint: "",
         }),
@@ -116,6 +119,22 @@ function testRestoreDoesNotAutosaveWithoutChanges() {
             hasHydrated: true,
             entryMode: "workspace",
             hasContent: true,
+            autosaveUnlocked: false,
+            persistenceFingerprint: buildPersistenceFingerprint("scene_restored", {
+                ...restoredDocument,
+                rootIds: ["node_changed"],
+            }),
+            lastSavedFingerprint: restoredFingerprint,
+        }),
+        false,
+    );
+
+    assert.equal(
+        shouldScheduleAutosave({
+            hasHydrated: true,
+            entryMode: "workspace",
+            hasContent: true,
+            autosaveUnlocked: true,
             persistenceFingerprint: buildPersistenceFingerprint("scene_restored", {
                 ...restoredDocument,
                 rootIds: ["node_changed"],

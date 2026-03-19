@@ -1,8 +1,11 @@
 import type { JobType } from "@/app/mvp/_hooks/mvpWorkspaceIntakeShared";
 
 export type LeftPanelPreviewWorkspaceNavigation = {
+    eyebrow?: string;
     title: string;
     note: string;
+    backLabel?: string;
+    backToStartHref?: string | null;
     onBackToStart: () => void;
 };
 

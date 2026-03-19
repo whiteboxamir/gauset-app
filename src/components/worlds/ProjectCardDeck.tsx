@@ -55,10 +55,10 @@ export function ProjectCardDeck({
     projectMetaById = {},
     canAccessMvp = false,
     eyebrow = "Project library",
-    title = "Projects under management",
-    description = "Use this library as the durable home base for project ownership, world linkage, review posture, and workspace launch.",
+    title = "Saved-world records",
+    description = "Each project is the durable record for one filmmaking world: continuity memory, reopen history, review posture, and handoff all stay attached here.",
     emptyTitle = "No projects yet",
-    emptyBody = "Create a project to start establishing account-level ownership around scenes and worlds.",
+    emptyBody = "Create a project to start one durable world record. The first save turns it into a real continuity anchor.",
 }: {
     projects: ProjectCardWithOptionalReadiness[];
     projectMetaById?: Record<string, ProjectCardMeta | undefined>;
@@ -105,8 +105,7 @@ export function ProjectCardDeck({
                                         label={project.status}
                                         tone={project.status === "active" ? "success" : project.status === "archived" ? "neutral" : "info"}
                                     />
-                                    <StatusBadge label={project.membershipRole} tone="info" />
-                                    <StatusBadge label={project.primarySceneId ? "World linked" : "World missing"} tone={project.primarySceneId ? "success" : "warning"} />
+                                    <StatusBadge label={project.primarySceneId ? "Saved world ready" : "No saved world yet"} tone={project.primarySceneId ? "success" : "warning"} />
                                     <StatusBadge
                                         label={projectMeta ? `${projectMeta.riskLevel} signal` : "No project signal"}
                                         tone={getRiskTone(projectMeta?.riskLevel)}
@@ -121,7 +120,7 @@ export function ProjectCardDeck({
                                     <p className="mt-1 text-xs text-neutral-500">{project.primaryEnvironmentLabel ?? "Add a world label"}</p>
                                 </article>
                                 <article className="rounded-[1.2rem] border border-white/10 bg-black/20 p-3">
-                                    <p className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">Readiness</p>
+                                    <p className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">World record state</p>
                                     <div className="mt-2">
                                         <StatusBadge
                                             label={project.releaseReadiness ? formatReleaseReadinessLabel(project.releaseReadiness.state) : "No readiness signal"}
@@ -135,10 +134,10 @@ export function ProjectCardDeck({
                                     <p className="mt-2 text-sm font-medium text-white">
                                         {projectMeta ? `${projectMeta.activeReviewShareCount} live / ${projectMeta.totalReviewShareCount} total` : "Pending signal"}
                                     </p>
-                                    <p className="mt-1 text-xs text-neutral-500">Backed by persisted review-share rows and project operations.</p>
+                                    <p className="mt-1 text-xs text-neutral-500">Pinned to saved versions so review does not drift from the world record.</p>
                                 </article>
                                 <article className="rounded-[1.2rem] border border-white/10 bg-black/20 p-3">
-                                    <p className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">Workspace continuity</p>
+                                    <p className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">Reopen history</p>
                                     <p className="mt-2 text-sm font-medium text-white">{formatDate(project.lastWorldOpenedAt, "Not reopened yet")}</p>
                                     <p className="mt-1 text-xs text-neutral-500">
                                         {project.lastWorldOpenedAt
@@ -150,7 +149,7 @@ export function ProjectCardDeck({
 
                             {projectMeta?.reasons.length ? (
                                 <div className="mt-4 rounded-[1.2rem] border border-white/10 bg-black/20 p-4">
-                                    <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-neutral-500">Current signal</p>
+                                    <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-neutral-500">Current risk signal</p>
                                     <p className="mt-2 text-sm text-neutral-300">
                                         {projectMeta.reasons.slice(0, 2).join(" · ")}
                                         {project.lastActivityAt ? ` · Last activity ${formatDate(project.lastActivityAt)}` : ""}
@@ -169,10 +168,10 @@ export function ProjectCardDeck({
                                 </div>
                             ) : (
                                 <div className="mt-4 rounded-[1.2rem] border border-white/10 bg-black/20 p-4">
-                                    <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-neutral-500">World lifecycle truth</p>
-                                    <p className="mt-2 text-sm font-medium text-white">Awaiting first owned world</p>
+                                    <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-neutral-500">World record truth</p>
+                                    <p className="mt-2 text-sm font-medium text-white">Awaiting first saved world</p>
                                     <p className="mt-2 text-sm text-neutral-400">
-                                        Projects stay durable before launch, but source, lane, and delivery truth only become inspectable after a real scene is linked.
+                                        The project record is ready now, but continuity memory, review, and handoff only become durable after the first world is saved.
                                     </p>
                                 </div>
                             )}
@@ -190,9 +189,9 @@ export function ProjectCardDeck({
                                     label={
                                         project.primarySceneId && canAccessMvp
                                             ? project.lastWorldOpenedAt
-                                                ? "Return to world"
-                                                : "Open first world pass"
-                                            : "Workspace launch unavailable"
+                                                ? "Return to saved world"
+                                                : "Open saved world"
+                                            : "Saved-world launch unavailable"
                                     }
                                     disabled={!project.primarySceneId || !canAccessMvp}
                                     variant="secondary"

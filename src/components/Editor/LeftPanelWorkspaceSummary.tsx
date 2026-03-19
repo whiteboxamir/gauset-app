@@ -1,8 +1,10 @@
 "use client";
 
+import Link from "next/link";
 import { AlertTriangle, ArrowLeft, Cpu, Loader2, ShieldCheck } from "lucide-react";
 
 import type { MvpWorkspaceIntakeController } from "@/app/mvp/_hooks/useMvpWorkspaceIntakeController";
+import type { WorkspaceLaunchSourceKind } from "@/app/mvp/_hooks/mvpWorkspaceSessionShared";
 
 import type { LeftPanelPreviewWorkspaceNavigation } from "./leftPanelShared";
 
@@ -23,8 +25,60 @@ type LeftPanelWorkspaceSummaryProps = Pick<
     | "setupTruth"
 > & {
     clarityMode?: boolean;
+    journeyStage?: "start" | "unsaved" | "saved";
+    launchProjectId?: string | null;
+    launchSourceKind?: WorkspaceLaunchSourceKind | null;
     previewWorkspaceNavigation?: LeftPanelPreviewWorkspaceNavigation | null;
 };
+
+function describeLaunchSource(launchSourceKind?: WorkspaceLaunchSourceKind | null) {
+    switch (launchSourceKind) {
+        case "upload":
+            return {
+                title: "Scout stills selected",
+                openingSummary: "Scout stills are already attached to this start.",
+                nextStepLabel: "Import scout stills",
+            };
+        case "capture_session":
+            return {
+                title: "Capture path selected",
+                openingSummary: "Capture is already attached to this start.",
+                nextStepLabel: "Start capture",
+            };
+        case "external_world_package":
+            return {
+                title: "External world selected",
+                openingSummary: "An external world package is already attached to this start.",
+                nextStepLabel: "Import external world",
+            };
+        case "third_party_world_model_output":
+            return {
+                title: "Third-party world selected",
+                openingSummary: "A third-party world output is already attached to this start.",
+                nextStepLabel: "Import third-party world",
+            };
+        case "provider_generated_still":
+            return {
+                title: "Generated still selected",
+                openingSummary: "A generated still is already attached to this start.",
+                nextStepLabel: "Continue with generated still",
+            };
+        case "linked_scene_version":
+            return {
+                title: "Linked world selected",
+                openingSummary: "This project is reopening a linked world.",
+                nextStepLabel: "Reopen the linked world",
+            };
+        case "demo_world":
+            return {
+                title: "Demo world selected",
+                openingSummary: "The demo path is ready.",
+                nextStepLabel: "Open the demo world",
+            };
+        default:
+            return null;
+    }
+}
 
 export function LeftPanelWorkspaceSummary({
     assetCapability,
@@ -33,6 +87,9 @@ export function LeftPanelWorkspaceSummary({
     benchmarkStatusLabel,
     captureSession,
     clarityMode = false,
+    journeyStage = "start",
+    launchProjectId = null,
+    launchSourceKind = null,
     minimumCaptureImages,
     previewCapability,
     previewWorkspaceNavigation = null,
@@ -43,6 +100,8 @@ export function LeftPanelWorkspaceSummary({
     selectedUpload,
     setupTruth,
 }: LeftPanelWorkspaceSummaryProps) {
+    const isFirstWorldStage = journeyStage === "start";
+    const launchSource = describeLaunchSource(launchSourceKind);
     const laneCards = [
         {
             key: "preview",
@@ -72,7 +131,7 @@ export function LeftPanelWorkspaceSummary({
         backendMode === "ready"
             ? connectedLaneCount === laneCards.length
                 ? "All lanes online"
-                : "Limited lane coverage"
+                : "Limited lanes"
             : backendMode === "degraded"
               ? "Lane needs attention"
               : backendMode === "offline"
@@ -81,35 +140,39 @@ export function LeftPanelWorkspaceSummary({
     const workspaceStatusSummary =
         backendMode === "ready"
             ? connectedLaneCount === laneCards.length
-                ? "Preview, reconstruction, and asset are connected for this session."
-                : `${connectedLaneCount} of ${laneCards.length} production modes are connected. You can keep scouting while the missing lane recovers.`
+                ? "Preview, reconstruction, and asset are connected."
+                : `${connectedLaneCount} of ${laneCards.length} lanes are connected.`
             : backendMode === "degraded"
-              ? "GAUSET is responding, but one production lane still needs attention."
+              ? "One production lane needs attention."
               : backendMode === "offline"
                 ? "The app cannot see local services yet. Reconnect them to intake stills and build the world."
-                : "Confirming the current backend, storage, and lane capabilities.";
+              : "Checking backend and lane availability.";
     const backendStatusDetail =
         backendMessage && backendMessage !== setupTruth && backendMessage !== workspaceStatusSummary ? backendMessage : "";
     const nextStep = selectedUpload
         ? {
-              title: "Send the selected still into the right mode",
+              title: "Build from the selected still",
               body: reconstructionCapability?.available
-                  ? "Use Preview for a fast scout pass, Asset for extraction, or keep stacking overlap for a faithful reconstruction."
-                  : "You can still judge frame quality and build the capture set while the missing worker is restored.",
+                  ? "Use preview for a fast scout pass, or keep stacking overlap for a fuller reconstruction."
+                  : "You can still judge the frame and keep building the capture set while the worker is restored.",
           }
         : captureSession?.ready_for_reconstruction
           ? {
-                title: reconstructionCapability?.available ? "Kick off reconstruction" : "Capture set is ready",
+                title: reconstructionCapability?.available ? "Start reconstruction" : "Capture set ready",
                 body: reconstructionCapability?.available
-                    ? "You have enough overlap to move from scout stills into a faithful world build."
-                    : "Your capture set is ready, but the reconstruction worker still needs to come online.",
+                    ? "You have enough overlap to move into a faithful world build."
+                    : "The capture set is ready, but the reconstruction worker is still offline.",
             }
           : {
-                title: "Start with the location",
+                title: isFirstWorldStage ? "Choose one source path" : "Start with the location",
                 body:
                     backendMode === "offline"
-                        ? "Reconnect local services, then import one hero still or a small orbit set to start building the scene."
-                        : "Import a hero still for preview or asset work, or begin a multi-view capture set for reconstruction.",
+                        ? "Reconnect local services, then import one hero still or a small orbit set."
+                        : launchProjectId && isFirstWorldStage
+                          ? "This workspace is already attached to one project world record. Choose the first source, then save once to anchor the continuity record."
+                        : isFirstWorldStage
+                          ? "Pick one clear source, then build the first world before thinking about review or handoff."
+                          : "Import a hero still for preview or asset work, or begin a multi-view capture set for reconstruction.",
             };
     const workspaceBadgeLabel =
         backendMode === "ready"
@@ -149,7 +212,13 @@ export function LeftPanelWorkspaceSummary({
         ? `${selectedUpload.source_type === "generated" ? "Generated still" : "Imported still"} · ${selectedUpload.sourceName}`
         : (captureSession?.frame_count ?? 0) > 0
           ? `${captureSession?.frame_count ?? 0} view${(captureSession?.frame_count ?? 0) === 1 ? "" : "s"} in capture set`
-          : "No world source loaded yet";
+          : launchSource
+            ? launchSource.title
+          : launchProjectId
+            ? "Project-linked world start"
+          : isFirstWorldStage
+            ? "No source chosen yet"
+            : "No world source loaded yet";
     const laneAvailabilityLabel =
         connectedLaneCount === laneCards.length
             ? "All intake lanes available"
@@ -163,17 +232,29 @@ export function LeftPanelWorkspaceSummary({
         ? nextStep.title
         : backendMode === "offline"
           ? "Reconnect services, then bring in a hero still"
-          : "Bring in a hero still or a small orbit set";
+          : launchProjectId && isFirstWorldStage
+            ? "Choose the first source"
+          : isFirstWorldStage && launchSource
+            ? launchSource.nextStepLabel
+          : isFirstWorldStage
+            ? "Choose one source"
+            : "Bring in a hero still or a small orbit set";
     const topSummaryLine = hasWorldLoaded
         ? workspaceStatusSummary
         : backendMode === "offline"
           ? "Reconnect intake services, then start with one clear source input."
-          : "Keep the opening move simple: bring in a hero still or a small capture orbit.";
+          : launchProjectId && isFirstWorldStage
+            ? "This project route is already attached to one durable world record."
+          : isFirstWorldStage && launchSource
+            ? launchSource.openingSummary
+          : isFirstWorldStage
+            ? "Choose one source path, then build the first world."
+            : "Bring in a hero still or a small capture orbit.";
     const attentionDetail =
         backendMode === "offline"
             ? "Local services are offline, so intake actions stay in standby until the backend reconnects."
             : backendMode === "degraded"
-              ? "One production lane still needs attention, but you can keep moving in the available paths."
+              ? "One production lane still needs attention, but the available path is still usable."
               : releaseGateFailureCount > 0
                 ? `${releaseGateFailureCount} tracked release gate${releaseGateFailureCount === 1 ? "" : "s"} currently need attention.`
                 : "";
@@ -190,34 +271,47 @@ export function LeftPanelWorkspaceSummary({
         : "Keep collecting overlap until the capture set is ready.";
     const systemWatchDetail =
         backendMode === "ready" ? `${benchmarkStatusLabel} · ${reconstructionWorkerLabel}` : backendStatusDetail || setupTruth || workspaceStatusSummary;
-    const shouldUseLightBrief = !hasWorldLoaded || backendMode === "offline";
+    const shouldUseLightBrief = isFirstWorldStage || !hasWorldLoaded || backendMode === "offline";
 
     return (
         <>
             {showPreviewWorkspaceNavigation ? (
                 <div
-                    className="sticky top-0 z-20 mb-4 rounded-[24px] border border-white/12 bg-[linear-gradient(180deg,rgba(10,16,24,0.96),rgba(7,11,17,0.98))] p-4 shadow-[0_18px_40px_rgba(0,0,0,0.28)] backdrop-blur-xl"
+                    className="sticky top-0 z-20 mb-4 rounded-[24px] border border-[var(--border-soft)] bg-[linear-gradient(180deg,rgba(22,28,34,0.96),rgba(16,20,24,0.98))] p-4 shadow-[0_18px_40px_rgba(0,0,0,0.22)] backdrop-blur-xl"
                     data-testid="mvp-preview-workspace-nav"
                 >
-                    <div className="flex items-start justify-between gap-3">
+                    <div className="flex flex-col gap-3">
                         <div className="min-w-0">
-                            <p className="text-[10px] uppercase tracking-[0.24em] text-cyan-100/90">MVP preview</p>
+                            <p className="text-[10px] uppercase tracking-[0.18em] text-[#bfd6de]/78">
+                                {previewWorkspaceNavigation?.eyebrow ?? "Preview"}
+                            </p>
                             <p className="mt-2 text-base font-semibold tracking-tight text-white">
                                 {previewWorkspaceNavigation?.title ?? "Current workspace"}
                             </p>
                             <p className="mt-1 text-xs leading-5 text-neutral-400">
-                                {previewWorkspaceNavigation?.note ?? "Back to start keeps this workspace in memory."}
+                                {previewWorkspaceNavigation?.note ?? "Return to the prior step without breaking this workspace."}
                             </p>
                         </div>
-                        <button
-                            type="button"
-                            onClick={previewWorkspaceNavigation?.onBackToStart}
-                            className="inline-flex shrink-0 items-center gap-2 rounded-full border border-white/12 bg-white/[0.04] px-3.5 py-2 text-[11px] font-medium uppercase tracking-[0.18em] text-white transition-colors hover:border-white/20 hover:bg-white/[0.08]"
-                            data-testid="mvp-preview-back-to-start"
-                        >
-                            <ArrowLeft className="h-3.5 w-3.5" />
-                            Back to start
-                        </button>
+                        {previewWorkspaceNavigation?.backToStartHref ? (
+                            <Link
+                                href={previewWorkspaceNavigation.backToStartHref}
+                                className="inline-flex w-full items-center justify-center gap-2 rounded-full border border-[var(--border-soft)] bg-[var(--surface-soft)] px-3.5 py-2 text-[11px] font-medium uppercase tracking-[0.16em] text-white transition-colors hover:border-white/20 hover:bg-white/[0.08]"
+                                data-testid="mvp-preview-back-to-start"
+                            >
+                                <ArrowLeft className="h-3.5 w-3.5" />
+                                {previewWorkspaceNavigation?.backLabel ?? "Back to start"}
+                            </Link>
+                        ) : (
+                            <button
+                                type="button"
+                                onClick={previewWorkspaceNavigation?.onBackToStart}
+                                className="inline-flex w-full items-center justify-center gap-2 rounded-full border border-[var(--border-soft)] bg-[var(--surface-soft)] px-3.5 py-2 text-[11px] font-medium uppercase tracking-[0.16em] text-white transition-colors hover:border-white/20 hover:bg-white/[0.08]"
+                                data-testid="mvp-preview-back-to-start"
+                            >
+                                <ArrowLeft className="h-3.5 w-3.5" />
+                                {previewWorkspaceNavigation?.backLabel ?? "Back to start"}
+                            </button>
+                        )}
                     </div>
                 </div>
             ) : (
@@ -262,7 +356,7 @@ export function LeftPanelWorkspaceSummary({
 
                     {shouldUseLightBrief ? (
                         <div className="mt-3 text-[11px] leading-5 text-neutral-400">
-                            <p>{backendMode === "offline" ? systemWatchDetail : availableLaneTitles}</p>
+                            <p>{isFirstWorldStage ? "The focused path stays simple first. Deeper system status is available below if you need it." : backendMode === "offline" ? systemWatchDetail : availableLaneTitles}</p>
                         </div>
                     ) : (
                         <div className="mt-4 overflow-hidden rounded-[18px] border border-white/8 bg-black/10">
@@ -295,6 +389,31 @@ export function LeftPanelWorkspaceSummary({
                             )}
                             <p>{attentionDetail}</p>
                         </div>
+                    ) : null}
+
+                    {isFirstWorldStage ? (
+                        <details className="mt-3 rounded-[16px] border border-white/8 bg-black/10">
+                            <summary className="cursor-pointer list-none px-3.5 py-3 text-[11px] font-medium text-neutral-300 marker:content-none">
+                                Inspect system status
+                            </summary>
+                            <div className="space-y-3 border-t border-white/8 px-3.5 py-3 text-[11px] leading-5 text-neutral-400">
+                                <div>
+                                    <p className="text-[10px] uppercase tracking-[0.16em] text-neutral-500">Lane availability</p>
+                                    <p className="mt-1 text-white">{laneAvailabilityLabel}</p>
+                                    <p className="mt-1">{availableLaneTitles}</p>
+                                </div>
+                                <div>
+                                    <p className="text-[10px] uppercase tracking-[0.16em] text-neutral-500">Capture readiness</p>
+                                    <p className="mt-1 text-white">{intakeReadinessLabel}</p>
+                                    <p className="mt-1">{intakeReadinessDetail}</p>
+                                </div>
+                                <div>
+                                    <p className="text-[10px] uppercase tracking-[0.16em] text-neutral-500">System watch</p>
+                                    <p className="mt-1 text-white">{workspaceStatusLabel}</p>
+                                    <p className="mt-1">{systemWatchDetail}</p>
+                                </div>
+                            </div>
+                        </details>
                     ) : null}
                 </section>
             )}

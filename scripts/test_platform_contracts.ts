@@ -743,6 +743,42 @@ function testWorldIngestContracts() {
     assert.equal(derivedRecord?.contract, "world-ingest/v1");
     assert.equal(derivedRecord?.workspace_binding.project_id, "11111111-1111-4111-8111-111111111111");
     assert.equal(derivedRecord?.workflow.share_ready, true);
+    assert.equal(
+        derivedRecord?.package.entrypoints.workspace,
+        "/mvp?scene=scene_093091ff&project=11111111-1111-4111-8111-111111111111",
+    );
+
+    const persistedRecord = JSON.parse(JSON.stringify(ingestRecord));
+    persistedRecord.workspace_binding.project_id = "22222222-2222-4222-8222-222222222222";
+    persistedRecord.workspace_binding.scene_id = "scene_persisted_project_world";
+    persistedRecord.versioning.version_id = "20260317T100000000Z";
+    persistedRecord.versioning.version_locked = true;
+    const persistedSceneDocument = JSON.parse(JSON.stringify(ingestRecord.scene_document));
+    const persistedSceneGraph = JSON.parse(JSON.stringify(ingestRecord.compatibility_scene_graph));
+    const primarySplatId = Object.keys(persistedSceneDocument.splats ?? {})[0];
+    if (primarySplatId) {
+        persistedSceneDocument.splats[primarySplatId].metadata = {
+            ...(persistedSceneDocument.splats[primarySplatId].metadata ?? {}),
+            ingest_record: persistedRecord,
+        };
+    }
+    persistedSceneGraph.environment = {
+        ...(persistedSceneGraph.environment ?? {}),
+        metadata: {
+            ...(persistedSceneGraph.environment?.metadata ?? {}),
+            ingest_record: persistedRecord,
+        },
+    };
+    const preservedRecord = deriveWorldIngestRecord({
+        sceneId: "scene_runtime_override",
+        versionId: "20260318T120000000Z",
+        projectId: "11111111-1111-4111-8111-111111111111",
+        sceneDocument: persistedSceneDocument,
+        sceneGraph: persistedSceneGraph,
+    });
+    assert.equal(preservedRecord?.workspace_binding.project_id, "22222222-2222-4222-8222-222222222222");
+    assert.equal(preservedRecord?.workspace_binding.scene_id, "scene_persisted_project_world");
+    assert.equal(preservedRecord?.versioning.version_id, "20260317T100000000Z");
 }
 
 function testReviewVersionShareContracts() {
@@ -867,6 +903,132 @@ function testDownstreamHandoffContracts() {
     assert.equal(builtManifest.contract, "downstream-handoff/v1");
     assert.equal(builtManifest.target.system, "unreal_engine");
     assert.equal(builtManifest.review.version_locked, true);
+
+    assert.throws(
+        () =>
+            buildDownstreamHandoffManifest({
+                projectId: "11111111-1111-4111-8111-111111111111",
+                sceneId: "scene_backlot_reconstruction_01",
+                versionId: "",
+                sceneDocument: readyManifest.scene_document,
+                sceneGraph: readyManifest.compatibility_scene_graph,
+                targetSystem: "unreal_engine",
+                targetProfile: "unreal_scene_package/v1",
+            }),
+        /saved version/i,
+    );
+
+    assert.throws(
+        () =>
+            buildDownstreamHandoffManifest({
+                projectId: "11111111-1111-4111-8111-111111111111",
+                sceneId: "scene_backlot_reconstruction_01",
+                versionId: "20260316T173000000Z",
+                sceneDocument: readyManifest.scene_document,
+                sceneGraph: readyManifest.compatibility_scene_graph,
+                ingestRecord: {
+                    contract: "world-ingest/v1",
+                    ingest_id: "ingest_mismatched_project",
+                    status: "accepted",
+                    source: {
+                        kind: "third_party_world_model_output",
+                        label: "Backlot reconstruction",
+                        vendor: null,
+                        captured_at: "2026-03-16T17:30:00.000Z",
+                        source_uri: null,
+                        origin: null,
+                        ingest_channel: null,
+                    },
+                    package: {
+                        media_type: "application/x-gauset-scene-document+json",
+                        checksum_sha256: null,
+                        entrypoints: {
+                            workspace: "/mvp?scene=scene_backlot_reconstruction_01",
+                            review: "/mvp/review?scene=scene_backlot_reconstruction_01",
+                        },
+                        files: {
+                            metadata: "/api/mvp/storage/scenes/scene_backlot_reconstruction_01/environment/metadata.json",
+                        },
+                    },
+                    scene_document: readyManifest.scene_document,
+                    compatibility_scene_graph: readyManifest.compatibility_scene_graph,
+                    workspace_binding: {
+                        project_id: "99999999-9999-4999-8999-999999999999",
+                        scene_id: "scene_backlot_reconstruction_01",
+                    },
+                    versioning: {
+                        version_id: "20260316T173000000Z",
+                        version_locked: true,
+                    },
+                    workflow: {
+                        workspace_path: "/mvp?scene=scene_backlot_reconstruction_01",
+                        review_path: "/mvp/review?scene=scene_backlot_reconstruction_01",
+                        share_path: "/mvp/review?scene=scene_backlot_reconstruction_01&version=20260316T173000000Z",
+                        save_ready: true,
+                        review_ready: true,
+                        share_ready: true,
+                    },
+                    truth: {
+                        lane: "reconstruction",
+                        truth_label: "Imported Reconstruction Package",
+                        lane_truth: "Imported from a third-party reconstruction output.",
+                        production_readiness: "handoff_ready",
+                        blockers: [],
+                    },
+                },
+                targetSystem: "unreal_engine",
+                targetProfile: "unreal_scene_package/v1",
+            }),
+        /requested project/i,
+    );
+}
+
+function testSingleJourneyRouteContracts() {
+    const appHome = readTextFixture("src/app/page.tsx");
+    const mvpPage = readTextFixture("src/app/mvp/page.tsx");
+    const previewPage = readTextFixture("src/app/mvp/preview/page.tsx");
+    const projectDetailPage = readTextFixture("src/app/(app)/app/worlds/[projectId]/page.tsx");
+    const openWorkspaceButton = readTextFixture("src/components/worlds/OpenWorkspaceButton.tsx");
+
+    assert.match(appHome, /redirect\("\/app\/worlds"\)/);
+    assert.match(mvpPage, /redirect\(nextPath\)/);
+    assert.match(mvpPage, /const nextPath =[\s\S]*launchSceneId[\s\S]*`\/mvp\?/);
+    assert.match(previewPage, /if \(launchSceneId\) \{[\s\S]*redirect\(`\/mvp\?/);
+    assert.match(projectDetailPage, /resumeSceneId=\{detail\.project\.primarySceneId\}/);
+    assert.match(openWorkspaceButton, /router\.push\("\/app\/worlds"\)/);
+    assert.doesNotMatch(openWorkspaceButton, /router\.push\(searchParams\.size > 0 \? `\/mvp/);
+}
+
+function testLocalPreviewJourneyContracts() {
+    const worldsPage = readTextFixture("src/app/(app)/app/worlds/page.tsx");
+    const projectDetailPage = readTextFixture("src/app/(app)/app/worlds/[projectId]/page.tsx");
+    const localPreviewNotice = readTextFixture("src/components/platform/LocalPreviewNotice.tsx");
+    const localPreviewData = readTextFixture("src/server/projects/local-preview.ts");
+
+    assert.match(worldsPage, /getAuthSurfaceStatus/);
+    assert.match(worldsPage, /resolveMvpAccessMode\(\)\.bypassed/);
+    assert.match(worldsPage, /if \(!authSurfaceStatus\.authConfigured\)/);
+    assert.match(worldsPage, /LocalPreviewNotice/);
+    assert.match(worldsPage, /listLocalPreviewProjectReadinessCardsForSession/);
+    assert.match(worldsPage, /Choose a project\. Build one world\. Save it once\./);
+    assert.match(worldsPage, /Start world/);
+    assert.match(worldsPage, /CreateProjectPanel id="project-composer"/);
+
+    assert.match(projectDetailPage, /if \(!authSurfaceStatus\.authConfigured\)/);
+    assert.match(projectDetailPage, /getLocalPreviewProjectReadinessDetailForId/);
+    assert.match(projectDetailPage, /LocalPreviewNotice/);
+    assert.match(projectDetailPage, /Start world/);
+    assert.match(projectDetailPage, /Current shell/);
+    assert.match(projectDetailPage, /World-first checklist/);
+    assert.doesNotMatch(projectDetailPage, /requireAuthSession\("\/app\/worlds"\);[\s\S]*if \(!authSurfaceStatus\.authConfigured\)/);
+
+    assert.match(localPreviewNotice, /canAccessMvp/);
+    assert.match(localPreviewNotice, /Open world start/);
+    assert.match(localPreviewNotice, /World start unavailable/);
+    assert.match(localPreviewNotice, /showWorldStartAction/);
+
+    assert.match(localPreviewData, /Backlot Scout/);
+    assert.match(localPreviewData, /Warehouse Blocking/);
 }
 
 function testSceneDocumentTruthSummaryContracts() {
@@ -1111,6 +1273,8 @@ testSharedTruthContractDocs();
 testWorldIngestContracts();
 testReviewVersionShareContracts();
 testDownstreamHandoffContracts();
+testSingleJourneyRouteContracts();
+testLocalPreviewJourneyContracts();
 testSceneDocumentTruthSummaryContracts();
 testReviewShareRequestShapeContracts();
 testFlattenedWorldTruthContracts();

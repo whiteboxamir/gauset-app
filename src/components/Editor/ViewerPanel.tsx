@@ -493,6 +493,7 @@ const ViewerSelectionTray = React.memo(function ViewerSelectionTray({
     directorBrief,
     readOnly,
     isPinPlacementEnabled,
+    allowDirectorBriefEditing,
     onFocusSelectedPin,
     onClearDirectorPath,
     onUpdateDirectorBrief,
@@ -505,6 +506,7 @@ const ViewerSelectionTray = React.memo(function ViewerSelectionTray({
     directorBrief: string;
     readOnly: boolean;
     isPinPlacementEnabled: boolean;
+    allowDirectorBriefEditing: boolean;
     onFocusSelectedPin: () => void;
     onClearDirectorPath: () => void;
     onUpdateDirectorBrief?: (directorBrief: string) => void;
@@ -585,7 +587,7 @@ const ViewerSelectionTray = React.memo(function ViewerSelectionTray({
                     </div>
                 </div>
 
-                {!readOnly ? (
+                {!readOnly && allowDirectorBriefEditing ? (
                     <textarea
                         value={directorBrief}
                         onChange={(event) => onUpdateDirectorBrief?.(event.target.value)}
@@ -669,7 +671,10 @@ const ViewerDirectorHud = React.memo(function ViewerDirectorHud({
     onToggleLeftHud,
     onToggleRightHud,
     onToggleDirectorHud,
+    onToggleAdvancedDensity,
     onToggleFullscreen,
+    canUseAdvancedDensity,
+    isAdvancedDensityEnabled,
 }: {
     sceneSlices: ViewerPanelSceneSlices;
     clarityMode: boolean;
@@ -708,7 +713,10 @@ const ViewerDirectorHud = React.memo(function ViewerDirectorHud({
     onToggleLeftHud?: () => void;
     onToggleRightHud?: () => void;
     onToggleDirectorHud?: () => void;
+    onToggleAdvancedDensity?: () => void;
     onToggleFullscreen: () => void | Promise<void>;
+    canUseAdvancedDensity?: boolean;
+    isAdvancedDensityEnabled?: boolean;
 }) {
     const hasEnvironment = Boolean(sceneSlices.environment);
     const environmentState = describeEnvironment(sceneSlices.environment);
@@ -728,7 +736,8 @@ const ViewerDirectorHud = React.memo(function ViewerDirectorHud({
         readOnly || !(viewerReady || shouldRenderInteractiveViewer || shouldUseStaticReferenceViewer || hasEnvironment);
     const canCaptureView = !cameraViewActionDisabled && hasOperableViewer;
     const canAnnotate = !viewerActionDisabled && hasOperableViewer;
-    const canRecordPath = !viewerActionDisabled && hasOperableViewer;
+    const canRecordPath = Boolean(isAdvancedDensityEnabled) && !viewerActionDisabled && hasOperableViewer;
+    const canUseTransformTools = Boolean(isAdvancedDensityEnabled);
     const directorHudToggleLabel = directorHudCompact ? "Open full controls" : "Return to dock";
     const environmentIndicatorClassName =
         hasEnvironment && !isReferenceOnlyDemo && !isLegacyDemoWorld
@@ -736,6 +745,9 @@ const ViewerDirectorHud = React.memo(function ViewerDirectorHud({
             : "bg-neutral-600";
     const utilityButtonClassName =
         "rounded-full border border-white/10 bg-white/[0.05] px-3 py-2 text-[11px] text-neutral-100 transition-colors hover:border-white/20 hover:bg-white/[0.08] hover:text-white";
+    const studioControlsButtonClassName = isAdvancedDensityEnabled
+        ? "rounded-full border border-sky-400/30 bg-sky-500/10 px-3 py-2 text-[11px] text-sky-100 transition-colors hover:bg-sky-500/15"
+        : utilityButtonClassName;
 
     if (isStandbyHud) {
         return (
@@ -762,7 +774,7 @@ const ViewerDirectorHud = React.memo(function ViewerDirectorHud({
                         </div>
                     </div>
                     <div className="flex flex-wrap items-center justify-center gap-2 md:justify-start">
-                        <ViewerTransformToolControls activeTool={activeTool} onSetActiveTool={onSetActiveTool} />
+                        {canUseTransformTools ? <ViewerTransformToolControls activeTool={activeTool} onSetActiveTool={onSetActiveTool} /> : null}
                         <ViewerLensPresetControls activeLensMm={sceneSlices.viewer.lens_mm} onSetLens={onSetLens} compact />
                     </div>
                     <div className="flex flex-wrap items-center justify-center gap-2 md:justify-end">
@@ -772,7 +784,7 @@ const ViewerDirectorHud = React.memo(function ViewerDirectorHud({
                                 onClick={onRequestViewCapture}
                                 className={`${utilityButtonClassName} shrink-0`}
                             >
-                                Capture view
+                                Save framing
                             </button>
                         ) : null}
                         {canAnnotate ? (
@@ -786,7 +798,7 @@ const ViewerDirectorHud = React.memo(function ViewerDirectorHud({
                                 }`}
                             >
                                 <MapPin className="mr-1 inline h-3.5 w-3.5" />
-                                {isPinPlacementEnabled ? "Placing note" : "Annotate"}
+                                {isPinPlacementEnabled ? "Placing note" : "Add note"}
                             </button>
                         ) : null}
                         <button
@@ -795,7 +807,7 @@ const ViewerDirectorHud = React.memo(function ViewerDirectorHud({
                             className={`${utilityButtonClassName} shrink-0`}
                         >
                             {isFullscreen ? <Minimize2 className="mr-1 inline h-3.5 w-3.5" /> : <Maximize2 className="mr-1 inline h-3.5 w-3.5" />}
-                            {isFullscreen ? "Exit full" : "Focus"}
+                            {isFullscreen ? "Exit full screen" : "Full screen"}
                         </button>
                         <button
                             type="button"
@@ -806,6 +818,15 @@ const ViewerDirectorHud = React.memo(function ViewerDirectorHud({
                             <Maximize2 className="mr-1 inline h-3.5 w-3.5" />
                             Controls
                         </button>
+                        {canUseAdvancedDensity && onToggleAdvancedDensity ? (
+                            <button
+                                type="button"
+                                onClick={onToggleAdvancedDensity}
+                                className={`${studioControlsButtonClassName} shrink-0`}
+                            >
+                                {isAdvancedDensityEnabled ? "Studio on" : "Studio off"}
+                            </button>
+                        ) : null}
                     </div>
                 </div>
             </div>
@@ -844,7 +865,7 @@ const ViewerDirectorHud = React.memo(function ViewerDirectorHud({
                             onClick={onRequestViewCapture}
                             className={utilityButtonClassName}
                         >
-                            Capture view
+                            Save framing
                         </button>
                     ) : null}
                     {canAnnotate ? (
@@ -859,19 +880,21 @@ const ViewerDirectorHud = React.memo(function ViewerDirectorHud({
                                 }`}
                             >
                                 <MapPin className="mr-1 inline h-3.5 w-3.5" />
-                                {isPinPlacementEnabled ? "Placing note" : "Annotate"}
+                                {isPinPlacementEnabled ? "Placing note" : "Add note"}
                             </button>
-                            <select
-                                value={pinType}
-                                onChange={(event) => onChangePinType(event.target.value as SpatialPinType)}
-                                className="rounded-full border border-white/10 bg-black/35 px-3 py-2 text-[11px] text-white outline-none transition-colors focus:border-sky-500/40"
-                                aria-label="Annotation type"
-                            >
-                                <option value="general">General</option>
-                                <option value="egress">Egress</option>
-                                <option value="lighting">Lighting</option>
-                                <option value="hazard">Hazard</option>
-                            </select>
+                            {isAdvancedDensityEnabled ? (
+                                <select
+                                    value={pinType}
+                                    onChange={(event) => onChangePinType(event.target.value as SpatialPinType)}
+                                    className="rounded-full border border-white/10 bg-black/35 px-3 py-2 text-[11px] text-white outline-none transition-colors focus:border-sky-500/40"
+                                    aria-label="Annotation type"
+                                >
+                                    <option value="general">General</option>
+                                    <option value="egress">Egress</option>
+                                    <option value="lighting">Lighting</option>
+                                    <option value="hazard">Hazard</option>
+                                </select>
+                            ) : null}
                         </>
                     ) : null}
                     {canRecordPath ? (
@@ -886,18 +909,23 @@ const ViewerDirectorHud = React.memo(function ViewerDirectorHud({
                                 }`}
                             >
                                 <Video className="mr-1 inline h-3.5 w-3.5" />
-                                {isRecordingPath ? "Stop move" : "Record move"}
+                                {isRecordingPath ? "Stop move" : "Record camera move"}
                             </button>
                         </>
                     ) : null}
                     <button type="button" onClick={() => void onToggleFullscreen()} className={utilityButtonClassName}>
                         {isFullscreen ? <Minimize2 className="mr-1 inline h-3.5 w-3.5" /> : <Maximize2 className="mr-1 inline h-3.5 w-3.5" />}
-                        {isFullscreen ? "Exit full screen" : "Focus"}
+                        {isFullscreen ? "Exit full screen" : "Full screen"}
                     </button>
                     {onToggleDirectorHud ? (
                         <button type="button" onClick={onToggleDirectorHud} className={utilityButtonClassName} aria-label={directorHudToggleLabel}>
                             <Minimize2 className="mr-1 inline h-3.5 w-3.5" />
                             Compact HUD
+                        </button>
+                    ) : null}
+                    {canUseAdvancedDensity && onToggleAdvancedDensity ? (
+                        <button type="button" onClick={onToggleAdvancedDensity} className={studioControlsButtonClassName}>
+                            {isAdvancedDensityEnabled ? "Studio view on" : "Studio view off"}
                         </button>
                     ) : null}
                 </div>
@@ -907,10 +935,12 @@ const ViewerDirectorHud = React.memo(function ViewerDirectorHud({
                 <div className="min-w-0 flex-1">
                     <ViewerLensPresetControls activeLensMm={sceneSlices.viewer.lens_mm} onSetLens={onSetLens} />
                 </div>
-                <div className="shrink-0">
-                    <ViewerTransformToolControls activeTool={activeTool} onSetActiveTool={onSetActiveTool} />
-                </div>
-                {isTransformToolMode(activeTool) ? (
+                {canUseTransformTools ? (
+                    <div className="shrink-0">
+                        <ViewerTransformToolControls activeTool={activeTool} onSetActiveTool={onSetActiveTool} />
+                    </div>
+                ) : null}
+                {canUseTransformTools && isTransformToolMode(activeTool) ? (
                     <div className="shrink-0">
                         <ViewerTransformSessionControls
                             activeTool={activeTool}
@@ -933,6 +963,7 @@ const ViewerSelectionTrayForSceneSlices = React.memo(function ViewerSelectionTra
     selectedViewId,
     readOnly,
     isPinPlacementEnabled,
+    allowDirectorBriefEditing,
     onFocusSelectedPin,
     onClearDirectorPath,
     onUpdateDirectorBrief,
@@ -942,6 +973,7 @@ const ViewerSelectionTrayForSceneSlices = React.memo(function ViewerSelectionTra
     selectedViewId?: string | null;
     readOnly: boolean;
     isPinPlacementEnabled: boolean;
+    allowDirectorBriefEditing: boolean;
     onFocusSelectedPin: () => void;
     onClearDirectorPath: () => void;
     onUpdateDirectorBrief?: (directorBrief: string) => void;
@@ -959,6 +991,7 @@ const ViewerSelectionTrayForSceneSlices = React.memo(function ViewerSelectionTra
             directorBrief={sceneSlices.director_brief}
             readOnly={readOnly}
             isPinPlacementEnabled={isPinPlacementEnabled}
+            allowDirectorBriefEditing={allowDirectorBriefEditing}
             onFocusSelectedPin={onFocusSelectedPin}
             onClearDirectorPath={onClearDirectorPath}
             onUpdateDirectorBrief={onUpdateDirectorBrief}
@@ -1112,7 +1145,10 @@ const ViewerPanelWorkspaceMode = React.memo(function ViewerPanelWorkspaceMode({
                     onToggleLeftHud={workspaceViewer.toggleLeftHud}
                     onToggleRightHud={workspaceViewer.toggleRightHud}
                     onToggleDirectorHud={workspaceViewer.toggleDirectorHud}
+                    onToggleAdvancedDensity={workspaceViewer.toggleAdvancedDensity}
                     onToggleFullscreen={workspaceViewer.toggleFullscreen}
+                    canUseAdvancedDensity={workspaceViewer.canUseAdvancedDensity}
+                    isAdvancedDensityEnabled={workspaceViewer.isAdvancedDensityEnabled}
                 />
             }
             overlaySurface={
@@ -1138,6 +1174,7 @@ const ViewerPanelWorkspaceMode = React.memo(function ViewerPanelWorkspaceMode({
                     selectedViewId={workspaceViewer.selectedViewId}
                     readOnly={readOnly}
                     isPinPlacementEnabled={workspaceViewer.isPinPlacementEnabled}
+                    allowDirectorBriefEditing={workspaceViewer.isAdvancedDensityEnabled}
                     onFocusSelectedPin={workspaceViewer.focusPin}
                     onClearDirectorPath={workspaceViewer.clearDirectorPath}
                     onUpdateDirectorBrief={workspaceViewer.setDirectorBrief}
@@ -1248,6 +1285,8 @@ const ViewerPanelOverrideMode = React.memo(function ViewerPanelOverrideMode({
                     onToggleRightHud={onToggleRightHud}
                     onToggleDirectorHud={onToggleDirectorHud}
                     onToggleFullscreen={toggleFullscreen}
+                    canUseAdvancedDensity={false}
+                    isAdvancedDensityEnabled={false}
                 />
             }
             overlaySurface={
@@ -1286,6 +1325,7 @@ const ViewerPanelOverrideMode = React.memo(function ViewerPanelOverrideMode({
                     selectedViewId={selectedViewId}
                     readOnly={readOnly}
                     isPinPlacementEnabled={isPinPlacementEnabled}
+                    allowDirectorBriefEditing={false}
                     onFocusSelectedPin={focusPin}
                     onClearDirectorPath={clearDirectorPath}
                 />

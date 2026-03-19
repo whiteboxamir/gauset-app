@@ -74,6 +74,7 @@ const EMPTY_SCENE_ACTIONS: MvpSceneStoreActions = {
     removeCameraView: () => undefined,
     setDirectorPath: () => undefined,
     setDirectorBrief: () => undefined,
+    patchContinuity: () => undefined,
     patchViewer: () => undefined,
     undo: () => undefined,
     redo: () => undefined,

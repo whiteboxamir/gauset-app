@@ -253,12 +253,12 @@ export function LeftPanelGenerateSection({
         <div className="mb-5 rounded-[24px] border border-white/10 bg-[linear-gradient(180deg,rgba(18,24,38,0.8),rgba(10,14,19,0.92))] p-5 shadow-[0_16px_36px_rgba(0,0,0,0.2)]">
             <div className="flex items-start justify-between gap-4">
                 <div>
-                    <p className="text-[10px] uppercase tracking-[0.22em] text-neutral-500">Prompt a source still</p>
+                    <p className="text-[10px] uppercase tracking-[0.22em] text-neutral-500">Optional source generation</p>
                     <p className="mt-3 text-xl font-medium tracking-tight text-white">
-                        {providersLoading ? "Loading providers" : "Generate a source still"}
+                        {providersLoading ? "Loading generation lane" : "Generate a source still, then attach it"}
                     </p>
                     <p className="mt-2 text-sm leading-6 text-neutral-400">
-                        Create a still from a prompt, then either keep it as a reference image or turn it straight into a persistent world.
+                        Create a still from a prompt, then attach it to the same world record. Generation stays secondary to the saved-world workflow.
                     </p>
                 </div>
                 {isGeneratingImage ? (
@@ -298,7 +298,7 @@ export function LeftPanelGenerateSection({
                         }
                         className="w-full rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3.5 text-white font-medium transition-all hover:bg-white/[0.1] disabled:opacity-50 disabled:hover:bg-white/[0.06]"
                     >
-                        {isGeneratingImage ? "Generating..." : "Generate source still"}
+                        {isGeneratingImage ? "Generating..." : "Generate source still only"}
                     </button>
                     <button
                         type="button"
@@ -316,7 +316,7 @@ export function LeftPanelGenerateSection({
                         }
                         className="w-full rounded-2xl bg-sky-400 px-4 py-3.5 text-black font-medium transition-all hover:bg-sky-300 disabled:opacity-50 disabled:hover:bg-sky-400"
                     >
-                        {isGeneratingImage ? "Generating..." : "Generate still + build world"}
+                        {isGeneratingImage ? "Generating..." : "Generate still, then build world"}
                     </button>
                 </div>
 

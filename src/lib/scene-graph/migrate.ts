@@ -8,6 +8,7 @@ import {
     createSplatNodeData,
     ensureReviewRecord,
     mergeWorkspaceSceneGraphIntoSceneDocument,
+    normalizeSceneDocumentDefaults,
     sceneDocumentToWorkspaceSceneGraph,
 } from "./document.ts";
 import type { SceneDocumentV2 } from "./types";
@@ -131,7 +132,7 @@ export function migratePersistedSceneGraphV1ToSceneDocumentV2(
 
 export function migrateSceneGraphToSceneDocument(sceneGraph: unknown): SceneDocumentV2 {
     if (sceneGraph && typeof sceneGraph === "object" && (sceneGraph as { version?: unknown }).version === 2) {
-        return structuredClone(sceneGraph as SceneDocumentV2);
+        return normalizeSceneDocumentDefaults(structuredClone(sceneGraph as SceneDocumentV2));
     }
 
     if (
@@ -140,7 +141,7 @@ export function migrateSceneGraphToSceneDocument(sceneGraph: unknown): SceneDocu
         (sceneGraph as { __scene_document_v2?: { version?: unknown } }).__scene_document_v2?.version === 2
     ) {
         const embeddedDocument = structuredClone((sceneGraph as { __scene_document_v2: SceneDocumentV2 }).__scene_document_v2);
-        return mergeWorkspaceSceneGraphIntoSceneDocument(embeddedDocument, normalizeWorkspaceSceneGraph(sceneGraph));
+        return normalizeSceneDocumentDefaults(mergeWorkspaceSceneGraphIntoSceneDocument(embeddedDocument, normalizeWorkspaceSceneGraph(sceneGraph)));
     }
 
     return migratePersistedSceneGraphV1ToSceneDocumentV2(sceneGraph);

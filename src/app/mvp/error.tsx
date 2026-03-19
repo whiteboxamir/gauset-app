@@ -15,11 +15,11 @@ export default function MVPError({
                 <div className="w-full rounded-[32px] border border-white/10 bg-[linear-gradient(180deg,rgba(10,14,21,0.96),rgba(7,10,14,0.92))] p-8 shadow-[0_28px_80px_rgba(0,0,0,0.45)] backdrop-blur-xl">
                     <div className="flex items-center gap-3 text-[11px] uppercase tracking-[0.26em] text-cyan-200/70">
                         <AlertTriangle className="h-4 w-4" />
-                        MVP Workspace
+                        Persistent world workspace
                     </div>
-                    <h1 className="mt-6 text-3xl font-medium tracking-[-0.04em] text-white">Failed to load workspace</h1>
+                    <h1 className="mt-6 text-3xl font-medium tracking-[-0.04em] text-white">Failed to load world record</h1>
                     <p className="mt-4 max-w-2xl text-sm leading-7 text-neutral-300">
-                        The workspace hit a render error before the editor could finish mounting. The route has not changed product truth: viewer certification stays host-specific, and reconstruction remains whatever the backend actually reports.
+                        The workspace hit an error before the saved-world surface could finish mounting. The route has not changed product truth: viewer certification stays host-specific, and reconstruction remains whatever the backend actually reports.
                     </p>
                     <div className="mt-6 rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-neutral-400">
                         {error.message || "Unknown MVP render failure."}
@@ -41,7 +41,7 @@ export default function MVPError({
                             className="inline-flex items-center justify-center gap-2 rounded-full bg-white px-5 py-3 text-sm font-medium text-black transition-colors hover:bg-neutral-200"
                         >
                             <RefreshCcw className="h-4 w-4" />
-                            Retry workspace
+                            Retry world record
                         </button>
                     </div>
                 </div>

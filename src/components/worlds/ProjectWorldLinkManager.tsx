@@ -46,11 +46,14 @@ export function ProjectWorldLinkManager({
     const [makePrimary, setMakePrimary] = useState(worldLinks.length === 0);
     const [error, setError] = useState<string | null>(null);
     const [message, setMessage] = useState<string | null>(null);
+    const [pendingAction, setPendingAction] = useState<"link" | "reopen" | "handoff-generic" | "handoff-unreal" | null>(null);
     const [isPending, startTransition] = useTransition();
+    const isBusy = isPending || pendingAction !== null;
 
     const submitLink = () => {
         setError(null);
         setMessage(null);
+        setPendingAction("link");
         startTransition(async () => {
             try {
                 const response = await fetch(`/api/projects/${projectId}/world-links`, {
@@ -71,10 +74,12 @@ export function ProjectWorldLinkManager({
                 setSceneId("");
                 setEnvironmentLabel("");
                 setMakePrimary(false);
-                setMessage("World linked to this project. Reopen tracking and review controls now run through the project layer.");
+                setMessage("World linked to this project. Review and handoff now resolve through the saved-world record.");
                 router.refresh();
             } catch (worldLinkError) {
                 setError(worldLinkError instanceof Error ? worldLinkError.message : "Unable to link world.");
+            } finally {
+                setPendingAction(null);
             }
         });
     };
@@ -82,6 +87,7 @@ export function ProjectWorldLinkManager({
     const markOpened = (linkedSceneId: string) => {
         setError(null);
         setMessage(null);
+        setPendingAction("reopen");
         startTransition(async () => {
             try {
                 const response = await fetch(`/api/projects/${projectId}/world-links`, {
@@ -98,10 +104,12 @@ export function ProjectWorldLinkManager({
                 if (!response.ok || !payload.success) {
                     throw new Error(payload.message || "Unable to mark world as opened.");
                 }
-                setMessage(`Recorded reopen activity for linked scene ${linkedSceneId}.`);
+                setMessage(`Recorded reopen for saved world ${linkedSceneId}.`);
                 router.refresh();
             } catch (openError) {
                 setError(openError instanceof Error ? openError.message : "Unable to record activity.");
+            } finally {
+                setPendingAction(null);
             }
         });
     };
@@ -109,6 +117,7 @@ export function ProjectWorldLinkManager({
     const downloadHandoff = (linkedSceneId: string, target: "generic" | "unreal") => {
         setError(null);
         setMessage(null);
+        setPendingAction(target === "generic" ? "handoff-generic" : "handoff-unreal");
         startTransition(async () => {
             try {
                 const response = await fetch(`/api/projects/${projectId}/world-links/${encodeURIComponent(linkedSceneId)}/handoff?target=${target}`, {
@@ -137,6 +146,8 @@ export function ProjectWorldLinkManager({
                 );
             } catch (handoffError) {
                 setError(handoffError instanceof Error ? handoffError.message : "Unable to generate handoff manifest.");
+            } finally {
+                setPendingAction(null);
             }
         });
     };
@@ -147,7 +158,7 @@ export function ProjectWorldLinkManager({
                 <div className="flex flex-wrap items-start justify-between gap-4">
                     <div className="max-w-3xl">
                         <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-cyan-200/70">World links</p>
-                        <h3 className="mt-2 text-lg font-medium text-white">Attach or reopen real worlds inside the project layer</h3>
+                        <h3 className="mt-2 text-lg font-medium text-white">Attach or reopen saved worlds inside the project record</h3>
                         <p className="mt-3 text-sm leading-7 text-neutral-400">
                             Linking a scene here records project ownership in the platform layer. Conflicting links are rejected so this page cannot bypass existing scene ownership or membership truth.
                         </p>
@@ -157,7 +168,7 @@ export function ProjectWorldLinkManager({
                     </div>
                     <div className="flex flex-wrap gap-2">
                         <StatusBadge label={`${worldLinks.length} linked`} tone={worldLinks.length > 0 ? "success" : "neutral"} />
-                        <StatusBadge label={canAccessMvp ? "Workspace shell available" : "Workspace shell blocked"} tone={canAccessMvp ? "success" : "warning"} />
+                        <StatusBadge label={canAccessMvp ? "Saved-world access available" : "Saved-world access blocked"} tone={canAccessMvp ? "success" : "warning"} />
                     </div>
                 </div>
 
@@ -166,23 +177,23 @@ export function ProjectWorldLinkManager({
                         value={sceneId}
                         onChange={(event) => setSceneId(event.target.value)}
                         placeholder="scene_34dc4347"
-                        disabled={isPending}
+                        disabled={isBusy}
                         className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white outline-none transition-colors placeholder:text-neutral-600 focus:border-cyan-300/40"
                     />
                     <input
                         value={environmentLabel}
                         onChange={(event) => setEnvironmentLabel(event.target.value)}
                         placeholder="Hero lobby preview"
-                        disabled={isPending}
+                        disabled={isBusy}
                         className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white outline-none transition-colors placeholder:text-neutral-600 focus:border-cyan-300/40"
                     />
                     <button
                         type="button"
                         onClick={submitLink}
-                        disabled={isPending || !sceneId.trim()}
+                        disabled={isBusy || !sceneId.trim()}
                         className="rounded-2xl bg-white px-5 py-3 text-sm font-semibold text-black transition-colors hover:bg-neutral-200 disabled:cursor-not-allowed disabled:opacity-60"
                     >
-                        {isPending ? "Working..." : "Link world"}
+                        {pendingAction === "link" ? "Linking world..." : "Attach world record"}
                     </button>
                 </div>
 
@@ -191,10 +202,10 @@ export function ProjectWorldLinkManager({
                         type="checkbox"
                         checked={makePrimary}
                         onChange={(event) => setMakePrimary(event.target.checked)}
-                        disabled={isPending}
+                        disabled={isBusy}
                         className="h-4 w-4 rounded border-white/20 bg-transparent"
                     />
-                    Set as primary world link
+                    Set as primary world record
                 </label>
 
                 {message ? <p className="mt-4 rounded-2xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">{message}</p> : null}
@@ -224,33 +235,33 @@ export function ProjectWorldLinkManager({
                                     <OpenWorkspaceButton
                                         projectId={projectId}
                                         sceneId={worldLink.sceneId}
-                                        label={canAccessMvp ? "Open workspace shell" : "Workspace shell unavailable"}
+                                        label={canAccessMvp ? "Open saved world" : "Saved-world access unavailable"}
                                         disabled={!canAccessMvp}
                                         variant="secondary"
                                     />
                                     <button
                                         type="button"
-                                        disabled={isPending}
+                                        disabled={isBusy}
                                         onClick={() => markOpened(worldLink.sceneId)}
                                         className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-sm font-medium text-white transition-colors hover:border-white/20 hover:bg-white/[0.08] disabled:opacity-60"
                                     >
-                                        Record external reopen
+                                        {pendingAction === "reopen" ? "Recording reopen..." : "Record reopen in history"}
                                     </button>
                                     <button
                                         type="button"
-                                        disabled={isPending}
+                                        disabled={isBusy}
                                         onClick={() => downloadHandoff(worldLink.sceneId, "generic")}
                                         className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-sm font-medium text-white transition-colors hover:border-white/20 hover:bg-white/[0.08] disabled:opacity-60"
                                     >
-                                        Generic handoff
+                                        {pendingAction === "handoff-generic" ? "Exporting..." : "Export generic handoff"}
                                     </button>
                                     <button
                                         type="button"
-                                        disabled={isPending}
+                                        disabled={isBusy}
                                         onClick={() => downloadHandoff(worldLink.sceneId, "unreal")}
                                         className="rounded-2xl border border-cyan-300/20 bg-cyan-400/10 px-4 py-2.5 text-sm font-medium text-cyan-50 transition-colors hover:border-cyan-200/30 hover:bg-cyan-400/15 disabled:opacity-60"
                                     >
-                                        Unreal handoff
+                                        {pendingAction === "handoff-unreal" ? "Exporting..." : "Export Unreal handoff"}
                                     </button>
                                 </div>
                             </div>

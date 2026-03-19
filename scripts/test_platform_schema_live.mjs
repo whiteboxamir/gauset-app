@@ -115,10 +115,21 @@ const expectedColumns = {
 const expectedRoutines = [
     "claim_project_world_link",
     "create_studio_workspace",
+    "finalize_workspace_invitation",
     "handle_auth_user_created",
     "platform_allocate_studio_slug",
     "platform_slugify_text",
     "set_updated_at",
+];
+
+const expectedRoutineSignatures = [
+    "public.claim_project_world_link(uuid,text,text,boolean,uuid)",
+    "public.create_studio_workspace(uuid,text,text,text,text,text)",
+    "public.finalize_workspace_invitation(uuid,text)",
+    "public.handle_auth_user_created()",
+    "public.platform_allocate_studio_slug(text)",
+    "public.platform_slugify_text(text)",
+    "public.set_updated_at()",
 ];
 
 const expectedIndexes = [
@@ -283,13 +294,36 @@ try {
         .sort();
     const expectedMigrationVersions = migrationFiles.map((file) => file.split("_")[0]);
 
-    const [migrationMetadata, tableRows, columnRows, routineRows, indexRows, triggerRows, planRows, duplicateOwnerRows, missingClaimTimestampRows, functionDefRows] = await Promise.all([
+    const [migrationMetadata, tableRows, columnRows, routineRows, routinePrivilegeRows, indexRows, triggerRows, planRows, duplicateOwnerRows, missingClaimTimestampRows, functionDefRows] = await Promise.all([
         loadAppliedMigrationVersions(),
-        runQuery("select table_name from information_schema.tables where table_schema = 'public' and table_type = 'BASE TABLE' order by table_name"),
+        runQuery(`
+            select
+                c.relname as table_name,
+                c.relrowsecurity as rls_enabled
+            from pg_class as c
+            join pg_namespace as n
+                on n.oid = c.relnamespace
+            where n.nspname = 'public'
+              and c.relkind = 'r'
+            order by c.relname
+        `),
         runQuery(
             "select table_name, column_name, data_type, is_nullable, column_default from information_schema.columns where table_schema = 'public' order by table_name, ordinal_position",
         ),
         runQuery("select routine_name from information_schema.routines where routine_schema = 'public' order by routine_name"),
+        runQuery(`
+            select
+                p.proname as routine_name,
+                p.oid::regprocedure::text as routine_signature,
+                has_function_privilege('anon', p.oid, 'EXECUTE') as anon_execute,
+                has_function_privilege('authenticated', p.oid, 'EXECUTE') as authenticated_execute,
+                has_function_privilege('service_role', p.oid, 'EXECUTE') as service_role_execute
+            from pg_proc as p
+            join pg_namespace as n
+                on n.oid = p.pronamespace
+            where n.nspname = 'public'
+            order by p.proname, p.oid::regprocedure::text
+        `),
         runQuery("select indexname, indexdef from pg_indexes where schemaname = 'public' order by indexname"),
         runQuery("select trigger_name, event_object_schema from information_schema.triggers order by trigger_name"),
         runQuery(`select
@@ -350,6 +384,11 @@ try {
         report.failures.push(`Missing expected public table(s): ${missingTables.join(", ")}.`);
     }
 
+    const rlsDisabledTables = tableRows.filter((row) => !row.rls_enabled).map((row) => row.table_name);
+    if (rlsDisabledTables.length > 0) {
+        report.failures.push(`Public table(s) missing RLS: ${rlsDisabledTables.join(", ")}.`);
+    }
+
     const actualColumnsByTable = new Map();
     for (const row of columnRows) {
         const columns = actualColumnsByTable.get(row.table_name) || [];
@@ -395,6 +434,29 @@ try {
     const missingRoutines = listMissing(actualRoutines, expectedRoutines);
     if (missingRoutines.length > 0) {
         report.failures.push(`Missing expected function(s): ${missingRoutines.join(", ")}.`);
+    }
+
+    const actualRoutineSignatures = routinePrivilegeRows.map((row) => row.routine_signature);
+    const missingRoutineSignatures = listMissing(actualRoutineSignatures, expectedRoutineSignatures);
+    if (missingRoutineSignatures.length > 0) {
+        report.failures.push(`Missing expected function signature(s): ${missingRoutineSignatures.join(", ")}.`);
+    }
+
+    const publiclyExecutableRoutines = routinePrivilegeRows.filter((row) => row.anon_execute || row.authenticated_execute);
+    if (publiclyExecutableRoutines.length > 0) {
+        report.failures.push(
+            `Public function execute grants remain exposed: ${publiclyExecutableRoutines
+                .map((row) => `${row.routine_signature} (anon=${row.anon_execute}, authenticated=${row.authenticated_execute})`)
+                .join(", ")}.`,
+        );
+    }
+
+    const missingServiceRoleRoutineGrants = expectedRoutineSignatures.filter((signature) => {
+        const row = routinePrivilegeRows.find((entry) => entry.routine_signature === signature);
+        return row ? !row.service_role_execute : false;
+    });
+    if (missingServiceRoleRoutineGrants.length > 0) {
+        report.failures.push(`service_role lost execute on function(s): ${missingServiceRoleRoutineGrants.join(", ")}.`);
     }
 
     const actualIndexes = indexRows.map((row) => row.indexname);
@@ -496,12 +558,16 @@ try {
             expectedCount: expectedTables.length,
             actualCount: actualTables.length,
             missingTables,
+            rlsDisabledTables,
         },
         columns: {
             missingColumns,
         },
         routines: {
             missingRoutines,
+            missingRoutineSignatures,
+            publiclyExecutableRoutines,
+            missingServiceRoleRoutineGrants,
         },
         indexes: {
             missingIndexes,

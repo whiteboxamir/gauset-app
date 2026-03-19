@@ -34,6 +34,11 @@ export default function LeftPanel({
         launchBrief,
         launchReferences,
         launchProviderId,
+        launchSourceKind,
+        hasWorldContent,
+        hasSavedVersion,
+        isAdvancedDensityEnabled,
+        journeyStage,
     } = useMvpWorkspaceSession();
     const intake = useMvpWorkspaceIntakeController({
         setActiveScene,
@@ -51,6 +56,113 @@ export default function LeftPanel({
         launchProviderId,
     });
     const showCondensedOfflineState = intake.backendMode === "offline" && !intake.selectedUpload && (intake.captureSession?.frame_count ?? 0) === 0;
+    const showStudioGeneration = isAdvancedDensityEnabled || journeyStage !== "start";
+    const allowAssetActions = isAdvancedDensityEnabled;
+    const previewButtonLabel = hasWorldContent ? "Refresh world preview" : "Build first world";
+    const hasActiveIntake = intake.uploads.length > 0 || (intake.captureSession?.frame_count ?? 0) > 0;
+
+    const captureWorkspace = (
+        <LeftPanelCaptureWorkspace
+            addSelectedToCaptureSet={intake.addSelectedToCaptureSet}
+            allowAssetActions={allowAssetActions}
+            assetCapability={intake.assetCapability}
+            backendMode={intake.backendMode}
+            backendWritesDisabled={intake.backendWritesDisabled}
+            captureBlockers={intake.captureBlockers}
+            captureDuplicateRatioPercent={intake.captureDuplicateRatioPercent}
+            captureNextActions={intake.captureNextActions}
+            captureQualitySummary={intake.captureQualitySummary}
+            captureSession={intake.captureSession}
+            captureSetBlocked={intake.captureSetBlocked}
+            captureUniqueFrameCount={intake.captureUniqueFrameCount}
+            errorText={intake.errorText}
+            generateAsset={intake.generateAsset}
+            generatePreview={intake.generatePreview}
+            isGeneratingAsset={intake.isGeneratingAsset}
+            isGeneratingPreview={intake.isGeneratingPreview}
+            isStartingReconstruction={intake.isStartingReconstruction}
+            isUpdatingCapture={intake.isUpdatingCapture}
+            minimumCaptureImages={intake.minimumCaptureImages}
+            previewCapability={intake.previewCapability}
+            recommendedCaptureImages={intake.recommendedCaptureImages}
+            reconstructionAvailable={intake.reconstructionAvailable}
+            reconstructionCapability={intake.reconstructionCapability}
+            reconstructionButtonLabel={intake.reconstructionButtonLabel}
+            selectedUpload={intake.selectedUpload}
+            selectedUploadAnalysis={intake.selectedUploadAnalysis}
+            selectedUploadId={intake.selectedUploadId}
+            setSelectedUploadId={intake.setSelectedUploadId}
+            startReconstruction={intake.startReconstruction}
+            statusText={intake.statusText}
+            uploads={intake.uploads}
+            previewButtonLabel={previewButtonLabel}
+        />
+    );
+
+    const importSection = (
+        <LeftPanelImportSection
+            backendMode={intake.backendMode}
+            backendWritesDisabled={intake.backendWritesDisabled}
+            backendWritesDisabledMessage={intake.backendWritesDisabledMessage}
+            isUploading={intake.isUploading}
+            reconstructionAvailable={intake.reconstructionAvailable}
+            triggerFilePicker={intake.triggerFilePicker}
+        />
+    );
+
+    const advancedSourceSection = (
+        <details className="rounded-[22px] border border-white/8 bg-white/[0.02]">
+            <summary className="cursor-pointer list-none px-4 py-3 marker:content-none">
+                <div className="flex items-center justify-between gap-3">
+                    <div>
+                        <p className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">
+                            {showStudioGeneration ? "Optional source generation" : "Secondary source option"}
+                        </p>
+                        <p className="mt-1 text-sm text-white">
+                            Prompt-generated stills stay available, but the saved world record still leads the workflow.
+                        </p>
+                    </div>
+                    <span className="rounded-full border border-white/8 bg-black/20 px-2.5 py-1 text-[10px] uppercase tracking-[0.18em] text-neutral-400">
+                        Reveal
+                    </span>
+                </div>
+            </summary>
+            <div className="border-t border-white/8 px-4 py-4">
+                <LeftPanelGenerateSection
+                    clarityMode={clarityMode}
+                    backendMode={intake.backendMode}
+                    backendWritesDisabled={intake.backendWritesDisabled}
+                    generateAspectRatio={intake.generateAspectRatio}
+                    generateCount={intake.generateCount}
+                    generateImage={intake.generateImage}
+                    generateNegativePrompt={intake.generateNegativePrompt}
+                    generatePrompt={intake.generatePrompt}
+                    imageProviders={intake.imageProviders}
+                    isGeneratingImage={intake.isGeneratingImage}
+                    previewCapability={intake.previewCapability}
+                    providerAspectRatios={intake.providerAspectRatios}
+                    providerGenerationEnabled={intake.providerGenerationEnabled}
+                    providersLoading={intake.providersLoading}
+                    selectedModelSupportsMultiOutput={intake.selectedModelSupportsMultiOutput}
+                    selectedModelSupportsNegativePrompt={intake.selectedModelSupportsNegativePrompt}
+                    selectedModelSupportsReferences={intake.selectedModelSupportsReferences}
+                    selectedProvider={intake.selectedProvider}
+                    selectedProviderMaxOutputs={intake.selectedProviderMaxOutputs}
+                    selectedProviderMaxReferences={intake.selectedProviderMaxReferences}
+                    selectedProviderModel={intake.selectedProviderModel}
+                    selectedReferenceIds={intake.selectedReferenceIds}
+                    setGenerateAspectRatio={intake.setGenerateAspectRatio}
+                    setGenerateCount={intake.setGenerateCount}
+                    setGenerateNegativePrompt={intake.setGenerateNegativePrompt}
+                    setGeneratePrompt={intake.setGeneratePrompt}
+                    setSelectedModelId={intake.setSelectedModelId}
+                    setSelectedProviderId={intake.setSelectedProviderId}
+                    toggleReferenceSelection={intake.toggleReferenceSelection}
+                    uploads={intake.uploads}
+                />
+            </div>
+        </details>
+    );
 
     return (
         <div
@@ -76,6 +188,9 @@ export default function LeftPanel({
                 releaseGateFailureCount={intake.releaseGateFailureCount}
                 selectedUpload={intake.selectedUpload}
                 setupTruth={intake.setupTruth}
+                journeyStage={journeyStage}
+                launchProjectId={launchProjectId}
+                launchSourceKind={launchSourceKind}
             />
 
             <input
@@ -89,115 +204,12 @@ export default function LeftPanel({
 
             {!showCondensedOfflineState ? (
                 <div className="space-y-4">
-                    <div className="rounded-[18px] border border-white/8 bg-white/[0.02] p-1">
-                        <div className="mb-2 px-2 pt-1">
-                            <p className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">Intake mode</p>
-                        </div>
-                        <div className="grid grid-cols-2 gap-1">
-                            <button
-                                type="button"
-                                onClick={() => intake.setIntakeMode("import")}
-                                className={`rounded-[14px] px-4 py-2.5 text-[12px] font-medium transition-all ${
-                                    intake.intakeMode === "import"
-                                        ? "bg-white text-black shadow-[0_14px_30px_rgba(255,255,255,0.08)]"
-                                        : "text-neutral-400 hover:bg-white/[0.03] hover:text-white"
-                                }`}
-                            >
-                                Import
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => intake.setIntakeMode("generate")}
-                                className={`rounded-[14px] px-4 py-2.5 text-[12px] font-medium transition-all ${
-                                    intake.intakeMode === "generate"
-                                        ? "bg-white text-black shadow-[0_14px_30px_rgba(255,255,255,0.08)]"
-                                        : "text-neutral-400 hover:bg-white/[0.03] hover:text-white"
-                                }`}
-                            >
-                                Generate
-                            </button>
-                        </div>
-                    </div>
+                    {hasActiveIntake ? captureWorkspace : null}
+                    {importSection}
+                    {advancedSourceSection}
+                    {!hasActiveIntake ? captureWorkspace : null}
 
-                    {intake.intakeMode === "import" ? (
-                        <LeftPanelImportSection
-                            backendMode={intake.backendMode}
-                            backendWritesDisabled={intake.backendWritesDisabled}
-                            backendWritesDisabledMessage={intake.backendWritesDisabledMessage}
-                            isUploading={intake.isUploading}
-                            reconstructionAvailable={intake.reconstructionAvailable}
-                            triggerFilePicker={intake.triggerFilePicker}
-                        />
-                    ) : (
-                        <LeftPanelGenerateSection
-                            clarityMode={clarityMode}
-                            backendMode={intake.backendMode}
-                            backendWritesDisabled={intake.backendWritesDisabled}
-                            generateAspectRatio={intake.generateAspectRatio}
-                            generateCount={intake.generateCount}
-                            generateImage={intake.generateImage}
-                            generateNegativePrompt={intake.generateNegativePrompt}
-                            generatePrompt={intake.generatePrompt}
-                            imageProviders={intake.imageProviders}
-                            isGeneratingImage={intake.isGeneratingImage}
-                            previewCapability={intake.previewCapability}
-                            providerAspectRatios={intake.providerAspectRatios}
-                            providerGenerationEnabled={intake.providerGenerationEnabled}
-                            providersLoading={intake.providersLoading}
-                            selectedModelSupportsMultiOutput={intake.selectedModelSupportsMultiOutput}
-                            selectedModelSupportsNegativePrompt={intake.selectedModelSupportsNegativePrompt}
-                            selectedModelSupportsReferences={intake.selectedModelSupportsReferences}
-                            selectedProvider={intake.selectedProvider}
-                            selectedProviderMaxOutputs={intake.selectedProviderMaxOutputs}
-                            selectedProviderMaxReferences={intake.selectedProviderMaxReferences}
-                            selectedProviderModel={intake.selectedProviderModel}
-                            selectedReferenceIds={intake.selectedReferenceIds}
-                            setGenerateAspectRatio={intake.setGenerateAspectRatio}
-                            setGenerateCount={intake.setGenerateCount}
-                            setGenerateNegativePrompt={intake.setGenerateNegativePrompt}
-                            setGeneratePrompt={intake.setGeneratePrompt}
-                            setSelectedModelId={intake.setSelectedModelId}
-                            setSelectedProviderId={intake.setSelectedProviderId}
-                            toggleReferenceSelection={intake.toggleReferenceSelection}
-                            uploads={intake.uploads}
-                        />
-                    )}
-
-                    <LeftPanelCaptureWorkspace
-                        addSelectedToCaptureSet={intake.addSelectedToCaptureSet}
-                        assetCapability={intake.assetCapability}
-                        backendMode={intake.backendMode}
-                        backendWritesDisabled={intake.backendWritesDisabled}
-                        captureBlockers={intake.captureBlockers}
-                        captureDuplicateRatioPercent={intake.captureDuplicateRatioPercent}
-                        captureNextActions={intake.captureNextActions}
-                        captureQualitySummary={intake.captureQualitySummary}
-                        captureSession={intake.captureSession}
-                        captureSetBlocked={intake.captureSetBlocked}
-                        captureUniqueFrameCount={intake.captureUniqueFrameCount}
-                        errorText={intake.errorText}
-                        generateAsset={intake.generateAsset}
-                        generatePreview={intake.generatePreview}
-                        isGeneratingAsset={intake.isGeneratingAsset}
-                        isGeneratingPreview={intake.isGeneratingPreview}
-                        isStartingReconstruction={intake.isStartingReconstruction}
-                        isUpdatingCapture={intake.isUpdatingCapture}
-                        minimumCaptureImages={intake.minimumCaptureImages}
-                        previewCapability={intake.previewCapability}
-                        recommendedCaptureImages={intake.recommendedCaptureImages}
-                        reconstructionAvailable={intake.reconstructionAvailable}
-                        reconstructionCapability={intake.reconstructionCapability}
-                        reconstructionButtonLabel={intake.reconstructionButtonLabel}
-                        selectedUpload={intake.selectedUpload}
-                        selectedUploadAnalysis={intake.selectedUploadAnalysis}
-                        selectedUploadId={intake.selectedUploadId}
-                        setSelectedUploadId={intake.setSelectedUploadId}
-                        startReconstruction={intake.startReconstruction}
-                        statusText={intake.statusText}
-                        uploads={intake.uploads}
-                    />
-
-                    <LeftPanelActivityLog jobs={intake.jobs} />
+                    {hasSavedVersion || isAdvancedDensityEnabled ? <LeftPanelActivityLog jobs={intake.jobs} /> : null}
                 </div>
             ) : null}
         </div>

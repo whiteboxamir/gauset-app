@@ -67,10 +67,18 @@ export function useMvpWorkspaceHudController({
         }));
     }, []);
 
+    const toggleAdvancedMode = useCallback(() => {
+        setHudState((previous) => ({
+            ...previous,
+            advancedMode: !previous.advancedMode,
+        }));
+    }, []);
+
     return {
         hudState,
         toggleLeftRail,
         toggleRightRail,
         toggleDirectorHud,
+        toggleAdvancedMode,
     };
 }

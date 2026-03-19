@@ -128,11 +128,13 @@ function inferProductionReadiness(lane: string | null, blockers: string[], deliv
 }
 
 function resolvePackageFiles({
+    projectId,
     sceneId,
     metadata,
     environment,
     sceneGraph,
 }: {
+    projectId: string | null;
     sceneId: string | null;
     metadata: Record<string, unknown> | null;
     environment: Record<string, unknown> | null;
@@ -168,7 +170,12 @@ function resolvePackageFiles({
 
     const entrypoints: Record<string, string> = {};
     if (sceneId) {
-        entrypoints.workspace = `/mvp?scene=${encodeURIComponent(sceneId)}`;
+        const baseParams = new URLSearchParams();
+        baseParams.set("scene", sceneId);
+        if (projectId) {
+            baseParams.set("project", projectId);
+        }
+        entrypoints.workspace = `/mvp?${baseParams.toString()}`;
         entrypoints.review = `/mvp/review?scene=${encodeURIComponent(sceneId)}`;
     }
     if (files.metadata) {
@@ -221,18 +228,21 @@ export function deriveWorldIngestRecord({
         readWorldIngestRecord(splatMetadata?.ingestRecord);
 
     if (candidateRecord) {
+        const persistedProjectId = candidateRecord.workspace_binding.project_id;
+        const persistedSceneId = candidateRecord.workspace_binding.scene_id;
+        const persistedVersionId = candidateRecord.versioning.version_id;
         return {
             ...candidateRecord,
             scene_document: candidateRecord.scene_document ?? normalizedSceneDocument ?? null,
             compatibility_scene_graph: candidateRecord.compatibility_scene_graph ?? sceneGraphRecord ?? null,
             workspace_binding: {
                 ...candidateRecord.workspace_binding,
-                project_id: readProjectId(projectId) ?? candidateRecord.workspace_binding.project_id,
-                scene_id: readString(sceneId) ?? candidateRecord.workspace_binding.scene_id,
+                project_id: persistedProjectId ?? readProjectId(projectId),
+                scene_id: persistedSceneId ?? readString(sceneId),
             },
             versioning: {
-                version_id: readString(versionId) ?? candidateRecord.versioning.version_id,
-                version_locked: Boolean(readString(versionId) ?? candidateRecord.versioning.version_id),
+                version_id: persistedVersionId ?? readString(versionId),
+                version_locked: Boolean(persistedVersionId ?? readString(versionId)),
             },
         };
     }
@@ -266,6 +276,7 @@ export function deriveWorldIngestRecord({
         ]),
     );
     const { files, entrypoints } = resolvePackageFiles({
+        projectId: readProjectId(projectId),
         sceneId: normalizedSceneId,
         metadata: environmentMetadata ?? splatMetadata,
         environment,
@@ -380,15 +391,43 @@ export function buildDownstreamHandoffManifest({
 }) {
     const compatibilitySceneGraph =
         asRecord(sceneGraph) ?? serializeSceneDocumentToNormalizedPersistedSceneGraph(sceneDocument);
+    const normalizedProjectId = readProjectId(projectId);
+    const normalizedVersionId = readString(versionId);
+    if (!normalizedVersionId) {
+        throw new Error("A saved version is required before downstream handoff.");
+    }
+
     const resolvedIngestRecord =
         ingestRecord ??
         deriveWorldIngestRecord({
             sceneId,
-            versionId,
-            projectId,
+            versionId: normalizedVersionId,
+            projectId: normalizedProjectId,
             sceneDocument,
             sceneGraph: compatibilitySceneGraph,
         });
+    const persistedProjectId = resolvedIngestRecord?.workspace_binding.project_id ?? null;
+    const persistedSceneId = resolvedIngestRecord?.workspace_binding.scene_id ?? null;
+    const persistedVersionId = resolvedIngestRecord?.versioning.version_id ?? null;
+    if (persistedSceneId && persistedSceneId !== sceneId) {
+        throw new Error("Saved world binding does not match the requested scene.");
+    }
+    if (normalizedProjectId && persistedProjectId && persistedProjectId !== normalizedProjectId) {
+        throw new Error("Saved world binding does not match the requested project.");
+    }
+    if (persistedVersionId && persistedVersionId !== normalizedVersionId) {
+        throw new Error("Saved world version does not match the requested handoff version.");
+    }
+
+    const versionLocked = Boolean(resolvedIngestRecord?.versioning.version_locked && (persistedVersionId ?? normalizedVersionId));
+    if (!versionLocked) {
+        throw new Error("A version-locked saved world is required before downstream handoff.");
+    }
+    const shareReady = Boolean(resolvedIngestRecord?.workflow.share_ready);
+    if (!shareReady) {
+        throw new Error("A version-locked review/share state is required before downstream handoff.");
+    }
+
     const reviewRecord = asRecord(sceneDocument.review);
     const reviewApproval = asRecord(reviewRecord?.approval);
     const approvalState = readString(reviewApproval?.state);
@@ -408,16 +447,16 @@ export function buildDownstreamHandoffManifest({
         source: {
             ingest_contract: resolvedIngestRecord?.contract ?? null,
             ingest_record_id: resolvedIngestRecord?.ingest_id ?? null,
-            project_id: readProjectId(projectId) ?? resolvedIngestRecord?.workspace_binding.project_id ?? null,
+            project_id: persistedProjectId ?? normalizedProjectId,
             scene_id: sceneId,
-            version_id: versionId,
+            version_id: normalizedVersionId,
         },
         scene_document: sceneDocument,
         compatibility_scene_graph: compatibilitySceneGraph,
         review: {
             approval_state: reviewApprovalState,
-            version_locked: true,
-            share_ready: true,
+            version_locked: versionLocked,
+            share_ready: shareReady,
             share_mode: "saved_version",
         },
         truth: {
