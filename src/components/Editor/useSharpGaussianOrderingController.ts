@@ -147,12 +147,14 @@ export function useSharpGaussianOrderingController({
     isSingleImagePreview,
     opacityBoost,
     colorGain,
+    renderOrder = 0,
 }: {
     payload: SharpGaussianPayload | null;
     material: THREE.ShaderMaterial | null;
     isSingleImagePreview: boolean;
     opacityBoost: number;
     colorGain: number;
+    renderOrder?: number;
 }) {
     const { gl, size } = useThree();
     const meshRef = useRef<THREE.Mesh<THREE.InstancedBufferGeometry, THREE.ShaderMaterial> | null>(null);
@@ -250,6 +252,8 @@ export function useSharpGaussianOrderingController({
             material.uniforms.uOrderTextureReady.value = 0;
             return;
         }
+
+        mesh.renderOrder = renderOrder;
 
         let frameTranslationDelta = 0;
         let frameAngularDelta = 0;
@@ -435,7 +439,7 @@ export function useSharpGaussianOrderingController({
                   ? PREVIEW_SORT_THRESHOLD_MULTIPLIER
                   : 1;
         const pureRotationAngleThreshold = Math.max(DIRECT_SORT_ROTATION_EPSILON * 48, 0.004363323129985824) * sortThresholdMultiplier;
-        const viewMotionThreshold = Math.max(0.001, payload.sceneRadius * 0.00075) * sortThresholdMultiplier;
+        const viewMotionThreshold = Math.max(0.0008, payload.sceneRadius * 0.00055) * sortThresholdMultiplier;
         const motionForcedResortFrameBudget =
             !useCpuOrdering && !isSingleImagePreview && interactionActive
                 ? frameAngularDelta > frameAngularThreshold * 1.5

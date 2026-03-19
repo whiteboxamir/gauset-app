@@ -1,12 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
 
-const DELIVERY_SCHEMA_VERSION = 1;
+const DELIVERY_SCHEMA_VERSION = 2;
 const TARGET_POINTS_PER_CHUNK = 16_384;
 const MAX_CHUNK_OCTREE_LEVEL = 6;
 const DEFAULT_BOOTSTRAP_POINT_CAP = 640_000;
 const DEFAULT_BOOTSTRAP_POINT_FLOOR = 180_000;
 const DEFAULT_BOOTSTRAP_RATIO = 0.26;
+const TARGET_POINTS_PER_PAGE = 220_000;
 
 const PROPERTY_SIZES = {
     char: 1,
@@ -397,6 +398,75 @@ function buildSelectionIndices(chunkCodes, chunkCounts, chunkQuotas) {
     return writeOffset === selectedIndices.length ? selectedIndices : selectedIndices.subarray(0, writeOffset);
 }
 
+function buildChunkPages(chunkEntries, bootstrapQuotas, targetPointsPerPage) {
+    const pages = [];
+    let currentPage = null;
+
+    for (const entry of chunkEntries) {
+        const bootstrapCount = bootstrapQuotas.get(entry.code) ?? 0;
+        const remainingCount = Math.max(0, entry.count - bootstrapCount);
+        if (remainingCount <= 0) {
+            continue;
+        }
+
+        if (!currentPage || currentPage.pointCount >= targetPointsPerPage) {
+            currentPage = {
+                pageIndex: pages.length,
+                id: `page-${pages.length + 1}`,
+                label: `Detail page ${pages.length + 1}`,
+                role: pages.length === 0 ? "hero" : pages.length <= 2 ? "supporting" : "tail",
+                chunkCodes: [],
+                pointCount: 0,
+                chunkCount: 0,
+                priority: pages.length + 1,
+            };
+            pages.push(currentPage);
+        }
+
+        currentPage.chunkCodes.push(entry.code);
+        currentPage.pointCount += remainingCount;
+        currentPage.chunkCount += 1;
+    }
+
+    return pages;
+}
+
+function buildPageSelectionIndices(chunkCodes, bootstrapMask, pageChunkCodeSet) {
+    const selected = [];
+    for (let vertexIndex = 0; vertexIndex < chunkCodes.length; vertexIndex += 1) {
+        if (bootstrapMask[vertexIndex] === 1) {
+            continue;
+        }
+        if (pageChunkCodeSet.has(chunkCodes[vertexIndex])) {
+            selected.push(vertexIndex);
+        }
+    }
+    return Uint32Array.from(selected);
+}
+
+function writeSelectionPly({
+    parsed,
+    sourceBuffer,
+    sourcePath,
+    outputPath,
+    selectedIndices,
+}) {
+    const { vertexElement, vertexSectionOffset } = parsed;
+    const header = Buffer.from(rewriteVertexCountInHeader(parsed.headerText, selectedIndices.length), "utf8");
+    const vertexBytes = Buffer.allocUnsafe(selectedIndices.length * vertexElement.stride);
+    let writeOffset = 0;
+    for (let selectionIndex = 0; selectionIndex < selectedIndices.length; selectionIndex += 1) {
+        const sourceVertexIndex = selectedIndices[selectionIndex];
+        const sourceStart = vertexSectionOffset + sourceVertexIndex * vertexElement.stride;
+        const sourceEnd = sourceStart + vertexElement.stride;
+        sourceBuffer.copy(vertexBytes, writeOffset, sourceStart, sourceEnd);
+        writeOffset += vertexElement.stride;
+    }
+    const trailingBytes = sourceBuffer.subarray(vertexSectionOffset + vertexElement.count * vertexElement.stride);
+    fs.writeFileSync(outputPath, Buffer.concat([header, vertexBytes, trailingBytes]));
+    return fs.statSync(outputPath);
+}
+
 function synthesizeManifest({
     sceneId,
     sceneLabel,
@@ -409,6 +479,7 @@ function synthesizeManifest({
     bootstrapBytes,
     fullPointCount,
     bootstrapPointCount,
+    pages,
     rootLevel,
     chunkCount,
     renderTargets,
@@ -440,11 +511,32 @@ function synthesizeManifest({
         },
     ];
 
+    const normalizedPages = pages.map((page) => ({
+        id: page.id,
+        label: page.label,
+        role: page.role,
+        url: `./${page.filename}`,
+        codec: "ply",
+        progressive: true,
+        preferred: false,
+        bytes: page.bytes,
+        point_count: page.pointCount,
+        page_index: page.pageIndex,
+        chunk_count: page.chunkCount,
+        priority: page.priority,
+        focus_center: page.focusCenter,
+        focus_radius: page.focusRadius,
+        sticky: page.role === "hero",
+        preload: page.role === "hero" || page.role === "supporting",
+        eviction_priority: page.role === "tail" ? 3 : page.role === "supporting" ? 2 : 1,
+    }));
+
     return {
         manifest_id: manifestId,
         manifest_first: true,
         bootstrap_variant: "bootstrap",
         full_variant: "full",
+        page_count: normalizedPages.length,
         summary_url: `./${path.basename(summaryUrl)}`,
         source_format: "sharp_ply_chunk_bootstrap",
         delivery: {
@@ -456,17 +548,20 @@ function synthesizeManifest({
             bootstrap_variant: "bootstrap",
             full_variant: "full",
             runtime_variants: variants,
+            pages: normalizedPages,
             chunking: {
                 mode: "spatial_octree",
                 root_level: rootLevel,
                 target_points_per_chunk: TARGET_POINTS_PER_CHUNK,
                 chunk_count: chunkCount,
+                page_count: normalizedPages.length,
                 summary_url: `./${path.basename(summaryUrl)}`,
             },
             render_targets: renderTargets,
         },
         runtime_variants: variants,
         variants,
+        pages: normalizedPages,
     };
 }
 
@@ -475,6 +570,7 @@ function mergeDeliveryIntoMetadata({
     manifestUrl,
     manifestId,
     variants,
+    pages = [],
     sceneLabel,
     fullPointCount,
     bootstrapPointCount,
@@ -508,12 +604,14 @@ function mergeDeliveryIntoMetadata({
     nextDelivery.manifest_first = true;
     nextDelivery.runtime_variant = "full";
     nextDelivery.runtime_variants = variants;
+    nextDelivery.pages = pages;
     nextDelivery.render_targets = nextRenderTargets;
     nextDelivery.chunking = {
         mode: "spatial_octree",
         root_level: rootLevel,
         target_points_per_chunk: TARGET_POINTS_PER_CHUNK,
         chunk_count: chunkCount,
+        page_count: Array.isArray(variants) ? Math.max(0, variants.filter((variant) => variant?.role === "page").length) : undefined,
     };
 
     nextMetadata.manifest_url = manifestUrl;
@@ -521,6 +619,7 @@ function mergeDeliveryIntoMetadata({
     nextMetadata.manifest_first = true;
     nextMetadata.runtime_variant = "full";
     nextMetadata.runtime_variants = variants;
+    nextMetadata.delivery_pages = pages;
     nextMetadata.rendering = nextRendering;
     nextMetadata.delivery = nextDelivery;
     nextMetadata.splat_manifest = {
@@ -528,6 +627,7 @@ function mergeDeliveryIntoMetadata({
         manifest_id: manifestId,
         manifest_first: true,
         runtime_variants: variants,
+        pages,
     };
 
     return nextMetadata;
@@ -551,6 +651,7 @@ export function ensureSceneDeliveryBundle({
     manifestFilename = "delivery-manifest.json",
     summaryFilename = "delivery-summary.json",
     metadataFilename = "metadata.json",
+    pageFilenamePrefix = "page",
     sceneLabel = "Scene",
     bootstrapPointCount = null,
 } = {}) {
@@ -585,6 +686,7 @@ export function ensureSceneDeliveryBundle({
                     manifestUrl,
                     manifestId,
                     variants,
+                    pages: Array.isArray(summary?.pages) ? summary.pages : [],
                     sceneLabel,
                     fullPointCount: layout.vertexCount,
                     bootstrapPointCount: resolvedBootstrapPointCount,
@@ -679,21 +781,79 @@ export function ensureSceneDeliveryBundle({
         .sort((left, right) => left.code - right.code);
     const quotas = distributeChunkQuotas(chunkEntries, resolvedBootstrapPointCount, vertexCount);
     const selectedIndices = buildSelectionIndices(chunkCodes, chunkCounts, quotas);
-
-    const bootstrapHeader = Buffer.from(rewriteVertexCountInHeader(parsed.headerText, selectedIndices.length), "utf8");
-    const bootstrapVertexBytes = Buffer.allocUnsafe(selectedIndices.length * vertexElement.stride);
-    let writeOffset = 0;
+    const bootstrapMask = new Uint8Array(vertexCount);
     for (let selectionIndex = 0; selectionIndex < selectedIndices.length; selectionIndex += 1) {
-        const sourceVertexIndex = selectedIndices[selectionIndex];
-        const sourceStart = vertexSectionOffset + sourceVertexIndex * vertexElement.stride;
-        const sourceEnd = sourceStart + vertexElement.stride;
-        buffer.copy(bootstrapVertexBytes, writeOffset, sourceStart, sourceEnd);
-        writeOffset += vertexElement.stride;
+        bootstrapMask[selectedIndices[selectionIndex]] = 1;
     }
-    const trailingBytes = buffer.subarray(vertexSectionOffset + vertexCount * vertexElement.stride);
-    fs.writeFileSync(bootstrapPath, Buffer.concat([bootstrapHeader, bootstrapVertexBytes, trailingBytes]));
-
-    const bootstrapStats = fs.statSync(bootstrapPath);
+    const bootstrapStats = writeSelectionPly({
+        parsed,
+        sourceBuffer: buffer,
+        sourcePath,
+        outputPath: bootstrapPath,
+        selectedIndices,
+    });
+    const chunkPages = buildChunkPages(chunkEntries, quotas, TARGET_POINTS_PER_PAGE);
+    const pageOutputs = chunkPages.map((page) => {
+        const pageFilename = `${pageFilenamePrefix}-${String(page.pageIndex + 1).padStart(2, "0")}.ply`;
+        const pagePath = path.join(resolvedEnvironmentDir, pageFilename);
+        const pageSelectionIndices = buildPageSelectionIndices(chunkCodes, bootstrapMask, new Set(page.chunkCodes));
+        let centerX = 0;
+        let centerY = 0;
+        let centerZ = 0;
+        let minPageX = Number.POSITIVE_INFINITY;
+        let minPageY = Number.POSITIVE_INFINITY;
+        let minPageZ = Number.POSITIVE_INFINITY;
+        let maxPageX = Number.NEGATIVE_INFINITY;
+        let maxPageY = Number.NEGATIVE_INFINITY;
+        let maxPageZ = Number.NEGATIVE_INFINITY;
+        for (let selectionIndex = 0; selectionIndex < pageSelectionIndices.length; selectionIndex += 1) {
+            const vertexIndex = pageSelectionIndices[selectionIndex];
+            const positionOffset = vertexIndex * 3;
+            const x = positions[positionOffset + 0];
+            const y = positions[positionOffset + 1];
+            const z = positions[positionOffset + 2];
+            centerX += x;
+            centerY += y;
+            centerZ += z;
+            minPageX = Math.min(minPageX, x);
+            minPageY = Math.min(minPageY, y);
+            minPageZ = Math.min(minPageZ, z);
+            maxPageX = Math.max(maxPageX, x);
+            maxPageY = Math.max(maxPageY, y);
+            maxPageZ = Math.max(maxPageZ, z);
+        }
+        const pagePointCount = pageSelectionIndices.length;
+        const focusCenter =
+            pagePointCount > 0
+                ? [centerX / pagePointCount, centerY / pagePointCount, centerZ / pagePointCount]
+                : [0, 0, 0];
+        const focusRadius =
+            pagePointCount > 0
+                ? Math.max(
+                      0.1,
+                      Math.hypot(maxPageX - minPageX, maxPageY - minPageY, maxPageZ - minPageZ) * 0.5,
+                  )
+                : 0.1;
+        const pageStats = writeSelectionPly({
+            parsed,
+            sourceBuffer: buffer,
+            sourcePath,
+            outputPath: pagePath,
+            selectedIndices: pageSelectionIndices,
+        });
+        return {
+            ...page,
+            filename: pageFilename,
+            path: pagePath,
+            bytes: pageStats.size,
+            pointCount: pagePointCount,
+            focusCenter,
+            focusRadius,
+            sticky: page.role === "hero",
+            preload: page.role === "hero" || page.role === "supporting",
+            evictionPriority: page.role === "tail" ? 3 : page.role === "supporting" ? 2 : 1,
+        };
+    });
     const renderTargets = {
         preferred_point_budget: vertexCount,
         bootstrap_point_budget: selectedIndices.length,
@@ -710,6 +870,7 @@ export function ensureSceneDeliveryBundle({
         bootstrapBytes: bootstrapStats.size,
         fullPointCount: vertexCount,
         bootstrapPointCount: selectedIndices.length,
+        pages: pageOutputs,
         rootLevel,
         chunkCount: chunkEntries.length,
         renderTargets,
@@ -732,9 +893,23 @@ export function ensureSceneDeliveryBundle({
         bootstrap_point_count: selectedIndices.length,
         root_level: rootLevel,
         chunk_count: chunkEntries.length,
+        page_count: pageOutputs.length,
         chunk_center: boundsCenter(bounds),
         chunk_bounds: bounds,
         runtime_variants: manifest.runtime_variants,
+        pages: pageOutputs.map((page) => ({
+            id: page.id,
+            filename: page.filename,
+            point_count: page.pointCount,
+            bytes: page.bytes,
+            priority: page.priority,
+            chunk_count: page.chunkCount,
+            focus_center: page.focusCenter,
+            focus_radius: page.focusRadius,
+            sticky: page.sticky,
+            preload: page.preload,
+            eviction_priority: page.evictionPriority,
+        })),
     };
     fs.writeFileSync(summaryPath, `${JSON.stringify(summary, null, 2)}\n`);
 
@@ -744,6 +919,7 @@ export function ensureSceneDeliveryBundle({
         manifestUrl,
         manifestId,
         variants: manifest.runtime_variants,
+        pages: manifest.pages,
         sceneLabel,
         fullPointCount: vertexCount,
         bootstrapPointCount: selectedIndices.length,

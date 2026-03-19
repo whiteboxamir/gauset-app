@@ -61,16 +61,30 @@ export interface ViewerRuntimeDiagnostics {
 
 type ViewerDeliveryRuntimeState = {
     stagedDeliveryObserved: boolean;
+    streamingObserved: boolean;
     upgradePending: boolean;
     activeVariantLabel: string | null;
     upgradeVariantLabel: string | null;
+    residentLayerCount: number;
+    residentPointCount: number;
+    refinePagesLoaded: number;
+    refinePagesPending: number;
+    deliveryProgressFraction: number;
+    evictions: number;
 };
 
 const DEFAULT_VIEWER_DELIVERY_RUNTIME_STATE: ViewerDeliveryRuntimeState = {
     stagedDeliveryObserved: false,
+    streamingObserved: false,
     upgradePending: false,
     activeVariantLabel: null,
     upgradeVariantLabel: null,
+    residentLayerCount: 0,
+    residentPointCount: 0,
+    refinePagesLoaded: 0,
+    refinePagesPending: 0,
+    deliveryProgressFraction: 0,
+    evictions: 0,
 };
 
 function isSingleImagePreviewEnvironment(metadata: unknown) {
@@ -153,21 +167,21 @@ function resolveViewerOperationalLane(
 
 function resolveViewerRuntimeLabel(mode: ViewerRuntimeMode, renderSourceMode: EnvironmentRenderSourceMode) {
     if (mode === "webgl_live") {
-        return renderSourceMode === "sharp" ? "WebGL2 live" : "Viewer live";
+        return renderSourceMode === "sharp" ? "Live scene" : "Viewer live";
     }
     if (mode === "interactive_projection") {
-        return "Interactive projection";
+        return "Guided preview";
     }
     if (mode === "interactive_fallback") {
-        return "Interactive fallback";
+        return "Reference view";
     }
     if (mode === "projection_only") {
-        return "Projection only";
+        return "Poster first";
     }
     if (mode === "hard_fallback") {
-        return "Viewer fallback";
+        return "Protected view";
     }
-    return "Viewer booting";
+    return "Preparing live scene";
 }
 
 function resolveViewerRuntimeDetail({
@@ -185,24 +199,24 @@ function resolveViewerRuntimeDetail({
         return fallbackMessage;
     }
     if (mode === "interactive_fallback") {
-        return "Using the preview image because the live renderer could not start on this host.";
+        return "Keeping the scene available with a trusted reference view.";
     }
     if (mode === "interactive_projection") {
-        return "Using the preview image as an interactive directing surface until a renderable splat is available.";
+        return "Using the poster as a guided surface until live detail is ready.";
     }
     if (mode === "projection_only") {
-        return "Showing the preview projection without a live 3D canvas.";
+        return "Holding the poster while the live scene proves stable.";
     }
     if (mode === "hard_fallback") {
-        return "The live viewer renderer is unavailable on this host.";
+        return "Keeping the experience stable on this browser.";
     }
     if (mode === "webgl_live") {
-        return renderSourceMode === "sharp" ? "Sharp gaussian rendering is active." : "Viewer render surface is active.";
+        return renderSourceMode === "sharp" ? "The live scene is active and budgeted for this device." : "Viewer render surface is active.";
     }
     if (!hasRenderableEnvironment) {
-        return "Waiting for renderable scene content before the live viewer boots.";
+        return "Waiting for scene content before the live view opens.";
     }
-    return "Waiting for the live viewer surface to initialize.";
+    return "Preparing the live scene.";
 }
 
 function resolveSingleImagePreviewCamera(metadata: any): (CameraPose & { up?: [number, number, number] }) | null {
@@ -600,11 +614,19 @@ export function useThreeOverlayViewerRuntimeController({
             setIsViewerReady(isLiveReady);
             setDeliveryRuntimeState((current) => ({
                 stagedDeliveryObserved: current.stagedDeliveryObserved || Boolean(loadState.stagedDelivery),
+                streamingObserved:
+                    current.streamingObserved || (Boolean(loadState.stagedDelivery) && (loadState.refinePagesLoaded ?? 0) + (loadState.refinePagesPending ?? 0) > 0),
                 upgradePending: Boolean(loadState.upgradePending),
                 activeVariantLabel: loadState.activeVariantLabel ?? current.activeVariantLabel,
                 upgradeVariantLabel: loadState.upgradePending
                     ? loadState.upgradeVariantLabel ?? current.upgradeVariantLabel
                     : loadState.upgradeVariantLabel ?? null,
+                residentLayerCount: loadState.residentLayerCount ?? current.residentLayerCount,
+                residentPointCount: loadState.residentPointCount ?? current.residentPointCount,
+                refinePagesLoaded: loadState.refinePagesLoaded ?? current.refinePagesLoaded,
+                refinePagesPending: loadState.refinePagesPending ?? current.refinePagesPending,
+                deliveryProgressFraction: loadState.deliveryProgressFraction ?? current.deliveryProgressFraction,
+                evictions: loadState.evictions ?? current.evictions,
             }));
         },
         [viewerDecision.renderSource.mode],
@@ -631,10 +653,18 @@ export function useThreeOverlayViewerRuntimeController({
         deliveryManifestFirst: Boolean(environmentRenderState.deliveryManifestFirst),
         deliveryHasProgressiveVariants: Boolean(environmentRenderState.deliveryHasProgressiveVariants),
         deliveryHasCompressedVariants: Boolean(environmentRenderState.deliveryHasCompressedVariants),
+        deliveryHasPageStreaming: Boolean(environmentRenderState.deliveryHasPageStreaming),
         deliveryStagedObserved: deliveryRuntimeState.stagedDeliveryObserved,
+        deliveryStreamingObserved: deliveryRuntimeState.streamingObserved,
         deliveryUpgradePending: deliveryRuntimeState.upgradePending,
         deliveryActiveVariantLabel: deliveryRuntimeState.activeVariantLabel,
         deliveryUpgradeVariantLabel: deliveryRuntimeState.upgradeVariantLabel,
+        deliveryResidentLayerCount: deliveryRuntimeState.residentLayerCount,
+        deliveryResidentPointCount: deliveryRuntimeState.residentPointCount,
+        deliveryRefinePagesLoaded: deliveryRuntimeState.refinePagesLoaded,
+        deliveryRefinePagesPending: deliveryRuntimeState.refinePagesPending,
+        deliveryProgressFraction: deliveryRuntimeState.deliveryProgressFraction,
+        deliveryEvictions: deliveryRuntimeState.evictions,
         prefersPerformanceMode,
         qualityPolicy,
         effectiveFocusRequest,

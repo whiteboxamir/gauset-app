@@ -40,6 +40,7 @@ const artifactDir = path.resolve(
     process.env.GAUSET_LOCAL_VIEWER_ARTIFACT_DIR ?? `artifacts/local-viewer/${runLabel}`,
 );
 const reportPath = path.join(artifactDir, "viewer-certification.json");
+const goldSceneRegistryPath = path.resolve(process.env.GAUSET_GOLD_SCENE_REGISTRY ?? "tests/fixtures/gold-scenes.json");
 const LOCAL_DRAFT_KEY = "gauset:mvp:draft:v1";
 
 function sleep(ms) {
@@ -242,6 +243,20 @@ async function fetchMetadata(metadataUrl) {
 }
 
 function buildDraft({ sceneId, urls, metadata, files }) {
+    let cameraViews = [];
+    let directorPath = [];
+    try {
+        if (fs.existsSync(goldSceneRegistryPath)) {
+            const registry = JSON.parse(fs.readFileSync(goldSceneRegistryPath, "utf8"));
+            const sceneEntry = Array.isArray(registry) ? registry.find((entry) => entry?.scene_id === sceneId) : null;
+            cameraViews = Array.isArray(sceneEntry?.camera_views) ? sceneEntry.camera_views : [];
+            directorPath = Array.isArray(sceneEntry?.director_path) ? sceneEntry.director_path : [];
+        }
+    } catch {
+        cameraViews = [];
+        directorPath = [];
+    }
+
     return {
         activeScene: sceneId,
         sceneGraph: {
@@ -255,9 +270,9 @@ function buildDraft({ sceneId, urls, metadata, files }) {
                 demo_reference_image: metadata?.demo_reference_image ?? null,
             },
             assets: [],
-            camera_views: [],
+            camera_views: cameraViews,
             pins: [],
-            director_path: [],
+            director_path: directorPath,
             director_brief: "",
             viewer: {
                 fov: 45,
@@ -416,11 +431,12 @@ function resolveMotionVerdict(runtimeDiagnostics) {
     const adaptiveFullMs = runtimeDiagnostics.adaptiveFullMs ?? 0;
     const adaptiveTotalMs = adaptiveSafeMs + adaptiveBalancedMs + adaptiveFullMs;
     const adaptiveSafeRatio = adaptiveTotalMs > 0 ? adaptiveSafeMs / adaptiveTotalMs : 0;
+    const contextLossCount = runtimeDiagnostics.contextLossCount ?? 0;
 
-    if (frameP95Ms !== null && frameP95Ms > 66) {
+    if (frameP95Ms !== null && frameP95Ms > 50) {
         reasons.push(`frame_p95_ms:${frameP95Ms}`);
     }
-    if (frameOver50MsRatio !== null && frameOver50MsRatio > 0.05) {
+    if (frameOver50MsRatio !== null && frameOver50MsRatio > 0.02) {
         reasons.push(`slow_frame_ratio:${frameOver50MsRatio.toFixed(3)}`);
     }
     if ((runtimeDiagnostics.adaptiveSafeEntries ?? 0) > 0) {
@@ -428,6 +444,15 @@ function resolveMotionVerdict(runtimeDiagnostics) {
     }
     if (adaptiveSafeRatio > 0.2) {
         reasons.push(`adaptive_safe_ratio:${adaptiveSafeRatio.toFixed(3)}`);
+    }
+    if (contextLossCount > 0) {
+        reasons.push(`context_loss_count:${contextLossCount}`);
+    }
+    if (
+        runtimeDiagnostics.deliveryStreamingObserved &&
+        (runtimeDiagnostics.deliveryRefinePagesLoaded ?? 0) + (runtimeDiagnostics.deliveryRefinePagesPending ?? 0) <= 0
+    ) {
+        reasons.push("streaming_truth_missing");
     }
 
     if (reasons.length > 0) {
@@ -440,7 +465,8 @@ function resolveMotionVerdict(runtimeDiagnostics) {
     if (
         (runtimeDiagnostics.frameP95Ms ?? Number.POSITIVE_INFINITY) <= 33 &&
         (runtimeDiagnostics.frameOver50MsRatio ?? 1) <= 0.02 &&
-        (runtimeDiagnostics.adaptiveSafeEntries ?? 0) === 0
+        (runtimeDiagnostics.adaptiveSafeEntries ?? 0) === 0 &&
+        contextLossCount === 0
     ) {
         return {
             outcome: "premium_candidate",
@@ -750,7 +776,12 @@ async function runViewerScenario({ scenarioId, draft, sceneId, forceWebgl2Unavai
         await page.waitForTimeout(waitMs);
 
         const screenshot = screenshotPath(`${scenarioId}.png`);
-        await page.screenshot({ path: screenshot, fullPage: true });
+        const viewerSurface = page.locator('[data-testid="mvp-viewer-surface"]').first();
+        if (await viewerSurface.count()) {
+            await viewerSurface.screenshot({ path: screenshot });
+        } else {
+            await page.screenshot({ path: screenshot, fullPage: true });
+        }
         const diagnostics = await collectViewerDiagnostics(page);
         const canvasVisualSample = summarizeVisualSample(await collectCanvasVisualSample(page));
         const screenshotVisualSample = summarizeVisualSample(await samplePngVisual(screenshot));

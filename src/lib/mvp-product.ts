@@ -566,6 +566,8 @@ export function resolveEnvironmentRenderState(environment: any) {
         deliveryPreferredRuntimeVariant: splatDelivery.preferredRuntimeVariant,
         deliveryHasProgressiveVariants: splatDelivery.hasProgressiveVariants,
         deliveryHasCompressedVariants: splatDelivery.hasCompressedVariants,
+        deliveryHasPageStreaming: splatDelivery.hasPageStreaming,
+        deliveryPageVariants: splatDelivery.pageVariants,
         previewProjectionImage: previewProjectionImage || null,
         referenceImage: referenceImage || null,
         hasRenderableOutput,

@@ -289,11 +289,6 @@ vec3 applyRichColorGrade(vec3 color) {
     return clamp(mix(lifted, filmic, clamp(uFilmicMix, 0.0, 1.0)), 0.0, 1.0);
 }
 
-float stableCoverageNoise(ivec2 coords) {
-    vec2 seed = vec2(coords);
-    return fract(sin(dot(seed, vec2(12.9898, 78.233))) * 43758.5453123);
-}
-
 void main() {
     float radiusSquared = dot(vLocalCoord, vLocalCoord);
     float minorAxisPx = max(vProjectedMinorAxisPx, 0.01);
@@ -313,7 +308,8 @@ void main() {
     float gaussian = mix(softGaussian, max(coreGaussian, haloGaussian * 0.92), clamp(uCoreHaloMix, 0.0, 1.0));
     float edgeFade = 1.0 - smoothstep(1.0 - edgeWidth, 1.0 + edgeWidth, radiusSquared);
     float alpha = clamp(vAlpha * uOpacityBoost * gaussian * edgeFade, 0.0, 1.0);
-    float alphaDiscardThreshold = mix(0.0011, 0.0018, stableCoverageNoise(vTextureCoords)) * (1.0 + subPixelSoftness * 0.4);
+    float projectedCoverage = clamp(minorAxisPx / 1.35, 0.0, 1.0);
+    float alphaDiscardThreshold = mix(0.00145, 0.00085, projectedCoverage) * (1.0 + subPixelSoftness * 0.25);
 
     if (alpha < alphaDiscardThreshold) {
         discard;

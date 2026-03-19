@@ -11,11 +11,31 @@ type SharpGaussianManifestVariant = {
     progressive: boolean;
 };
 
+export type SharpGaussianManifestPage = {
+    id: string;
+    label: string | null;
+    role: string | null;
+    source: string;
+    pointCount: number | null;
+    bytes: number | null;
+    priority: number | null;
+    pageIndex: number | null;
+    chunkCount: number | null;
+    progressive: boolean;
+    focusCenter: [number, number, number] | null;
+    focusRadius: number | null;
+    sticky: boolean;
+    preload: boolean;
+    evictionPriority: number | null;
+};
+
 type SharpGaussianManifestResolution = {
     source: string;
     manifestUrl: string;
     variant: SharpGaussianManifestVariant | null;
     staged: boolean;
+    streaming: boolean;
+    refinePages: SharpGaussianManifestPage[];
     upgradeSource: string | null;
     upgradeVariant: SharpGaussianManifestVariant | null;
 };
@@ -151,6 +171,42 @@ function readVariantProgressive(record: Record<string, unknown>) {
     return Boolean(record.progressive ?? record.streaming ?? record.is_progressive ?? record.isStreaming);
 }
 
+function readPageIndex(record: Record<string, unknown>) {
+    const pageIndex = Number(record.page_index ?? record.pageIndex ?? record.index ?? record.order_index);
+    return Number.isFinite(pageIndex) && pageIndex >= 0 ? pageIndex : null;
+}
+
+function readChunkCount(record: Record<string, unknown>) {
+    return asNumber(record.chunk_count ?? record.chunkCount ?? record.chunks ?? record.chunk_total);
+}
+
+function readVector3Tuple(value: unknown): [number, number, number] | null {
+    if (!Array.isArray(value) || value.length < 3) {
+        return null;
+    }
+    const x = Number(value[0]);
+    const y = Number(value[1]);
+    const z = Number(value[2]);
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+        return null;
+    }
+    return [x, y, z];
+}
+
+function readBooleanLike(value: unknown) {
+    if (typeof value === "boolean") {
+        return value;
+    }
+    if (typeof value === "number") {
+        return value !== 0;
+    }
+    if (typeof value === "string") {
+        const normalized = value.trim().toLowerCase();
+        return normalized === "true" || normalized === "1" || normalized === "yes" || normalized === "on";
+    }
+    return false;
+}
+
 function collectVariantRecords(value: unknown) {
     if (!Array.isArray(value)) {
         return [];
@@ -176,6 +232,33 @@ function normalizeVariant(record: Record<string, unknown>): SharpGaussianManifes
         maxTextureSize: readVariantMaxTextureSize(record),
         priority: readVariantPriority(record),
         progressive: readVariantProgressive(record),
+    };
+}
+
+function normalizePage(record: Record<string, unknown>): SharpGaussianManifestPage | null {
+    const source = readVariantSource(record);
+    if (!source) {
+        return null;
+    }
+
+    const id = readVariantId(record) || `page-${readPageIndex(record) ?? "x"}`;
+
+    return {
+        id,
+        label: readVariantLabel(record),
+        role: readVariantRole(record),
+        source,
+        pointCount: readVariantPointCount(record),
+        bytes: readVariantBytes(record),
+        priority: readVariantPriority(record),
+        pageIndex: readPageIndex(record),
+        chunkCount: readChunkCount(record),
+        progressive: readVariantProgressive(record),
+        focusCenter: readVector3Tuple(record.focus_center ?? record.focusCenter ?? record.center),
+        focusRadius: asNumber(record.focus_radius ?? record.focusRadius ?? record.radius),
+        sticky: readBooleanLike(record.sticky ?? record.keep_resident ?? record.keepResident),
+        preload: readBooleanLike(record.preload ?? record.hero_preload ?? record.heroPreload),
+        evictionPriority: asNumber(record.eviction_priority ?? record.evictionPriority ?? record.evict_priority),
     };
 }
 
@@ -227,6 +310,21 @@ function collectManifestVariants(manifest: Record<string, unknown>) {
     }
 
     return variants;
+}
+
+function collectManifestPages(manifest: Record<string, unknown>) {
+    const delivery = asRecord(manifest.delivery);
+
+    return [
+        ...collectVariantRecords(delivery?.pages),
+        ...collectVariantRecords(delivery?.page_variants),
+        ...collectVariantRecords(delivery?.page_assets),
+        ...collectVariantRecords(manifest.pages),
+        ...collectVariantRecords(manifest.page_variants),
+        ...collectVariantRecords(manifest.page_assets),
+    ]
+        .map(normalizePage)
+        .filter((page): page is SharpGaussianManifestPage => Boolean(page));
 }
 
 function isPlyLikeVariantSource(source: string) {
@@ -641,6 +739,8 @@ export async function resolveSharpGaussianManifestSource({
             manifestUrl: "",
             variant: null,
             staged: false,
+            streaming: false,
+            refinePages: [],
             upgradeSource: null,
             upgradeVariant: null,
         };
@@ -662,6 +762,7 @@ export async function resolveSharpGaussianManifestSource({
     }
 
     const variants = collectManifestVariants(manifest);
+    const pages = collectManifestPages(manifest);
     const delivery = asRecord(manifest.delivery);
     const preferredVariantId = readPreferredVariantPreference(manifest, delivery);
 
@@ -697,22 +798,53 @@ export async function resolveSharpGaussianManifestSource({
             manifestUrl,
             variant: null,
             staged: false,
+            streaming: false,
+            refinePages: [],
             upgradeSource: null,
             upgradeVariant: null,
         };
     }
 
+    const safePages = pages
+        .filter(
+            (page) =>
+                isPlyLikeVariantSource(page.source) &&
+                page.source !== selectedVariant.source &&
+                page.source !== initialVariant?.source,
+        )
+        .sort((left, right) => {
+            const leftPriority = left.priority ?? Number.POSITIVE_INFINITY;
+            const rightPriority = right.priority ?? Number.POSITIVE_INFINITY;
+            if (leftPriority !== rightPriority) {
+                return leftPriority - rightPriority;
+            }
+
+            const leftIndex = left.pageIndex ?? Number.POSITIVE_INFINITY;
+            const rightIndex = right.pageIndex ?? Number.POSITIVE_INFINITY;
+            if (leftIndex !== rightIndex) {
+                return leftIndex - rightIndex;
+            }
+
+            return left.id.localeCompare(right.id);
+        })
+        .map((page) => ({
+            ...page,
+            source: resolveManifestRelativeUrl(manifestUrl, page.source),
+        }));
     const stagedUpgrade = Boolean(
         initialVariant &&
             selectedVariant &&
             initialVariant.source !== selectedVariant.source &&
             hasMeaningfulStagedUpgrade(initialVariant, selectedVariant),
     );
+    const stagedStreaming = safePages.length > 0;
     const selectedSummary = formatVariantSummary(selectedVariant);
     const initialSummary = formatVariantSummary(initialVariant ?? selectedVariant);
 
     onProgress?.(
-        stagedUpgrade
+        stagedStreaming
+            ? `${initialSummary} selected for fast first light. Progressive page refinement is available after the first stable frame.`
+            : stagedUpgrade
             ? `${initialSummary} selected for fast first light. ${selectedSummary} is eligible to refine later if the browser keeps enough headroom.`
             : `${selectedSummary} selected from manifest. Loading environment splat...`,
     );
@@ -721,8 +853,10 @@ export async function resolveSharpGaussianManifestSource({
         source: resolveManifestRelativeUrl(manifestUrl, (initialVariant ?? selectedVariant).source),
         manifestUrl,
         variant: initialVariant ?? selectedVariant,
-        staged: stagedUpgrade,
-        upgradeSource: stagedUpgrade ? resolveManifestRelativeUrl(manifestUrl, selectedVariant.source) : null,
-        upgradeVariant: stagedUpgrade ? selectedVariant : null,
+        staged: stagedStreaming || stagedUpgrade,
+        streaming: stagedStreaming,
+        refinePages: safePages,
+        upgradeSource: stagedStreaming ? null : stagedUpgrade ? resolveManifestRelativeUrl(manifestUrl, selectedVariant.source) : null,
+        upgradeVariant: stagedStreaming ? null : stagedUpgrade ? selectedVariant : null,
     };
 }

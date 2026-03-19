@@ -27,6 +27,8 @@ export interface NormalizedSplatDeliveryState {
     hasBootstrapVariants: boolean;
     hasFullVariants: boolean;
     hasStagedRuntimePair: boolean;
+    pageVariants: NormalizedSplatDeliveryVariant[];
+    hasPageStreaming: boolean;
 }
 
 type EnvironmentLike = {
@@ -393,6 +395,15 @@ export function normalizeSplatDeliveryState(environment: EnvironmentLike | null 
         manifest?.runtime_variants,
         manifest?.variants,
     );
+    const { variants: pageVariants } = mergeVariants(
+        delivery?.pages,
+        delivery?.page_variants,
+        rendering?.pages,
+        rendering?.page_variants,
+        manifest?.pages,
+        manifest?.page_variants,
+        metadata?.delivery_pages,
+    );
 
     const directVariants = [
         directViewerUrl
@@ -465,5 +476,7 @@ export function normalizeSplatDeliveryState(environment: EnvironmentLike | null 
         hasBootstrapVariants,
         hasFullVariants,
         hasStagedRuntimePair: hasBootstrapVariants && hasFullVariants,
+        pageVariants,
+        hasPageStreaming: pageVariants.length > 0,
     };
 }

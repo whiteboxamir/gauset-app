@@ -160,10 +160,18 @@ function summarizeRuntimeQuality(snapshot) {
               deliveryManifestFirst: runtimeDiagnostics.deliveryManifestFirst,
               deliveryHasProgressiveVariants: runtimeDiagnostics.deliveryHasProgressiveVariants,
               deliveryHasCompressedVariants: runtimeDiagnostics.deliveryHasCompressedVariants,
+              deliveryHasPageStreaming: runtimeDiagnostics.deliveryHasPageStreaming,
               stagedDeliveryObserved: runtimeDiagnostics.deliveryStagedObserved,
+              streamingObserved: runtimeDiagnostics.deliveryStreamingObserved,
               upgradePending: runtimeDiagnostics.deliveryUpgradePending,
               activeVariantLabel: runtimeDiagnostics.deliveryActiveVariantLabel,
               upgradeVariantLabel: runtimeDiagnostics.deliveryUpgradeVariantLabel,
+              residentLayerCount: runtimeDiagnostics.deliveryResidentLayerCount,
+              residentPointCount: runtimeDiagnostics.deliveryResidentPointCount,
+              refinePagesLoaded: runtimeDiagnostics.deliveryRefinePagesLoaded,
+              refinePagesPending: runtimeDiagnostics.deliveryRefinePagesPending,
+              deliveryProgressFraction: runtimeDiagnostics.deliveryProgressFraction,
+              deliveryEvictions: runtimeDiagnostics.deliveryEvictions,
           }
         : null;
 }
@@ -515,11 +523,12 @@ function resolveMotionVerdict(runtimeQuality) {
     const adaptiveFullMs = runtimeQuality.adaptiveFullMs ?? 0;
     const adaptiveTotalMs = adaptiveSafeMs + adaptiveBalancedMs + adaptiveFullMs;
     const adaptiveSafeRatio = adaptiveTotalMs > 0 ? adaptiveSafeMs / adaptiveTotalMs : 0;
+    const contextLossCount = runtimeQuality.contextLossCount ?? 0;
 
-    if (frameP95Ms !== null && frameP95Ms > 66) {
+    if (frameP95Ms !== null && frameP95Ms > 50) {
         reasons.push(`frame_p95_ms:${frameP95Ms}`);
     }
-    if (frameOver50MsRatio !== null && frameOver50MsRatio > 0.05) {
+    if (frameOver50MsRatio !== null && frameOver50MsRatio > 0.02) {
         reasons.push(`slow_frame_ratio:${frameOver50MsRatio.toFixed(3)}`);
     }
     if ((runtimeQuality.adaptiveSafeEntries ?? 0) > 0) {
@@ -527,6 +536,12 @@ function resolveMotionVerdict(runtimeQuality) {
     }
     if (adaptiveSafeRatio > 0.2) {
         reasons.push(`adaptive_safe_ratio:${adaptiveSafeRatio.toFixed(3)}`);
+    }
+    if (contextLossCount > 0) {
+        reasons.push(`context_loss_count:${contextLossCount}`);
+    }
+    if (runtimeQuality.streamingObserved && (runtimeQuality.refinePagesLoaded ?? 0) + (runtimeQuality.refinePagesPending ?? 0) <= 0) {
+        reasons.push("streaming_truth_missing");
     }
 
     if (reasons.length > 0) {
@@ -539,7 +554,8 @@ function resolveMotionVerdict(runtimeQuality) {
     if (
         (runtimeQuality.frameP95Ms ?? Number.POSITIVE_INFINITY) <= 33 &&
         (runtimeQuality.frameOver50MsRatio ?? 1) <= 0.02 &&
-        (runtimeQuality.adaptiveSafeEntries ?? 0) === 0
+        (runtimeQuality.adaptiveSafeEntries ?? 0) === 0 &&
+        contextLossCount === 0
     ) {
         return {
             outcome: "premium_candidate",

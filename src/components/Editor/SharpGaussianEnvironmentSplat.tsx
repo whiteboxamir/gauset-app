@@ -8,19 +8,58 @@ import type { ViewerFallbackReason } from "@/lib/mvp-viewer";
 
 import { EnvironmentSplatStatus } from "./EnvironmentSplatStatus";
 import { createSharpGaussianMaterial } from "./sharpGaussianShaders";
-import type { PreviewBounds, SharpGaussianLoadState } from "./sharpGaussianShared";
+import type { PreviewBounds, SharpGaussianLoadState, SharpGaussianResidentPayload } from "./sharpGaussianShared";
 import { useSharpGaussianOrderingController } from "./useSharpGaussianOrderingController";
 import { useSharpGaussianPayloadController } from "./useSharpGaussianPayloadController";
+
+function SharpGaussianPayloadLayerMesh({
+    layer,
+    isSingleImagePreview,
+    opacityBoost,
+    colorGain,
+}: {
+    layer: SharpGaussianResidentPayload;
+    isSingleImagePreview: boolean;
+    opacityBoost: number;
+    colorGain: number;
+}) {
+    const material = useMemo(
+        () =>
+            createSharpGaussianMaterial({
+                payload: layer.payload,
+                isSingleImagePreview,
+            }),
+        [isSingleImagePreview, layer.payload],
+    );
+    const meshRef = useSharpGaussianOrderingController({
+        payload: layer.payload,
+        material,
+        isSingleImagePreview,
+        opacityBoost,
+        colorGain,
+        renderOrder: layer.role === "bootstrap" ? 0 : 100 + (layer.pageIndex ?? layer.priority),
+    });
+
+    useEffect(() => {
+        return () => {
+            material.dispose();
+        };
+    }, [material]);
+
+    return <mesh ref={meshRef} geometry={layer.payload.geometry} material={material} frustumCulled={false} />;
+}
 
 export function SharpGaussianEnvironmentSplat({
     source,
     metadata,
+    focusTarget,
     onPreviewBounds,
     onFatalError,
     onLiveStateChange,
 }: {
     source: string;
     metadata?: GeneratedEnvironmentMetadata | null;
+    focusTarget?: [number, number, number] | null;
     onPreviewBounds?: (bounds: PreviewBounds) => void;
     onFatalError?: (message: string, reason: ViewerFallbackReason) => void;
     onLiveStateChange?: (state: { isLiveReady: boolean; loadState: SharpGaussianLoadState }) => void;
@@ -29,40 +68,14 @@ export function SharpGaussianEnvironmentSplat({
     const sharpGaussian = useSharpGaussianPayloadController({
         source,
         metadata,
+        focusTarget,
         maxTextureSize: gl.capabilities.maxTextureSize,
         onPreviewBounds,
         onFatalError,
     });
-    const material = useMemo(
-        () =>
-            sharpGaussian.payload
-                ? createSharpGaussianMaterial({
-                      payload: sharpGaussian.payload,
-                      isSingleImagePreview: sharpGaussian.isSingleImagePreview,
-                  })
-                : null,
-        [sharpGaussian.isSingleImagePreview, sharpGaussian.payload],
-    );
-    const meshRef = useSharpGaussianOrderingController({
-        payload: sharpGaussian.payload,
-        material,
-        isSingleImagePreview: sharpGaussian.isSingleImagePreview,
-        opacityBoost: sharpGaussian.opacityBoost,
-        colorGain: sharpGaussian.colorGain,
-    });
-    const candidateLiveReady = sharpGaussian.loadState.phase === "ready" && Boolean(sharpGaussian.payload && material);
+    const candidateLiveReady = sharpGaussian.loadState.phase === "ready" && sharpGaussian.payloadLayers.length > 0;
     const reportedLiveStateRef = useRef<boolean | null>(null);
     const pendingLiveStateRef = useRef(false);
-
-    useEffect(() => {
-        if (!material) {
-            return;
-        }
-
-        return () => {
-            material.dispose();
-        };
-    }, [material]);
 
     useEffect(() => {
         if (!onLiveStateChange) {
@@ -95,7 +108,7 @@ export function SharpGaussianEnvironmentSplat({
         return <EnvironmentSplatStatus text={`Environment splat failed: ${sharpGaussian.loadState.message}`} tone="error" />;
     }
 
-    if (!sharpGaussian.payload || !material) {
+    if (sharpGaussian.payloadLayers.length === 0) {
         return <EnvironmentSplatStatus text={sharpGaussian.loadState.message} />;
     }
 
@@ -111,10 +124,25 @@ export function SharpGaussianEnvironmentSplat({
                         "data-upgrade-pending": sharpGaussian.loadState.upgradePending ? "true" : "false",
                         "data-active-variant-label": sharpGaussian.loadState.activeVariantLabel ?? "",
                         "data-upgrade-variant-label": sharpGaussian.loadState.upgradeVariantLabel ?? "",
+                        "data-resident-layer-count": String(sharpGaussian.loadState.residentLayerCount ?? sharpGaussian.payloadLayers.length),
+                        "data-resident-point-count": String(
+                            sharpGaussian.loadState.residentPointCount ??
+                                sharpGaussian.payloadLayers.reduce((sum, layer) => sum + layer.pointCount, 0),
+                        ),
+                        "data-refine-pages-loaded": String(sharpGaussian.loadState.refinePagesLoaded ?? 0),
+                        "data-refine-pages-pending": String(sharpGaussian.loadState.refinePagesPending ?? 0),
                     }}
                 />
             ) : null}
-            <mesh ref={meshRef} geometry={sharpGaussian.payload.geometry} material={material} frustumCulled={false} />
+            {sharpGaussian.payloadLayers.map((layer) => (
+                <SharpGaussianPayloadLayerMesh
+                    key={layer.id}
+                    layer={layer}
+                    isSingleImagePreview={sharpGaussian.isSingleImagePreview}
+                    opacityBoost={sharpGaussian.opacityBoost}
+                    colorGain={sharpGaussian.colorGain}
+                />
+            ))}
         </>
     );
 }

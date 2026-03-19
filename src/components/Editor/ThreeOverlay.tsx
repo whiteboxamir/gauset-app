@@ -447,9 +447,16 @@ const ViewerRuntimeBadge = React.memo(function ViewerRuntimeBadge({
     runtimeTelemetry: ViewerRuntimeTelemetrySnapshot;
     deliveryStatus: {
         stagedObserved: boolean;
+        streamingObserved: boolean;
         upgradePending: boolean;
         activeVariantLabel: string | null;
         upgradeVariantLabel: string | null;
+        residentLayerCount: number;
+        residentPointCount: number;
+        refinePagesLoaded: number;
+        refinePagesPending: number;
+        progressFraction: number;
+        evictions: number;
     };
 }) {
     const qualityToneClass =
@@ -474,9 +481,9 @@ const ViewerRuntimeBadge = React.memo(function ViewerRuntimeBadge({
               : qualityPolicy.label;
     const qualityDetail =
         diagnostics.operationalMode === "webgl_live" && adaptiveQualityTier === "safe"
-            ? "Runtime safeguard reduced fidelity to protect stability."
+            ? "We lowered detail to keep motion smooth."
             : diagnostics.operationalMode === "webgl_live" && adaptiveQualityTier === "balanced" && qualityPolicy.tier === "premium"
-              ? "Adaptive balancing is keeping the live renderer responsive."
+              ? "We are balancing clarity and motion to keep the scene graceful."
               : qualityPolicy.mode === "fallback"
                 ? "Stable fallback path"
                 : qualityPolicy.summary;
@@ -495,9 +502,13 @@ const ViewerRuntimeBadge = React.memo(function ViewerRuntimeBadge({
                   : "Motion guarded"
             : null;
     const deliveryBadge = deliveryStatus.upgradePending
-        ? `Refining from ${deliveryStatus.activeVariantLabel ?? "starter"} to ${deliveryStatus.upgradeVariantLabel ?? "full"}`
+        ? deliveryStatus.streamingObserved
+            ? `Detail arriving · ${Math.round(deliveryStatus.progressFraction * 100)}%`
+            : `Refining from ${deliveryStatus.activeVariantLabel ?? "starter"} to ${deliveryStatus.upgradeVariantLabel ?? "full"}`
         : deliveryStatus.stagedObserved
-          ? `${deliveryStatus.activeVariantLabel ?? "Live scene"} ready`
+          ? deliveryStatus.streamingObserved
+              ? `Live and refining · ${deliveryStatus.residentLayerCount} layers resident`
+              : `${deliveryStatus.activeVariantLabel ?? "Live scene"} ready`
           : null;
     const toneClass =
         diagnostics.operationalMode === "webgl_live"
@@ -680,10 +691,15 @@ const ViewerLiveWarmupMatte = React.memo(function ViewerLiveWarmupMatte({
         upgradePending: boolean;
         activeVariantLabel: string | null;
         upgradeVariantLabel: string | null;
+        streamingObserved?: boolean;
+        refinePagesLoaded?: number;
+        refinePagesPending?: number;
     };
 }) {
     const detail = deliveryStatus.upgradePending
-        ? `Starting with ${deliveryStatus.activeVariantLabel ?? "a safe first-light variant"} while ${deliveryStatus.upgradeVariantLabel ?? "the fuller live scene"} prepares.`
+        ? deliveryStatus.streamingObserved
+            ? `Starting with ${deliveryStatus.activeVariantLabel ?? "first light"} while ${deliveryStatus.refinePagesPending ?? 0} detail pages settle into the live scene.`
+            : `Starting with ${deliveryStatus.activeVariantLabel ?? "a safe first-light variant"} while ${deliveryStatus.upgradeVariantLabel ?? "the fuller live scene"} prepares.`
         : qualityPolicy.summary;
 
     return (
@@ -1019,6 +1035,7 @@ const ThreeOverlay = React.memo(function ThreeOverlay({
                                 plyUrl={overlaySurface.environmentSplatUrl}
                                 viewerUrl={overlaySurface.environmentViewerUrl}
                                 metadata={overlaySurface.environmentMetadata}
+                                focusTarget={overlaySurface.effectiveFocusRequest?.target ?? null}
                                 onPreviewBounds={overlaySurface.handlePreviewBounds}
                                 onFatalError={overlaySurface.handleEnvironmentFatalError}
                                 onSharpLiveStateChange={overlaySurface.handleSharpLiveStateChange}
@@ -1184,10 +1201,18 @@ const ThreeOverlay = React.memo(function ThreeOverlay({
                 data-delivery-manifest-first={overlaySurface.deliveryManifestFirst ? "true" : "false"}
                 data-delivery-has-progressive-variants={overlaySurface.deliveryHasProgressiveVariants ? "true" : "false"}
                 data-delivery-has-compressed-variants={overlaySurface.deliveryHasCompressedVariants ? "true" : "false"}
+                data-delivery-has-page-streaming={overlaySurface.deliveryHasPageStreaming ? "true" : "false"}
                 data-delivery-staged-observed={overlaySurface.deliveryStagedObserved ? "true" : "false"}
+                data-delivery-streaming-observed={overlaySurface.deliveryStreamingObserved ? "true" : "false"}
                 data-delivery-upgrade-pending={overlaySurface.deliveryUpgradePending ? "true" : "false"}
                 data-delivery-active-variant-label={overlaySurface.deliveryActiveVariantLabel ?? ""}
                 data-delivery-upgrade-variant-label={overlaySurface.deliveryUpgradeVariantLabel ?? ""}
+                data-delivery-resident-layer-count={String(overlaySurface.deliveryResidentLayerCount)}
+                data-delivery-resident-point-count={String(overlaySurface.deliveryResidentPointCount)}
+                data-delivery-refine-pages-loaded={String(overlaySurface.deliveryRefinePagesLoaded)}
+                data-delivery-refine-pages-pending={String(overlaySurface.deliveryRefinePagesPending)}
+                data-delivery-progress-fraction={formatNumericRuntimeDiagnostic(overlaySurface.deliveryProgressFraction)}
+                data-delivery-evictions={String(overlaySurface.deliveryEvictions)}
                 data-canvas-created-at-ms={formatNumericRuntimeDiagnostic(overlaySurface.runtimeDiagnostics.canvasCreatedAtMs)}
                 data-viewer-ready-at-ms={formatNumericRuntimeDiagnostic(overlaySurface.runtimeDiagnostics.viewerReadyAtMs)}
                 data-first-context-loss-at-ms={formatNumericRuntimeDiagnostic(overlaySurface.runtimeDiagnostics.firstContextLossAtMs)}
@@ -1224,6 +1249,9 @@ const ThreeOverlay = React.memo(function ThreeOverlay({
                         upgradePending: overlaySurface.deliveryUpgradePending,
                         activeVariantLabel: overlaySurface.deliveryActiveVariantLabel,
                         upgradeVariantLabel: overlaySurface.deliveryUpgradeVariantLabel,
+                        streamingObserved: overlaySurface.deliveryStreamingObserved,
+                        refinePagesLoaded: overlaySurface.deliveryRefinePagesLoaded,
+                        refinePagesPending: overlaySurface.deliveryRefinePagesPending,
                     }}
                 />
             ) : null}
@@ -1242,9 +1270,16 @@ const ThreeOverlay = React.memo(function ThreeOverlay({
                 runtimeTelemetry={runtimeTelemetry}
                 deliveryStatus={{
                     stagedObserved: overlaySurface.deliveryStagedObserved,
+                    streamingObserved: overlaySurface.deliveryStreamingObserved,
                     upgradePending: overlaySurface.deliveryUpgradePending,
                     activeVariantLabel: overlaySurface.deliveryActiveVariantLabel,
                     upgradeVariantLabel: overlaySurface.deliveryUpgradeVariantLabel,
+                    residentLayerCount: overlaySurface.deliveryResidentLayerCount,
+                    residentPointCount: overlaySurface.deliveryResidentPointCount,
+                    refinePagesLoaded: overlaySurface.deliveryRefinePagesLoaded,
+                    refinePagesPending: overlaySurface.deliveryRefinePagesPending,
+                    progressFraction: overlaySurface.deliveryProgressFraction,
+                    evictions: overlaySurface.deliveryEvictions,
                 }}
             />
             {surfaceContent}

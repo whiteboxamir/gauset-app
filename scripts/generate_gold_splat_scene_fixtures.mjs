@@ -206,6 +206,74 @@ function buildMetadata(profile, pointCount) {
     };
 }
 
+function buildFixtureCameras(profile) {
+    if (profile.sceneId === "scene_gold_cinematic_ribbons") {
+        return [
+            {
+                id: "hero-ribbons",
+                label: "Hero still",
+                position: [0.4, 0.55, 7.6],
+                target: [0.0, 0.2, 0.0],
+                fov: 40,
+                lens_mm: 43,
+                note: "Balanced hero composition across the ribbon span.",
+            },
+            {
+                id: "orbit-ribbons",
+                label: "Slow orbit",
+                position: [2.4, 0.7, 6.9],
+                target: [0.0, 0.25, 0.0],
+                fov: 42,
+                lens_mm: 40,
+                note: "Parallax-friendly orbit start for motion certification.",
+            },
+        ];
+    }
+
+    if (profile.sceneId === "scene_gold_luminous_atrium") {
+        return [
+            {
+                id: "hero-atrium",
+                label: "Hero still",
+                position: [0.0, 0.9, 8.2],
+                target: [0.0, 0.25, 0.0],
+                fov: 38,
+                lens_mm: 46,
+                note: "Centered architectural hero shot.",
+            },
+            {
+                id: "push-atrium",
+                label: "Push in",
+                position: [0.0, 1.1, 9.1],
+                target: [0.0, 0.4, 0.0],
+                fov: 36,
+                lens_mm: 49,
+                note: "Forward motion path for shimmer and pacing checks.",
+            },
+        ];
+    }
+
+    return [];
+}
+
+function buildFixtureDirectorPath(profile) {
+    if (profile.sceneId === "scene_gold_cinematic_ribbons") {
+        return [
+            { time: 0, position: [2.4, 0.7, 6.9], target: [0.0, 0.25, 0.0], rotation: [0, 0, 0, 1], fov: 42 },
+            { time: 3.5, position: [-2.2, 0.75, 6.5], target: [0.0, 0.22, 0.0], rotation: [0, 0, 0, 1], fov: 42 },
+        ];
+    }
+
+    if (profile.sceneId === "scene_gold_luminous_atrium") {
+        return [
+            { time: 0, position: [0.0, 1.1, 9.1], target: [0.0, 0.4, 0.0], rotation: [0, 0, 0, 1], fov: 36 },
+            { time: 3.0, position: [0.0, 0.95, 7.2], target: [0.0, 0.35, 0.0], rotation: [0, 0, 0, 1], fov: 35 },
+        ];
+    }
+
+    return [];
+}
+
 function ensureGoldSceneFixture(profile) {
     const [width, height, depth] = profile.dimensions;
     const pointCount = width * height * depth;
@@ -225,7 +293,7 @@ function ensureGoldSceneFixture(profile) {
     }
 
     fs.writeFileSync(metadataPath, `${JSON.stringify(buildMetadata(profile, pointCount), null, 2)}\n`);
-    fs.writeFileSync(camerasPath, "[]\n");
+    fs.writeFileSync(camerasPath, `${JSON.stringify(buildFixtureCameras(profile), null, 2)}\n`);
     fs.writeFileSync(
         benchmarkReportPath,
         `${JSON.stringify(
@@ -236,6 +304,8 @@ function ensureGoldSceneFixture(profile) {
                 status: "fixture_ready",
                 point_count: pointCount,
                 fixture_schema_version: GOLD_FIXTURE_SCHEMA_VERSION,
+                cameras: buildFixtureCameras(profile),
+                director_path: buildFixtureDirectorPath(profile),
             },
             null,
             2,
@@ -249,6 +319,7 @@ function ensureGoldSceneFixture(profile) {
                 fixture: true,
                 point_count: pointCount,
                 fixture_schema_version: GOLD_FIXTURE_SCHEMA_VERSION,
+                cameras: buildFixtureCameras(profile),
             },
             null,
             2,
@@ -262,6 +333,7 @@ function ensureGoldSceneFixture(profile) {
                 fixture: true,
                 point_count: pointCount,
                 fixture_schema_version: GOLD_FIXTURE_SCHEMA_VERSION,
+                director_path: buildFixtureDirectorPath(profile),
             },
             null,
             2,
