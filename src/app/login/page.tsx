@@ -8,7 +8,7 @@ export default async function LoginPage({
     searchParams: Promise<{ next?: string; email?: string }>;
 }) {
     const params = await searchParams;
-    const nextPath = sanitizeNextPath(params.next, "/app/dashboard");
+    const nextPath = sanitizeNextPath(params.next, "/app/worlds");
     const redirectParams = new URLSearchParams({
         next: nextPath,
     });

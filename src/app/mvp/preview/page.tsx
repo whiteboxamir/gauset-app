@@ -28,12 +28,26 @@ export default async function MVPPreviewPage({
     const launchReferences = normalizeLaunchText(params.refs, 1000);
     const launchProviderId = normalizeLaunchText(params.provider, 120);
     const launchSourceKind = normalizeLaunchSourceKind(params.source_kind);
+
+    if (launchSceneId) {
+        const workspaceSearchParams = new URLSearchParams({
+            scene: launchSceneId,
+        });
+        if (launchProjectId) {
+            workspaceSearchParams.set("project", launchProjectId);
+        }
+        if (launchSourceKind) {
+            workspaceSearchParams.set("source_kind", launchSourceKind);
+        }
+        const canonicalWorkspacePath = `/mvp?${workspaceSearchParams.toString()}`;
+
+        await requireMvpWorkspaceAccess(canonicalWorkspacePath);
+        redirect(canonicalWorkspacePath);
+    }
+
     const directProjectFrontDoor = Boolean(launchProjectId) && !launchSceneId;
     const resolvedLaunchEntryMode = directProjectFrontDoor ? null : launchEntryMode;
     const previewSearchParams = new URLSearchParams();
-    if (launchSceneId) {
-        previewSearchParams.set("scene", launchSceneId);
-    }
     if (launchProjectId) {
         previewSearchParams.set("project", launchProjectId);
     }
@@ -56,9 +70,6 @@ export default async function MVPPreviewPage({
         previewSearchParams.set("entry", resolvedLaunchEntryMode);
     }
     const canonicalPreviewPath = `/mvp/preview?${previewSearchParams.toString()}`;
-    if (launchSceneId) {
-        redirect(`/mvp?${previewSearchParams.toString()}`);
-    }
     const launchPreviewParams = new URLSearchParams(previewSearchParams);
     const launchPreviewHref =
         launchProjectId && !launchSceneId
