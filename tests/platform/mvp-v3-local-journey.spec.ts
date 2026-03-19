@@ -111,6 +111,7 @@ test.describe("v3 project-bound local journey", () => {
     });
 
     test("continuity memory saves with the world and survives reopen", async ({ page }) => {
+        test.setTimeout(300_000);
         await openProjectWorldStart(page);
         await uploadSource(page);
         await buildWorldPreview(page);

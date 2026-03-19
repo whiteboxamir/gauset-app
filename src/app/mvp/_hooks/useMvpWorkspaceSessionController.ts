@@ -92,7 +92,8 @@ export function useMvpWorkspaceSessionController({
         },
         [sceneStore],
     );
-    const startInWorkspace = (routeVariant === "workspace" && Boolean(launchSceneId)) || launchEntryMode === "workspace";
+    const directProjectPreviewFrontDoor = routeVariant === "preview" && Boolean(launchProjectId) && !launchSceneId;
+    const startInWorkspace = (routeVariant === "workspace" && Boolean(launchSceneId)) || launchEntryMode === "workspace" || directProjectPreviewFrontDoor;
 
     const workspacePersistence = useMvpWorkspacePersistenceController({
         clarityMode,
@@ -192,8 +193,12 @@ export function useMvpWorkspaceSessionController({
             }
             if (result.status === "environment") {
                 setLinkedLaunchStatus("opened");
-                setLinkedLaunchMessage(`Opened ${launchSceneId} from stored world artifacts.`);
-                workspaceTelemetry.appendActivity("Linked world opened", `Loaded ${launchSceneId} from stored world artifacts.`, "info");
+                setLinkedLaunchMessage(`Opened stored world artifacts for ${launchSceneId}. No saved version history was found.`);
+                workspaceTelemetry.appendActivity(
+                    "Stored world artifacts opened",
+                    `Loaded ${launchSceneId} from stored world artifacts because no saved version history was found.`,
+                    "info",
+                );
                 return;
             }
             if (result.status === "error") {

@@ -566,7 +566,7 @@ export function useMvpWorkspacePersistenceController({
                             sceneDocument: restoredSceneSnapshot.sceneDocument,
                             assetsList: [],
                             saveState: "recovered",
-                            saveMessage: `Opened saved world from ${formatTimestamp(versionPayload.saved_at) || "saved history"}.`,
+                            saveMessage: `Opened saved world version from ${formatTimestamp(versionPayload.saved_at) || "saved history"}.`,
                             currentInputLabel: resolveEnvironmentSourceLabel(restoredSceneSnapshot.sceneDocument),
                             lastSavedAt: versionPayload.saved_at ?? null,
                             lastOutputLabel: "Saved world",
@@ -609,11 +609,11 @@ export function useMvpWorkspacePersistenceController({
                             assetsList: [],
                             saveState: "recovered",
                             saveMessage: metadata
-                                ? `Opened saved world ${normalizedSceneId} from stored environment artifacts.`
-                                : `Opened saved world ${normalizedSceneId}, but no saved version history exists yet.`,
+                                ? `Opened stored world artifacts for ${normalizedSceneId}. No saved version history was found.`
+                                : `Opened stored world artifacts for ${normalizedSceneId}. No saved version history or stored metadata was found.`,
                             currentInputLabel: sourceLabel,
                             lastSavedAt: null,
-                            lastOutputLabel: "Saved world",
+                            lastOutputLabel: "Stored world artifacts",
                         },
                     {
                         keepAsLastOutput: true,

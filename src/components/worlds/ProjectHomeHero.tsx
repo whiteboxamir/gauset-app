@@ -28,6 +28,17 @@ function formatDate(value?: string | null, fallback = "Not yet recorded") {
     return dateFormatter.format(parsed);
 }
 
+function getRiskTone(riskLevel?: ProjectOperationalRisk["riskLevel"]) {
+    switch (riskLevel) {
+        case "urgent":
+            return "danger" as const;
+        case "watch":
+            return "warning" as const;
+        default:
+            return "success" as const;
+    }
+}
+
 export function ProjectHomeHero({
     detail,
     projectRisk,
@@ -47,33 +58,41 @@ export function ProjectHomeHero({
                 ? "Reopen saved world"
                 : "Open saved world"
             : "Build world record";
+    const worldStateLabel = detail.project.primarySceneId ? "Saved world ready" : "Awaiting first save";
+    const reviewStateLabel =
+        reviewShareSummary.activeCount > 0
+            ? `${reviewShareSummary.activeCount} live review link${reviewShareSummary.activeCount === 1 ? "" : "s"}`
+            : "No live review links";
+    const leadNarrative =
+        detail.project.description ??
+        "Build one world. Save it once. Then direct it. This project record is the durable home for continuity memory, saved versions, review, and handoff.";
+    const riskSummary = projectRisk?.reasons[0] ?? null;
 
     return (
         <section className="overflow-hidden rounded-[2.2rem] border border-[var(--border-soft)] bg-[radial-gradient(circle_at_top_left,rgba(191,214,222,0.16),transparent_30%),radial-gradient(circle_at_bottom_right,rgba(220,195,161,0.12),transparent_26%),linear-gradient(180deg,rgba(255,255,255,0.07),rgba(255,255,255,0.025))] p-6 shadow-[0_28px_90px_rgba(0,0,0,0.18)]">
-            <div className="flex flex-wrap items-start justify-between gap-6">
+            <div className="grid gap-6 xl:grid-cols-[1.18fr,0.82fr]">
                 <div className="max-w-3xl">
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-[#bfd6de]/78">{detail.project.studioName ?? "Personal scope"}</p>
-                    <h1 className="mt-3 text-3xl font-medium tracking-tight text-[var(--foreground)]">{detail.project.name}</h1>
-                    <p className="mt-3 text-sm leading-6 text-[#d3ccc2]">
-                        {detail.project.description ??
-                            "Build one world. Save it once. Then direct it. This project record is the durable home for continuity memory, saved versions, review, and handoff."}
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-[#bfd6de]/78">
+                        {detail.project.studioName ?? "Personal scope"}
                     </p>
-                    <div className="mt-5 flex flex-wrap gap-2">
-                        <StatusBadge label={detail.project.status} tone={detail.project.status === "active" ? "success" : detail.project.status === "archived" ? "neutral" : "info"} />
+
+                    <div className="mt-4 flex flex-wrap gap-2">
                         <StatusBadge
-                            label={detail.project.primarySceneId ? "Saved world ready" : "No saved world yet"}
-                            tone={detail.project.primarySceneId ? "success" : "warning"}
+                            label={detail.project.status}
+                            tone={detail.project.status === "active" ? "success" : detail.project.status === "archived" ? "neutral" : "info"}
                         />
-                        <StatusBadge
-                            label={formatReleaseReadinessLabel(detail.releaseReadiness.state)}
-                            tone={detail.releaseReadiness.state === "blocked" ? "danger" : detail.releaseReadiness.state === "at_risk" ? "warning" : "success"}
-                        />
-                        <StatusBadge
-                            label={reviewShareSummary.activeCount > 0 ? `${reviewShareSummary.activeCount} live review links` : "No live review links"}
-                            tone={reviewShareSummary.activeCount > 0 ? "success" : "neutral"}
-                        />
+                        <StatusBadge label={worldStateLabel} tone={detail.project.primarySceneId ? "success" : "warning"} />
+                        {projectRisk && projectRisk.riskLevel !== "stable" ? (
+                            <StatusBadge label={`${projectRisk.riskLevel} signal`} tone={getRiskTone(projectRisk.riskLevel)} />
+                        ) : null}
                     </div>
-                    <div className="mt-6 flex flex-wrap gap-3">
+
+                    <h1 className="mt-4 text-[2rem] font-medium tracking-tight text-[var(--foreground)] md:text-[2.35rem]">
+                        {detail.project.name}
+                    </h1>
+                    <p className="mt-4 max-w-2xl text-[15px] leading-7 text-[#d3ccc2]">{leadNarrative}</p>
+
+                    <div className="mt-6 flex flex-wrap items-center gap-3">
                         {detail.project.primarySceneId ? (
                             <OpenWorkspaceButton
                                 projectId={detail.project.projectId}
@@ -89,45 +108,80 @@ export function ProjectHomeHero({
                                 {launchLabel}
                             </Link>
                         )}
+                        <p className="text-xs uppercase tracking-[0.16em] text-[#9d978f]">
+                            {detail.project.primarySceneId
+                                ? "Return to the same saved world from this project record."
+                                : "Start with import or capture. Keep generation secondary."}
+                        </p>
                     </div>
                 </div>
 
-                <div className="grid min-w-[320px] gap-3 sm:grid-cols-2">
-                    <article className="rounded-[1.5rem] border border-white/10 bg-black/25 p-4">
-                        <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-neutral-500">Primary world</p>
-                        <p className="mt-3 text-sm font-medium text-white">{detail.project.primarySceneId ?? "No linked world yet"}</p>
-                        <p className="mt-2 text-sm text-neutral-400">
-                            {detail.project.primaryEnvironmentLabel ?? "Attach or reopen a primary saved world so the project stays a trustworthy system of record."}
-                        </p>
-                    </article>
-                    <article className="rounded-[1.5rem] border border-white/10 bg-black/25 p-4">
-                        <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-neutral-500">Review posture</p>
-                        <p className="mt-3 text-sm font-medium text-white">{reviewShareSummary.activeCount > 0 ? "Live secure access exists" : "No live secure access"}</p>
-                        <p className="mt-2 text-sm text-neutral-400">
-                            {reviewShareSummary.totalCount} total review links across active and historical delivery. Review stays pinned to saved versions instead of mutable workspace state.
-                        </p>
-                    </article>
-                    <article className="rounded-[1.5rem] border border-white/10 bg-black/25 p-4">
-                        <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-neutral-500">Reopen history</p>
-                        <p className="mt-3 text-sm font-medium text-white">
-                            {detail.project.lastWorldOpenedAt ? formatDate(detail.project.lastWorldOpenedAt) : hasPrimaryLaunch ? "Ready for first reopen" : "Awaiting primary launch"}
-                        </p>
-                        <p className="mt-2 text-sm text-neutral-400">
-                            {detail.project.lastWorldOpenedAt
-                                ? `Last reopen signal ${formatDate(detail.project.lastWorldOpenedAt)}`
-                                : hasPrimaryLaunch
-                                ? "The primary world is linked and ready to reopen from this project."
-                                  : "No project-linked world has been reopened yet."}
-                        </p>
-                    </article>
-                    <article className="rounded-[1.5rem] border border-white/10 bg-black/25 p-4">
-                        <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-neutral-500">World record state</p>
-                        <p className="mt-3 text-sm font-medium text-white">{formatReleaseReadinessLabel(detail.releaseReadiness.state)}</p>
-                        <p className="mt-2 text-sm text-neutral-400">
-                            {nextGate?.summary ?? "The project world is ready to move through save, review, and handoff without losing continuity."}
-                        </p>
-                    </article>
-                </div>
+                <aside className="rounded-[1.65rem] border border-white/10 bg-black/24 p-5">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-neutral-500">Project record</p>
+
+                    <div className="mt-4 space-y-3">
+                        <section className="rounded-[1.3rem] border border-white/8 bg-white/[0.03] p-4">
+                            <p className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">Primary world</p>
+                            <p className="mt-2 text-base font-medium text-white">
+                                {detail.project.primaryEnvironmentLabel ?? detail.project.primarySceneId ?? "No linked world yet"}
+                            </p>
+                            <p className="mt-1 text-sm leading-6 text-neutral-400">
+                                {detail.project.primarySceneId
+                                    ? "The saved world stays attached to this project as the continuity source of record."
+                                    : "Create or attach the first saved world here before review and handoff."}
+                            </p>
+                        </section>
+
+                        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+                            <section className="rounded-[1.25rem] border border-white/8 bg-white/[0.02] p-4">
+                                <p className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">Reopen cadence</p>
+                                <p className="mt-2 text-sm font-medium text-white">
+                                    {detail.project.lastWorldOpenedAt
+                                        ? formatDate(detail.project.lastWorldOpenedAt)
+                                        : hasPrimaryLaunch
+                                          ? "Ready for first reopen"
+                                          : "Awaiting primary launch"}
+                                </p>
+                                <p className="mt-1 text-sm leading-6 text-neutral-400">
+                                    {detail.project.lastWorldOpenedAt
+                                        ? "This project has already returned to the saved world."
+                                        : hasPrimaryLaunch
+                                          ? "The project can reopen the current saved world without branching."
+                                          : "No saved-world reopen has happened yet."}
+                                </p>
+                            </section>
+
+                            <section className="rounded-[1.25rem] border border-white/8 bg-white/[0.02] p-4">
+                                <p className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">Review posture</p>
+                                <p className="mt-2 text-sm font-medium text-white">{reviewStateLabel}</p>
+                                <p className="mt-1 text-sm leading-6 text-neutral-400">
+                                    {reviewShareSummary.totalCount} total review links. Review stays attached to saved versions instead of mutable workspace state.
+                                </p>
+                            </section>
+                        </div>
+
+                        <section className="rounded-[1.3rem] border border-white/8 bg-white/[0.03] p-4">
+                            <div className="flex flex-wrap items-start justify-between gap-3">
+                                <div>
+                                    <p className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">Readiness</p>
+                                    <p className="mt-2 text-sm font-medium text-white">
+                                        {formatReleaseReadinessLabel(detail.releaseReadiness.state)}
+                                    </p>
+                                </div>
+                                {projectRisk ? (
+                                    <StatusBadge label={`${projectRisk.riskLevel} signal`} tone={getRiskTone(projectRisk.riskLevel)} />
+                                ) : null}
+                            </div>
+                            <p className="mt-2 text-sm leading-6 text-neutral-400">
+                                {nextGate?.summary ??
+                                    "The project world is ready to move through save, review, and handoff without losing continuity."}
+                            </p>
+                            {riskSummary ? (
+                                <p className="mt-2 text-xs leading-5 text-neutral-500">Current signal: {riskSummary}</p>
+                            ) : null}
+                        </section>
+                    </div>
+                </aside>
             </div>
         </section>
     );

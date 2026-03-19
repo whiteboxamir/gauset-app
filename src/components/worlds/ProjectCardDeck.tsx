@@ -105,7 +105,7 @@ export function ProjectCardDeck({
                                         label={project.status}
                                         tone={project.status === "active" ? "success" : project.status === "archived" ? "neutral" : "info"}
                                     />
-                                    <StatusBadge label={project.primarySceneId ? "Saved world ready" : "No saved world yet"} tone={project.primarySceneId ? "success" : "warning"} />
+                                    <StatusBadge label={project.primarySceneId ? "Saved world ready" : "Awaiting first save"} tone={project.primarySceneId ? "success" : "warning"} />
                                     <StatusBadge
                                         label={projectMeta ? `${projectMeta.riskLevel} signal` : "No project signal"}
                                         tone={getRiskTone(projectMeta?.riskLevel)}
@@ -181,21 +181,24 @@ export function ProjectCardDeck({
                                     href={`/app/worlds/${project.projectId}`}
                                     className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-sm font-medium text-white transition-colors hover:border-white/20 hover:bg-white/[0.08]"
                                 >
-                                    Open project home
+                                    Open project record
                                 </Link>
-                                <OpenWorkspaceButton
-                                    projectId={project.projectId}
-                                    sceneId={project.primarySceneId}
-                                    label={
-                                        project.primarySceneId && canAccessMvp
-                                            ? project.lastWorldOpenedAt
-                                                ? "Return to saved world"
-                                                : "Open saved world"
-                                            : "Saved-world launch unavailable"
-                                    }
-                                    disabled={!project.primarySceneId || !canAccessMvp}
-                                    variant="secondary"
-                                />
+                                {project.primarySceneId ? (
+                                    <OpenWorkspaceButton
+                                        projectId={project.projectId}
+                                        sceneId={project.primarySceneId}
+                                        label={canAccessMvp ? (project.lastWorldOpenedAt ? "Return to saved world" : "Open saved world") : "Saved-world launch unavailable"}
+                                        disabled={!canAccessMvp}
+                                        variant="secondary"
+                                    />
+                                ) : (
+                                    <Link
+                                        href={`/app/worlds/${project.projectId}#project-world-launch`}
+                                        className="rounded-2xl border border-[#bfd6de]/20 bg-[#bfd6de]/10 px-4 py-2.5 text-sm font-medium text-[#deedf1] transition-colors hover:border-[#bfd6de]/35 hover:bg-[#bfd6de]/14"
+                                    >
+                                        Choose source path
+                                    </Link>
+                                )}
                             </div>
                         </article>
                     );

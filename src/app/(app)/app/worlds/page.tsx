@@ -130,22 +130,25 @@ export default async function PlatformWorldsPage() {
                                                   ? "Review links stay off in preview"
                                                   : "Clean sample shell"}
                                         </span>
+                                        <span className="rounded-full border border-[var(--border-soft)] bg-[rgba(244,239,232,0.035)] px-3 py-2 text-xs text-[#d3ccc2]">
+                                            {project.primaryEnvironmentLabel ? project.primaryEnvironmentLabel : "Project record ready for first source path"}
+                                        </span>
                                     </div>
 
                                     <div className="mt-5 flex flex-wrap items-center gap-3">
                                         {canAccessLocalPreviewMvp ? (
                                             <Link
-                                                href={`/mvp/preview?project=${encodeURIComponent(project.projectId)}&entry=workspace`}
+                                                href={`/app/worlds/${project.projectId}#project-world-launch`}
                                                 className="rounded-2xl bg-[#f4efe8] px-4 py-2.5 text-sm font-semibold text-[#101418] transition-colors hover:bg-[#ebe3d8]"
                                             >
-                                                Start world
+                                                Choose source path
                                             </Link>
                                         ) : null}
                                         <Link
                                             href={`/app/worlds/${project.projectId}`}
                                             className="rounded-2xl border border-[var(--border-soft)] bg-[var(--surface-soft)] px-4 py-2.5 text-sm font-medium text-[var(--foreground)] transition-colors hover:border-white/25 hover:bg-white/[0.08]"
                                         >
-                                            Project home
+                                            Open project record
                                         </Link>
                                     </div>
                                 </article>

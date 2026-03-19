@@ -11,11 +11,11 @@ export default function WorldsError({
         <section className="rounded-[2rem] border border-rose-400/20 bg-rose-500/10 p-8 shadow-[0_24px_80px_rgba(0,0,0,0.24)]">
             <div className="flex items-center gap-3 text-[10px] font-semibold uppercase tracking-[0.28em] text-rose-200/80">
                 <AlertTriangle className="h-4 w-4" />
-                World library error
+                World record library error
             </div>
-            <h2 className="mt-3 text-2xl font-medium tracking-tight text-white">The project library could not be loaded.</h2>
+            <h2 className="mt-3 text-2xl font-medium tracking-tight text-white">The project-bound world record library could not be loaded.</h2>
             <p className="mt-3 max-w-2xl text-sm leading-7 text-rose-100/90">
-                Retry the library to reload project ownership, world-link, and review-share truth from the platform layer.
+                Retry the library to reload saved-world ownership, reopen paths, and version-locked review posture without inventing delivery readiness.
             </p>
             <div className="mt-5 rounded-[1.4rem] border border-rose-300/15 bg-black/20 px-4 py-4">
                 <p className="text-[10px] uppercase tracking-[0.18em] text-rose-100/70">Truth boundary</p>

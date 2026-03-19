@@ -40,7 +40,8 @@ export function useMvpWorkspaceIntakeController({
     launchProviderId?: string | null;
 }) {
     const [intakeMode, setIntakeMode] = useState<IntakeMode>(launchIntent === "generate" ? "generate" : "import");
-    const [generatePrompt, setGeneratePrompt] = useState(launchBrief ?? "");
+    const shouldSeedGeneratePrompt = launchIntent === "generate" && !launchProjectId;
+    const [generatePrompt, setGeneratePrompt] = useState(shouldSeedGeneratePrompt ? (launchBrief ?? "") : "");
     const [generateNegativePrompt, setGenerateNegativePrompt] = useState("");
     const [generateAspectRatio, setGenerateAspectRatio] = useState("16:9");
     const [generateCount, setGenerateCount] = useState(1);

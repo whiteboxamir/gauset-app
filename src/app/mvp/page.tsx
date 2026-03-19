@@ -28,6 +28,7 @@ export default async function MVPPage({
     const launchReferences = normalizeLaunchText(params.refs, 1000);
     const launchProviderId = normalizeLaunchText(params.provider, 120);
     const launchSourceKind = normalizeLaunchSourceKind(params.source_kind);
+    const directProjectFrontDoor = Boolean(launchProjectId) && !launchSceneId;
     const nextSearchParams = new URLSearchParams();
     if (launchSceneId) {
         nextSearchParams.set("scene", launchSceneId);
@@ -50,7 +51,7 @@ export default async function MVPPage({
     if (launchSourceKind) {
         nextSearchParams.set("source_kind", launchSourceKind);
     }
-    if (launchEntryMode) {
+    if (launchEntryMode && !launchSceneId && !directProjectFrontDoor) {
         nextSearchParams.set("entry", launchEntryMode);
     }
     const nextPath =

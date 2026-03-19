@@ -60,9 +60,10 @@ export function OpenWorkspaceButton({
                                 }
                             } catch (reopenError) {
                                 setError(
-                                    reopenError instanceof Error ? reopenError.message : "Could not record the reopen against the project world record.",
+                                    reopenError instanceof Error
+                                        ? `${reopenError.message} Opening the saved world anyway.`
+                                        : "Could not record the reopen against the project world record. Opening the saved world anyway.",
                                 );
-                                return;
                             }
                         }
 

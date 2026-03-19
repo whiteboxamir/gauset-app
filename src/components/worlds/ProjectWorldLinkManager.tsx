@@ -31,6 +31,64 @@ function asErrorMessage(value: unknown, fallback: string): string {
     return typeof value === "string" && value.trim().length > 0 ? value : fallback;
 }
 
+function humanizeToken(value: string) {
+    return value.replaceAll("_", " ").replaceAll("-", " ").trim();
+}
+
+function deriveHandoffState(worldLink: ProjectWorldLink, canAccessMvp: boolean) {
+    const latestVersionId = worldLink.latestVersionId ?? worldLink.truthSummary?.latestVersionId ?? null;
+    const blockers = worldLink.blockers?.length ? worldLink.blockers : (worldLink.truthSummary?.blockers ?? []);
+    const normalizedBlockers = blockers.map(humanizeToken);
+    const deliveryStatus = worldLink.deliveryStatus ?? worldLink.truthSummary?.deliveryStatus ?? null;
+    const downstreamTargetSummary = worldLink.downstreamTargetSummary ?? worldLink.truthSummary?.downstreamTargetSummary ?? null;
+
+    if (!canAccessMvp) {
+        return {
+            canExport: false,
+            tone: "warning" as const,
+            statusLabel: "Handoff hidden",
+            versionLabel: "Access blocked",
+            summary: "This account cannot inspect or export saved-world handoff from the project record until MVP access is available.",
+            blockers: [] as string[],
+        };
+    }
+
+    if (!latestVersionId) {
+        return {
+            canExport: false,
+            tone: "warning" as const,
+            statusLabel: "Awaiting first saved version",
+            versionLabel: "No saved version",
+            summary: "This panel only exports from a saved world version. Save the linked world once in the workspace before attempting handoff.",
+            blockers: [] as string[],
+        };
+    }
+
+    if (deliveryStatus === "blocked" || normalizedBlockers.length > 0) {
+        return {
+            canExport: false,
+            tone: "warning" as const,
+            statusLabel: "Handoff blocked",
+            versionLabel: `Latest version ${latestVersionId}`,
+            summary: normalizedBlockers.length > 0
+                ? `Latest saved version ${latestVersionId} is blocked for downstream handoff. Clear the saved-world blockers first.`
+                : `Latest saved version ${latestVersionId} is not currently cleared for downstream handoff.`,
+            blockers: normalizedBlockers,
+        };
+    }
+
+    return {
+        canExport: true,
+        tone: "success" as const,
+        statusLabel: "Latest-version export only",
+        versionLabel: `Latest version ${latestVersionId}`,
+        summary:
+            downstreamTargetSummary ??
+            `This panel exports the latest saved version only: ${latestVersionId}. Version choice is not available here; pick another version in the workspace before returning if you need a different handoff anchor.`,
+        blockers: [] as string[],
+    };
+}
+
 export function ProjectWorldLinkManager({
     projectId,
     worldLinks,
@@ -46,7 +104,8 @@ export function ProjectWorldLinkManager({
     const [makePrimary, setMakePrimary] = useState(worldLinks.length === 0);
     const [error, setError] = useState<string | null>(null);
     const [message, setMessage] = useState<string | null>(null);
-    const [pendingAction, setPendingAction] = useState<"link" | "reopen" | "handoff-generic" | "handoff-unreal" | null>(null);
+    const [pendingAction, setPendingAction] = useState<"link" | "handoff-generic" | "handoff-unreal" | null>(null);
+    const [pendingSceneId, setPendingSceneId] = useState<string | null>(null);
     const [isPending, startTransition] = useTransition();
     const isBusy = isPending || pendingAction !== null;
 
@@ -54,6 +113,7 @@ export function ProjectWorldLinkManager({
         setError(null);
         setMessage(null);
         setPendingAction("link");
+        setPendingSceneId(null);
         startTransition(async () => {
             try {
                 const response = await fetch(`/api/projects/${projectId}/world-links`, {
@@ -74,42 +134,13 @@ export function ProjectWorldLinkManager({
                 setSceneId("");
                 setEnvironmentLabel("");
                 setMakePrimary(false);
-                setMessage("World linked to this project. Review and handoff now resolve through the saved-world record.");
+                setMessage("Saved world linked to this project record. Review and handoff now resolve through the same durable source.");
                 router.refresh();
             } catch (worldLinkError) {
                 setError(worldLinkError instanceof Error ? worldLinkError.message : "Unable to link world.");
             } finally {
                 setPendingAction(null);
-            }
-        });
-    };
-
-    const markOpened = (linkedSceneId: string) => {
-        setError(null);
-        setMessage(null);
-        setPendingAction("reopen");
-        startTransition(async () => {
-            try {
-                const response = await fetch(`/api/projects/${projectId}/world-links`, {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                    },
-                    body: JSON.stringify({
-                        sceneId: linkedSceneId,
-                        markOpened: true,
-                    }),
-                });
-                const payload = (await response.json()) as { success?: boolean; message?: string };
-                if (!response.ok || !payload.success) {
-                    throw new Error(payload.message || "Unable to mark world as opened.");
-                }
-                setMessage(`Recorded reopen for saved world ${linkedSceneId}.`);
-                router.refresh();
-            } catch (openError) {
-                setError(openError instanceof Error ? openError.message : "Unable to record activity.");
-            } finally {
-                setPendingAction(null);
+                setPendingSceneId(null);
             }
         });
     };
@@ -118,6 +149,7 @@ export function ProjectWorldLinkManager({
         setError(null);
         setMessage(null);
         setPendingAction(target === "generic" ? "handoff-generic" : "handoff-unreal");
+        setPendingSceneId(linkedSceneId);
         startTransition(async () => {
             try {
                 const response = await fetch(`/api/projects/${projectId}/world-links/${encodeURIComponent(linkedSceneId)}/handoff?target=${target}`, {
@@ -141,29 +173,38 @@ export function ProjectWorldLinkManager({
 
                 setMessage(
                     manifest.delivery.status === "ready"
-                        ? `${manifest.target.label} exported from saved version ${manifest.source.version_id}.`
-                        : `${manifest.target.label} exported with blockers from saved version ${manifest.source.version_id}.`,
+                        ? `${manifest.target.label} manifest exported from saved version ${manifest.source.version_id}.`
+                        : `${manifest.target.label} manifest exported with blockers from saved version ${manifest.source.version_id}.`,
                 );
             } catch (handoffError) {
                 setError(handoffError instanceof Error ? handoffError.message : "Unable to generate handoff manifest.");
             } finally {
                 setPendingAction(null);
+                setPendingSceneId(null);
             }
         });
     };
+    const progressLabel =
+        pendingAction === "link"
+            ? "Attaching the saved world to this project record."
+            : pendingAction === "handoff-generic"
+              ? `Exporting the generic downstream manifest${pendingSceneId ? ` for ${pendingSceneId}` : ""}.`
+              : pendingAction === "handoff-unreal"
+                ? `Exporting the Unreal downstream manifest${pendingSceneId ? ` for ${pendingSceneId}` : ""}.`
+                : "";
 
     return (
-        <section id="world-links" className="space-y-5">
+        <section id="world-links" className="space-y-5" data-testid="world-links-manager">
             <div className="rounded-[1.85rem] border border-white/10 bg-black/30 p-5">
                 <div className="flex flex-wrap items-start justify-between gap-4">
                     <div className="max-w-3xl">
-                        <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-cyan-200/70">World links</p>
-                        <h3 className="mt-2 text-lg font-medium text-white">Attach or reopen saved worlds inside the project record</h3>
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-cyan-200/70">Project world registry</p>
+                        <h3 className="mt-2 text-lg font-medium text-white">Attach, reopen, and hand off saved worlds from the project record</h3>
                         <p className="mt-3 text-sm leading-7 text-neutral-400">
-                            Linking a scene here records project ownership in the platform layer. Conflicting links are rejected so this page cannot bypass existing scene ownership or membership truth.
+                            Attach an existing saved world to the project record here. Conflicting links are rejected so this surface cannot bypass ownership or membership truth.
                         </p>
                         <p className="mt-2 text-sm leading-7 text-neutral-500">
-                            Opening a linked world from this panel records the revisit automatically. The named handoff actions below emit explicit downstream manifests from saved versions instead of pretending that review-share export is a delivery artifact.
+                            Reopen actions write history from the actual open path. Handoff exports emit explicit version-locked manifests instead of pretending that review-link export is a delivery artifact.
                         </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
@@ -172,12 +213,23 @@ export function ProjectWorldLinkManager({
                     </div>
                 </div>
 
+                {progressLabel ? (
+                    <div className="mt-5 rounded-2xl border border-sky-400/18 bg-sky-500/[0.07] px-4 py-4">
+                        <p className="text-[10px] uppercase tracking-[0.16em] text-sky-100/80">Registry progress</p>
+                        <p className="mt-2 text-sm leading-6 text-sky-50">{progressLabel}</p>
+                        <div className="mt-3 overflow-hidden rounded-full bg-white/[0.06]">
+                            <div className="h-1.5 w-1/2 animate-pulse rounded-full bg-sky-300/70" />
+                        </div>
+                    </div>
+                ) : null}
+
                 <div className="mt-5 grid gap-4 lg:grid-cols-[1.2fr,1fr,auto]">
                     <input
                         value={sceneId}
                         onChange={(event) => setSceneId(event.target.value)}
                         placeholder="scene_34dc4347"
                         disabled={isBusy}
+                        data-testid="world-link-scene-id-input"
                         className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white outline-none transition-colors placeholder:text-neutral-600 focus:border-cyan-300/40"
                     />
                     <input
@@ -185,15 +237,17 @@ export function ProjectWorldLinkManager({
                         onChange={(event) => setEnvironmentLabel(event.target.value)}
                         placeholder="Hero lobby preview"
                         disabled={isBusy}
+                        data-testid="world-link-environment-label-input"
                         className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white outline-none transition-colors placeholder:text-neutral-600 focus:border-cyan-300/40"
                     />
                     <button
                         type="button"
                         onClick={submitLink}
                         disabled={isBusy || !sceneId.trim()}
+                        data-testid="world-link-attach-button"
                         className="rounded-2xl bg-white px-5 py-3 text-sm font-semibold text-black transition-colors hover:bg-neutral-200 disabled:cursor-not-allowed disabled:opacity-60"
                     >
-                        {pendingAction === "link" ? "Linking world..." : "Attach world record"}
+                        {pendingAction === "link" ? "Attaching world..." : "Attach saved world"}
                     </button>
                 </div>
 
@@ -203,13 +257,22 @@ export function ProjectWorldLinkManager({
                         checked={makePrimary}
                         onChange={(event) => setMakePrimary(event.target.checked)}
                         disabled={isBusy}
+                        data-testid="world-link-primary-checkbox"
                         className="h-4 w-4 rounded border-white/20 bg-transparent"
                     />
                     Set as primary world record
                 </label>
 
-                {message ? <p className="mt-4 rounded-2xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">{message}</p> : null}
-                {error ? <p className="mt-4 rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">{error}</p> : null}
+                {message ? (
+                    <p className="mt-4 rounded-2xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100" data-testid="world-link-manager-message">
+                        {message}
+                    </p>
+                ) : null}
+                {error ? (
+                    <p className="mt-4 rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-100" data-testid="world-link-manager-error">
+                        {error}
+                    </p>
+                ) : null}
             </div>
 
             {worldLinks.length === 0 ? (
@@ -220,8 +283,18 @@ export function ProjectWorldLinkManager({
                 />
             ) : (
                 <div className="space-y-3">
-                    {worldLinks.map((worldLink) => (
-                        <article key={worldLink.id} className="rounded-[1.5rem] border border-white/10 bg-black/30 p-4">
+                    {worldLinks.map((worldLink) => {
+                        const handoffState = deriveHandoffState(worldLink, canAccessMvp);
+                        const isGenericPending = pendingAction === "handoff-generic" && pendingSceneId === worldLink.sceneId;
+                        const isUnrealPending = pendingAction === "handoff-unreal" && pendingSceneId === worldLink.sceneId;
+                        const exportDisabled = isBusy || !handoffState.canExport;
+
+                        return (
+                        <article
+                            key={worldLink.id}
+                            className="rounded-[1.5rem] border border-white/10 bg-black/30 p-4"
+                            data-testid={`world-link-row-${worldLink.sceneId}`}
+                        >
                             <div className="flex flex-wrap items-start justify-between gap-4">
                                 <div>
                                     <div className="flex flex-wrap items-center gap-2">
@@ -232,38 +305,59 @@ export function ProjectWorldLinkManager({
                                     <p className="mt-2 text-xs text-neutral-500">Linked {formatDate(worldLink.createdAt)}</p>
                                 </div>
                                 <div className="flex flex-wrap gap-2">
-                                    <OpenWorkspaceButton
-                                        projectId={projectId}
-                                        sceneId={worldLink.sceneId}
-                                        label={canAccessMvp ? "Open saved world" : "Saved-world access unavailable"}
-                                        disabled={!canAccessMvp}
-                                        variant="secondary"
-                                    />
+                                    <div data-testid={`world-link-open-${worldLink.sceneId}`}>
+                                        <OpenWorkspaceButton
+                                            projectId={projectId}
+                                            sceneId={worldLink.sceneId}
+                                            label={canAccessMvp ? "Open saved world" : "Saved-world access unavailable"}
+                                            disabled={!canAccessMvp}
+                                            variant="secondary"
+                                        />
+                                    </div>
                                     <button
                                         type="button"
-                                        disabled={isBusy}
-                                        onClick={() => markOpened(worldLink.sceneId)}
-                                        className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-sm font-medium text-white transition-colors hover:border-white/20 hover:bg-white/[0.08] disabled:opacity-60"
-                                    >
-                                        {pendingAction === "reopen" ? "Recording reopen..." : "Record reopen in history"}
-                                    </button>
-                                    <button
-                                        type="button"
-                                        disabled={isBusy}
+                                        disabled={exportDisabled}
                                         onClick={() => downloadHandoff(worldLink.sceneId, "generic")}
+                                        data-testid={`world-link-export-generic-${worldLink.sceneId}`}
                                         className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-sm font-medium text-white transition-colors hover:border-white/20 hover:bg-white/[0.08] disabled:opacity-60"
                                     >
-                                        {pendingAction === "handoff-generic" ? "Exporting..." : "Export generic handoff"}
+                                        {isGenericPending ? "Exporting generic handoff..." : "Export generic manifest"}
                                     </button>
                                     <button
                                         type="button"
-                                        disabled={isBusy}
+                                        disabled={exportDisabled}
                                         onClick={() => downloadHandoff(worldLink.sceneId, "unreal")}
+                                        data-testid={`world-link-export-unreal-${worldLink.sceneId}`}
                                         className="rounded-2xl border border-cyan-300/20 bg-cyan-400/10 px-4 py-2.5 text-sm font-medium text-cyan-50 transition-colors hover:border-cyan-200/30 hover:bg-cyan-400/15 disabled:opacity-60"
                                     >
-                                        {pendingAction === "handoff-unreal" ? "Exporting..." : "Export Unreal handoff"}
+                                        {isUnrealPending ? "Exporting Unreal handoff..." : "Export Unreal manifest"}
                                     </button>
                                 </div>
+                            </div>
+
+                            <div
+                                className="mt-4 rounded-[1.2rem] border border-white/10 bg-black/20 p-4"
+                                data-testid={`world-link-handoff-state-${worldLink.sceneId}`}
+                            >
+                                <div className="flex flex-wrap items-start justify-between gap-3">
+                                    <div className="max-w-3xl">
+                                        <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-neutral-500">Handoff truth</p>
+                                        <p className="mt-2 text-sm font-medium text-white">{handoffState.statusLabel}</p>
+                                        <p className="mt-2 text-sm leading-6 text-neutral-400">{handoffState.summary}</p>
+                                    </div>
+                                    <div className="flex flex-wrap gap-2">
+                                        <StatusBadge label={handoffState.versionLabel} tone={handoffState.canExport ? "info" : "warning"} />
+                                        <StatusBadge label={handoffState.statusLabel} tone={handoffState.tone} />
+                                    </div>
+                                </div>
+                                {handoffState.blockers.length > 0 ? (
+                                    <p className="mt-3 text-xs leading-5 text-amber-200/80" data-testid={`world-link-handoff-blockers-${worldLink.sceneId}`}>
+                                        Blockers: {handoffState.blockers.join(", ")}
+                                    </p>
+                                ) : null}
+                                <p className="mt-3 text-xs leading-5 text-neutral-500" data-testid={`world-link-open-note-${worldLink.sceneId}`}>
+                                    Opening the saved world records reopen history automatically. There is no separate manual reopen action here.
+                                </p>
                             </div>
 
                             <WorldLinkLifecycleSummary
@@ -273,7 +367,8 @@ export function ProjectWorldLinkManager({
                                 truthSummary={worldLink.truthSummary}
                             />
                         </article>
-                    ))}
+                        );
+                    })}
                 </div>
             )}
         </section>

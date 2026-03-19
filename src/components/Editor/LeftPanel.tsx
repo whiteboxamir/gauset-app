@@ -110,16 +110,31 @@ export default function LeftPanel({
         />
     );
 
+    const sourcePathIntroSection = (
+        <section className="rounded-[22px] border border-[var(--border-soft)] bg-[linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.015))] px-4 py-4">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#9d978f]">Source path</p>
+            <p className="mt-2 text-sm font-medium leading-6 text-white">
+                {launchProjectId ? "Choose the first source for this project-bound world." : "Choose one source path before anything else."}
+            </p>
+            <p className="mt-2 text-sm leading-6 text-neutral-400">
+                Import or capture leads the workflow. Generation stays available below as a secondary option.
+            </p>
+        </section>
+    );
+
     const advancedSourceSection = (
-        <details className="rounded-[22px] border border-white/8 bg-white/[0.02]">
+        <details
+            className="rounded-[22px] border border-white/8 bg-white/[0.02]"
+            open={launchIntent === "generate" ? true : undefined}
+        >
             <summary className="cursor-pointer list-none px-4 py-3 marker:content-none">
                 <div className="flex items-center justify-between gap-3">
                     <div>
                         <p className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">
-                            {showStudioGeneration ? "Optional source generation" : "Secondary source option"}
+                            {showStudioGeneration ? "Generation, secondary" : "Secondary source option"}
                         </p>
                         <p className="mt-1 text-sm text-white">
-                            Prompt-generated stills stay available, but the saved world record still leads the workflow.
+                            Keep generated stills available without competing with import or capture.
                         </p>
                     </div>
                     <span className="rounded-full border border-white/8 bg-black/20 px-2.5 py-1 text-[10px] uppercase tracking-[0.18em] text-neutral-400">
@@ -204,12 +219,12 @@ export default function LeftPanel({
 
             {!showCondensedOfflineState ? (
                 <div className="space-y-4">
+                    {sourcePathIntroSection}
                     {hasActiveIntake ? captureWorkspace : null}
                     {importSection}
-                    {advancedSourceSection}
                     {!hasActiveIntake ? captureWorkspace : null}
-
                     {hasSavedVersion || isAdvancedDensityEnabled ? <LeftPanelActivityLog jobs={intake.jobs} /> : null}
+                    {advancedSourceSection}
                 </div>
             ) : null}
         </div>

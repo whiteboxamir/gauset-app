@@ -28,8 +28,8 @@ export default async function MVPPreviewPage({
     const launchReferences = normalizeLaunchText(params.refs, 1000);
     const launchProviderId = normalizeLaunchText(params.provider, 120);
     const launchSourceKind = normalizeLaunchSourceKind(params.source_kind);
-    const directProjectWorkspaceEntry = Boolean(launchProjectId) && !launchSceneId;
-    const resolvedLaunchEntryMode = launchEntryMode ?? (directProjectWorkspaceEntry ? "workspace" : null);
+    const directProjectFrontDoor = Boolean(launchProjectId) && !launchSceneId;
+    const resolvedLaunchEntryMode = directProjectFrontDoor ? null : launchEntryMode;
     const previewSearchParams = new URLSearchParams();
     if (launchSceneId) {
         previewSearchParams.set("scene", launchSceneId);
@@ -55,7 +55,7 @@ export default async function MVPPreviewPage({
     if (resolvedLaunchEntryMode) {
         previewSearchParams.set("entry", resolvedLaunchEntryMode);
     }
-    const canonicalProjectPreviewPath = `/mvp/preview?${previewSearchParams.toString()}`;
+    const canonicalPreviewPath = `/mvp/preview?${previewSearchParams.toString()}`;
     if (launchSceneId) {
         redirect(`/mvp?${previewSearchParams.toString()}`);
     }
@@ -67,15 +67,17 @@ export default async function MVPPreviewPage({
                   launchPreviewParams.delete("entry");
                   return launchPreviewParams.size > 0 ? `/mvp/preview?${launchPreviewParams.toString()}` : "/mvp/preview";
               })();
-    const nextPath = directProjectWorkspaceEntry && launchEntryMode !== "workspace" ? canonicalProjectPreviewPath : launchPreviewHref;
+    const nextPath = directProjectFrontDoor ? canonicalPreviewPath : launchPreviewHref;
     const workspaceSearchParams = new URLSearchParams(launchPreviewParams);
-    workspaceSearchParams.set("entry", "workspace");
-    const launchWorkspaceHref = `/mvp/preview?${workspaceSearchParams.toString()}`;
+    if (!directProjectFrontDoor) {
+        workspaceSearchParams.set("entry", "workspace");
+    }
+    const launchWorkspaceHref = directProjectFrontDoor ? canonicalPreviewPath : `/mvp/preview?${workspaceSearchParams.toString()}`;
 
     await requireMvpWorkspaceAccess(nextPath);
 
-    if (directProjectWorkspaceEntry && launchEntryMode !== "workspace") {
-        redirect(canonicalProjectPreviewPath);
+    if (directProjectFrontDoor && launchEntryMode === "workspace") {
+        redirect(canonicalPreviewPath);
     }
 
     return (

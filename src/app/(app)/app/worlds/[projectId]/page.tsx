@@ -106,18 +106,25 @@ export default async function PlatformProjectDetailPage({
                         resumeSceneId={detail.project.primarySceneId}
                     />
                     <section className="rounded-[1.85rem] border border-[var(--border-soft)] bg-[linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.02))] p-5 shadow-[0_18px_60px_rgba(0,0,0,0.16)]">
-                        <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#9d978f]">World record</p>
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#9d978f]">Project record state</p>
                         <div className="mt-4 rounded-[1.2rem] border border-[var(--border-soft)] bg-[rgba(244,239,232,0.035)] p-4">
                             <div className="flex flex-wrap gap-2">
                                 <span className="rounded-full border border-[#c7d7c8]/35 bg-[#c7d7c8]/10 px-3 py-1 text-[10px] uppercase tracking-[0.16em] text-[#dce7dd]">
-                                    Saved world live
+                                    {detail.project.primarySceneId ? "Saved world anchored" : "Awaiting first save"}
                                 </span>
                                 <span className="rounded-full border border-[#dcc3a1]/35 bg-[#dcc3a1]/10 px-3 py-1 text-[10px] uppercase tracking-[0.16em] text-[#f3debf]">
                                     Sharing off
                                 </span>
                             </div>
                             <p className="mt-3 text-sm leading-6 text-[#b8b1a7]">
-                                Choose one source path, save the first version, then reopen, review, and hand off from that same project-bound world record.
+                                {detail.project.primarySceneId
+                                    ? "This project already has a linked saved world. Reopen and save against the same record instead of branching into a fresh prompt-led start."
+                                    : "Choose one source path, save the first version, then unlock reopen, review, and handoff from that same project-bound world record."}
+                            </p>
+                            <p className="mt-3 text-xs leading-5 text-[#9d978f]">
+                                {detail.project.primarySceneId
+                                    ? `Primary world: ${detail.project.primarySceneId}${detail.project.primaryEnvironmentLabel ? ` · ${detail.project.primaryEnvironmentLabel}` : ""}`
+                                    : "No saved world has been attached to this project record yet."}
                             </p>
                         </div>
                     </section>

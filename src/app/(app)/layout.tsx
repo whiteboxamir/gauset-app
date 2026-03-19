@@ -29,17 +29,17 @@ export default async function PlatformAppLayout({ children }: { children: ReactN
     const appNavGroups: PlatformNavGroup[] = isLocalPreviewShell
         ? [
               {
-                  label: "Primary flow",
-                  items: [{ href: "/app/worlds", label: "Worlds" }],
+                  label: "World records",
+                  items: [{ href: "/app/worlds", label: "Project library" }],
               },
           ]
         : [
               {
-                  label: "Primary flow",
-                  items: [{ href: "/app/worlds", label: "Worlds" }],
+                  label: "World records",
+                  items: [{ href: "/app/worlds", label: "Project library" }],
               },
               {
-                  label: "Studio admin",
+                  label: "Operating lanes",
                   items: [
                       { href: "/app/dashboard", label: "Operations" },
                       { href: "/app/billing", label: "Billing" },
@@ -48,7 +48,7 @@ export default async function PlatformAppLayout({ children }: { children: ReactN
                   ],
               },
               {
-                  label: "Settings",
+                  label: "Account",
                   items: [
                       { href: "/app/settings/profile", label: "Profile" },
                       { href: "/app/settings/governance", label: "Governance" },
@@ -66,28 +66,28 @@ export default async function PlatformAppLayout({ children }: { children: ReactN
         <AppShell
             navGroups={appNavGroups}
             accountLabel={isLocalPreviewShell ? undefined : session?.user.displayName ?? session?.user.email ?? undefined}
-            environmentLabel={isLocalPreviewShell ? "Local preview" : "World workflow"}
-            eyebrow={isLocalPreviewShell ? "World-first workflow" : "Project-first workflow"}
-            title="Worlds"
+            environmentLabel={isLocalPreviewShell ? "Preview-only record flow" : "Persistent world record"}
+            eyebrow={isLocalPreviewShell ? "Persistent world preview" : "Persistent world system of record"}
+            title="World record library"
             subtitle={
                 isLocalPreviewShell
-                    ? "Pick a sample project and move straight into the world-first flow."
-                    : "Open a project, start or reopen the world, then save once before sharing or exporting."
+                    ? "Inspect the project-bound saved-world route without pretending live review, handoff, or studio mutations are already on."
+                    : "Open a project record, reopen the same world, save durable versions, and keep review and handoff pinned to one source of truth."
             }
             statusLabel={
                 isLocalPreviewShell
-                    ? "Local preview"
+                    ? "Preview-only route"
                     : workspaceState.activeStudio
-                    ? `${workspaceState.activeStudio.role} workspace · ${
+                    ? `${workspaceState.activeStudio.role} studio · ${
                           coordinationSnapshot
                               ? coordinationSnapshot.operations.urgentCount > 0
-                                  ? `${coordinationSnapshot.operations.urgentCount} workflow blocker${coordinationSnapshot.operations.urgentCount === 1 ? "" : "s"}`
+                                  ? `${coordinationSnapshot.operations.urgentCount} blocker${coordinationSnapshot.operations.urgentCount === 1 ? "" : "s"}`
                                   : coordinationSnapshot.operations.watchCount > 0
-                                    ? `${coordinationSnapshot.operations.watchCount} workflow watch item${coordinationSnapshot.operations.watchCount === 1 ? "" : "s"}`
-                                    : "workflow stable"
-                              : "world workflow active"
+                                    ? `${coordinationSnapshot.operations.watchCount} watch item${coordinationSnapshot.operations.watchCount === 1 ? "" : "s"}`
+                                    : "record flow stable"
+                              : "record flow active"
                       }`
-                    : "Workspace bootstrap"
+                    : "Studio bootstrap"
             }
             workspaceSwitcher={
                 session ? (
@@ -111,9 +111,9 @@ export default async function PlatformAppLayout({ children }: { children: ReactN
             ) : null}
             {children ?? (
                 <EmptyState
-                    eyebrow="World workflow"
+                    eyebrow="World record flow"
                     title="World routes mount here"
-                    body="Use this shell for project ownership, world launch, review posture, and handoff readiness around the workspace."
+                    body="Use this shell for project records, saved-world launch, review posture, and handoff readiness around one durable filmmaking world."
                 />
             )}
         </AppShell>

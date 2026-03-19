@@ -104,6 +104,10 @@ function humanizeToken(value: string) {
     return value.replaceAll("_", " ").trim();
 }
 
+function toAbsoluteShareUrl(sharePath: string) {
+    return new URL(sharePath, window.location.origin).toString();
+}
+
 function getReadinessTone(state: ReviewShareReadiness["state"]) {
     switch (state) {
         case "ready":
@@ -146,6 +150,7 @@ export function ReviewSharePanel({
     reviewShareSummary: ReviewShareCollectionSummary;
 }) {
     const router = useRouter();
+    const canCreateReviewShares = canAccessMvp && canManageReviewShares;
     const primaryWorld = useMemo(() => worldLinks.find((entry) => entry.isPrimary) ?? worldLinks[0] ?? null, [worldLinks]);
     const [selectedSceneId, setSelectedSceneId] = useState(primaryWorld?.sceneId ?? "");
     const [selectedVersionId, setSelectedVersionId] = useState("");
@@ -171,6 +176,11 @@ export function ReviewSharePanel({
             setSelectedSceneId(primaryWorld.sceneId);
         }
     }, [primaryWorld?.sceneId, selectedSceneId]);
+
+    useEffect(() => {
+        setShareUrl("");
+        setExpiresAt(null);
+    }, [selectedSceneId, selectedVersionId]);
 
     useEffect(() => {
         if (!canAccessMvp || !selectedSceneId) {
@@ -280,16 +290,34 @@ export function ReviewSharePanel({
     const signedDeliveryShareCount = reviewShares.length - manualDeliveryShareCount;
     const selectedVersionSummary = selectedVersion
         ? `${selectedVersion.version_id} · ${formatDate(selectedVersion.saved_at)}`
+        : !canAccessMvp
+          ? "Version inspection unavailable on this host."
         : isLoadingVersions
           ? "Loading saved versions..."
           : "Save a version in /mvp before publishing a secure review link.";
     const createActionLabel =
         pendingAction === "create"
             ? "Creating review link..."
+            : !canAccessMvp
+              ? "Creation blocked on this host"
+              : !canManageReviewShares
+                ? "Read-only access"
             : selectedReadiness?.state === "review_only"
               ? "Create review-only link"
-              : "Create secure review link";
+              : "Create version-locked review link";
     const selectedReadinessBlockers = selectedReadiness?.blockers.map(humanizeToken) ?? [];
+    const progressLabel =
+        pendingAction === "create"
+            ? "Writing a version-locked review link from the selected saved world."
+            : pendingAction === "copy"
+              ? "Copying the current review link and recording the audit event."
+              : pendingAction === "revoke"
+                ? "Revoking the selected review link."
+                : isLoadingVersions
+                  ? "Loading saved versions for the selected world."
+                  : isLoadingReadiness
+                    ? "Inspecting whether the selected version is actually ready for review."
+                    : "";
 
     const createShare = () => {
         if (!selectedSceneId || !selectedVersion?.version_id) {
@@ -342,14 +370,14 @@ export function ReviewSharePanel({
                     await copyTextToClipboard(payload.shareUrl);
                     setMessage(
                         payload.shareMode === "localhost_fallback"
-                            ? "Local review link created and copied."
-                            : "Secure review link created, persisted, and copied.",
+                            ? "Local review link is ready and copied."
+                            : "Version-locked review link is ready and copied.",
                     );
                 } catch {
                     setMessage(
                         payload.shareMode === "localhost_fallback"
-                            ? "Local review link created."
-                            : "Secure review link created and persisted.",
+                            ? "Local review link is ready."
+                            : "Version-locked review link is ready.",
                     );
                 }
 
@@ -375,15 +403,28 @@ export function ReviewSharePanel({
         setMessage("");
         setError("");
         startTransition(async () => {
+            let copiedToClipboard = false;
             try {
-                const absoluteUrl = new URL(sharePath, window.location.origin).toString();
+                const absoluteUrl = toAbsoluteShareUrl(sharePath);
                 await copyTextToClipboard(absoluteUrl);
-                await fetch(`/api/review-shares/${share.id}/copy`, {
+                copiedToClipboard = true;
+                const response = await fetch(`/api/review-shares/${share.id}/copy`, {
                     method: "POST",
                 });
-                setMessage(`Copied ${share.label ?? share.id}.`);
+                if (!response.ok) {
+                    throw new Error(await extractApiError(response, `Unable to record copy audit (${response.status})`));
+                }
+                setMessage(`Copied ${share.label ?? share.id} and recorded the audit event.`);
             } catch (copyError) {
-                setError(copyError instanceof Error ? copyError.message : "Unable to copy secure review share.");
+                setError(
+                    copiedToClipboard
+                        ? copyError instanceof Error
+                            ? `Link copied, but ${copyError.message}`
+                            : "Link copied, but the audit event could not be recorded."
+                        : copyError instanceof Error
+                          ? copyError.message
+                          : "Unable to copy secure review share.",
+                );
             } finally {
                 setPendingAction(null);
                 setPendingShareId(null);
@@ -404,6 +445,10 @@ export function ReviewSharePanel({
                 const payload = (await response.json()) as { success?: boolean; message?: string };
                 if (!response.ok || !payload.success) {
                     throw new Error(payload.message || "Unable to revoke review share.");
+                }
+                if (share.sharePath && toAbsoluteShareUrl(share.sharePath) === shareUrl) {
+                    setShareUrl("");
+                    setExpiresAt(null);
                 }
                 setMessage(`Revoked ${share.label ?? share.id}.`);
                 router.refresh();
@@ -427,56 +472,66 @@ export function ReviewSharePanel({
     }
 
     return (
-        <section id="review-shares" className="rounded-[1.75rem] border border-white/10 bg-black/30 p-5">
+        <section id="review-shares" data-testid="review-share-panel" className="rounded-[1.75rem] border border-white/10 bg-black/30 p-5">
             <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
                     <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-cyan-200/70">Secure review sharing</p>
-                    <h3 className="mt-2 text-lg font-medium text-white">Operator-grade review links</h3>
+                    <h3 className="mt-2 text-lg font-medium text-white">Version-locked review links</h3>
                     <p className="mt-3 max-w-3xl text-sm leading-7 text-neutral-400">
-                        Signed review links now persist in the platform database, stay pinned to one saved world version, and can be revoked immediately without broadening anonymous access to `/api/mvp`.
+                        Review links stay pinned to one saved world version and can be revoked immediately. They do not silently drift when `/mvp` keeps changing.
                     </p>
                     <p className="mt-2 max-w-3xl text-sm leading-7 text-neutral-500">
-                        If the signing secret or MVP entitlement is missing in the current environment, share creation fails explicitly instead of pretending review delivery is live.
+                        If signing or access is unavailable on this host, creation fails explicitly instead of pretending review delivery is live.
                     </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                    <StatusBadge label={canAccessMvp ? "MVP access ready" : "MVP access blocked"} tone={canAccessMvp ? "success" : "warning"} />
-                    <StatusBadge label={`${reviewShareSummary.activeCount} active`} tone={reviewShareSummary.activeCount > 0 ? "success" : "neutral"} />
-                    <StatusBadge label={`${reviewShareSummary.revokedCount} revoked`} tone={reviewShareSummary.revokedCount > 0 ? "danger" : "neutral"} />
-                    <StatusBadge label={`${reviewShareSummary.expiredCount} expired`} tone={reviewShareSummary.expiredCount > 0 ? "warning" : "neutral"} />
+                    <StatusBadge label={canAccessMvp ? "Saved-world access ready" : "Create blocked on this host"} tone={canAccessMvp ? "success" : "warning"} />
+                    <StatusBadge label={`${reviewShareSummary.activeCount} live`} tone={reviewShareSummary.activeCount > 0 ? "success" : "neutral"} />
                     <StatusBadge label={`${versionLockedShareCount} version-locked`} tone={versionLockedShareCount > 0 ? "info" : "neutral"} />
-                    <StatusBadge label={`${inlinePackageShareCount} inline`} tone={inlinePackageShareCount > 0 ? "warning" : "neutral"} />
+                    <StatusBadge label={`${reviewShareSummary.revokedCount + reviewShareSummary.expiredCount} closed`} tone={reviewShareSummary.revokedCount + reviewShareSummary.expiredCount > 0 ? "warning" : "neutral"} />
                 </div>
             </div>
 
             {!canAccessMvp ? (
-                <EmptyState
-                    className="mt-5"
-                    eyebrow="Entitlement"
-                    title="World review sharing is blocked"
-                    body="This account must have MVP access before it can mint or open secure review links."
-                />
-            ) : (
-                <>
+                <div data-testid="review-share-read-only-notice" className="mt-5 rounded-2xl border border-amber-300/18 bg-amber-400/10 px-4 py-4">
+                    <p className="text-[10px] uppercase tracking-[0.16em] text-amber-100/75">Read-only review posture</p>
+                    <p className="mt-2 text-sm leading-6 text-amber-50">
+                        This host cannot mint new review links right now, but persisted review history remains visible as part of the project record.
+                    </p>
+                </div>
+            ) : null}
+
+            {progressLabel ? (
+                <div data-testid="review-share-progress" className="mt-5 rounded-2xl border border-sky-400/18 bg-sky-500/[0.07] px-4 py-4">
+                    <p className="text-[10px] uppercase tracking-[0.16em] text-sky-100/80">Review-link progress</p>
+                    <p className="mt-2 text-sm leading-6 text-sky-50">{progressLabel}</p>
+                    <div className="mt-3 overflow-hidden rounded-full bg-white/[0.06]">
+                        <div className="h-1.5 w-1/2 animate-pulse rounded-full bg-sky-300/70" />
+                    </div>
+                </div>
+            ) : null}
+
+            <>
                     <div className="mt-6 grid gap-4 xl:grid-cols-[minmax(0,1.05fr),minmax(320px,0.95fr)]">
-                        <div className="rounded-[1.5rem] border border-white/10 bg-white/[0.03] p-4">
+                        <div data-testid="review-share-create-form" className="rounded-[1.5rem] border border-white/10 bg-white/[0.03] p-4">
                             <div className="flex items-center justify-between gap-3">
                                 <div>
-                                    <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-neutral-500">Create secure review link</p>
+                                    <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-neutral-500">Create review link</p>
                                     <p className="mt-2 text-sm text-neutral-400">
-                                        Choose a linked scene, lock to a saved version, and publish a revocable review share.
+                                        Choose the project world and saved version that review should stay pinned to.
                                     </p>
                                 </div>
-                                {!canManageReviewShares ? <StatusBadge label="Read-only access" tone="warning" /> : null}
+                                {!canCreateReviewShares ? <StatusBadge label="Read-only access" tone="warning" /> : null}
                             </div>
 
                             <div className="mt-5 grid gap-4">
                                 <label className="space-y-2">
-                                    <span className="text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500">Linked scene</span>
+                                    <span className="text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500">Project world</span>
                                     <select
+                                        data-testid="review-share-scene-select"
                                         value={selectedSceneId}
                                         onChange={(event) => setSelectedSceneId(event.target.value)}
-                                        disabled={isPending || !canManageReviewShares || worldLinks.length === 0}
+                                        disabled={isPending || !canCreateReviewShares || worldLinks.length === 0}
                                         className="w-full rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white outline-none transition-colors focus:border-cyan-300/40 disabled:opacity-60"
                                     >
                                         {worldLinks.length === 0 ? (
@@ -496,6 +551,7 @@ export function ReviewSharePanel({
                                 <label className="space-y-2">
                                     <span className="text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500">Saved version</span>
                                     <select
+                                        data-testid="review-share-version-select"
                                         value={selectedVersionId}
                                         onChange={(event) => setSelectedVersionId(event.target.value)}
                                         disabled={isPending || isLoadingVersions || versions.length === 0 || !canManageReviewShares}
@@ -514,31 +570,32 @@ export function ReviewSharePanel({
                                         )}
                                     </select>
                                     <p className="text-xs leading-5 text-neutral-500">
-                                        Secure review links stay pinned to a saved version. If version history is unavailable, this panel blocks link creation instead of faking a live handoff.
+                                        Review links stay pinned to a saved version. If version history is unavailable, this panel blocks creation instead of faking a live handoff.
                                     </p>
                                     <p className="text-xs leading-5 text-neutral-500">
-                                        This project surface only mints version-locked shares from linked scenes. If inline packages appear here from another controlled flow, they stay
-                                        labeled as inline payload truth instead of being treated like saved history.
+                                        Inline-package rows remain visible as historical truth, but this panel only mints version-locked links from linked project worlds.
                                     </p>
                                 </label>
 
                                 <div className="grid gap-4 lg:grid-cols-2">
                                     <label className="space-y-2">
-                                        <span className="text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500">Share label</span>
+                                        <span className="text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500">Link name</span>
                                         <input
+                                            data-testid="review-share-label-input"
                                             value={shareLabel}
                                             onChange={(event) => setShareLabel(event.target.value)}
                                             placeholder="Design-partner v2 review"
-                                            disabled={isPending || !canManageReviewShares}
+                                            disabled={isPending || !canCreateReviewShares}
                                             className="w-full rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white outline-none transition-colors placeholder:text-neutral-600 focus:border-cyan-300/40 disabled:opacity-60"
                                         />
                                     </label>
                                     <label className="space-y-2">
                                         <span className="text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500">Link lifetime</span>
                                         <select
+                                            data-testid="review-share-expiry-select"
                                             value={String(expiresInHours)}
                                             onChange={(event) => setExpiresInHours(Number(event.target.value))}
-                                            disabled={isPending || !canManageReviewShares}
+                                            disabled={isPending || !canCreateReviewShares}
                                             className="w-full rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white outline-none transition-colors focus:border-cyan-300/40 disabled:opacity-60"
                                         >
                                             {EXPIRY_OPTIONS.map((option) => (
@@ -553,17 +610,18 @@ export function ReviewSharePanel({
                                 <label className="space-y-2">
                                     <span className="text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500">Operator note</span>
                                     <textarea
+                                        data-testid="review-share-note-input"
                                         value={shareNote}
                                         onChange={(event) => setShareNote(event.target.value)}
                                         placeholder="What the design partner should validate on this pass."
-                                        disabled={isPending || !canManageReviewShares}
+                                        disabled={isPending || !canCreateReviewShares}
                                         rows={3}
                                         className="w-full rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white outline-none transition-colors placeholder:text-neutral-600 focus:border-cyan-300/40 disabled:opacity-60"
                                     />
                                 </label>
 
                                 {selectedVersion ? (
-                                    <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">
+                                    <div data-testid="review-share-selected-version-posture" className="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">
                                         <div className="flex flex-wrap items-start justify-between gap-3">
                                             <div>
                                                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500">Selected version posture</p>
@@ -609,6 +667,7 @@ export function ReviewSharePanel({
 
                             <div className="mt-5 flex flex-wrap gap-3">
                                 <button
+                                    data-testid="review-share-create-button"
                                     type="button"
                                     onClick={createShare}
                                     disabled={
@@ -617,7 +676,8 @@ export function ReviewSharePanel({
                                         isLoadingReadiness ||
                                         !selectedSceneId ||
                                         !selectedVersion ||
-                                        !canManageReviewShares ||
+                                        !canCreateReviewShares ||
+                                        Boolean(readinessError) ||
                                         selectedReadiness?.canCreate === false
                                     }
                                     className="rounded-2xl bg-white px-5 py-3 text-sm font-semibold text-black transition-colors hover:bg-neutral-200 disabled:cursor-not-allowed disabled:opacity-60"
@@ -626,12 +686,13 @@ export function ReviewSharePanel({
                                 </button>
                                 {shareUrl ? (
                                     <a
+                                        data-testid="review-share-session-open"
                                         href={shareUrl}
                                         target="_blank"
                                         rel="noreferrer"
                                         className="rounded-2xl border border-white/10 bg-white/[0.04] px-5 py-3 text-sm font-medium text-white transition-colors hover:border-white/20 hover:bg-white/[0.08]"
                                     >
-                                        Open review
+                                        Open current session link
                                     </a>
                                 ) : null}
                             </div>
@@ -650,11 +711,11 @@ export function ReviewSharePanel({
                                     <p className="mt-3 text-sm font-medium text-white">{selectedVersion ? "Version-locked" : "Awaiting save"}</p>
                                     <p className="mt-1 text-sm text-neutral-500">{selectedVersionSummary}</p>
                                 </article>
-                                <article className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                                    <p className="text-xs uppercase tracking-[0.18em] text-neutral-500">Current persisted link</p>
-                                    <p className="mt-3 text-sm font-medium text-white">{shareUrl ? "Ready" : "No new link this session"}</p>
+                                <article data-testid="review-share-session-link" className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                                    <p className="text-xs uppercase tracking-[0.18em] text-neutral-500">Current session link</p>
+                                    <p className="mt-3 text-sm font-medium text-white">{shareUrl ? "Ready" : "No new link in this session"}</p>
                                     <p className="mt-1 text-sm text-neutral-500">
-                                        {expiresAt ? `Expires ${formatDate(expiresAt)}` : "Create a share to publish the next version-locked review link."}
+                                        {expiresAt ? `Expires ${formatDate(expiresAt)}` : "Create a link in this session to open it directly from here."}
                                     </p>
                                 </article>
                             </div>
@@ -718,11 +779,19 @@ export function ReviewSharePanel({
                         </div>
                     </div>
 
-                    {message ? <p className="mt-4 rounded-2xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">{message}</p> : null}
-                    {error ? <p className="mt-4 rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">{error}</p> : null}
+                    {message ? (
+                        <p data-testid="review-share-message" className="mt-4 rounded-2xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">
+                            {message}
+                        </p>
+                    ) : null}
+                    {error ? (
+                        <p data-testid="review-share-error" className="mt-4 rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
+                            {error}
+                        </p>
+                    ) : null}
 
                     <div className="mt-6 grid gap-4 xl:grid-cols-[minmax(0,1fr),minmax(0,1fr)]">
-                        <div className="rounded-[1.5rem] border border-white/10 bg-white/[0.03] p-4">
+                        <div data-testid="review-share-active-list" className="rounded-[1.5rem] border border-white/10 bg-white/[0.03] p-4">
                             <div className="flex items-center justify-between gap-3">
                                 <div>
                                     <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-cyan-200/70">Active shares</p>
@@ -732,16 +801,26 @@ export function ReviewSharePanel({
                             </div>
 
                             {activeShares.length === 0 ? (
-                                <EmptyState
-                                    className="mt-4 border-white/10 bg-black/20 p-6 shadow-none"
-                                    eyebrow="Live links"
-                                    title="No active review shares"
-                                    body="Create the first persisted secure link from the panel above when this project is ready for external review."
-                                />
+                                <div data-testid="review-share-active-empty">
+                                    <EmptyState
+                                        className="mt-4 border-white/10 bg-black/20 p-6 shadow-none"
+                                        eyebrow="Live links"
+                                        title="No active review shares"
+                                        body={
+                                            canCreateReviewShares
+                                                ? "Create the first persisted secure link from the panel above when this project is ready for external review."
+                                                : "Live review links created by eligible operators remain visible here with their audit trail and current access state."
+                                        }
+                                    />
+                                </div>
                             ) : (
                                 <div className="mt-4 space-y-3">
                                     {activeShares.map((share) => (
-                                        <article key={share.id} className="rounded-[1.35rem] border border-white/10 bg-black/20 p-4">
+                                        <article
+                                            key={share.id}
+                                            data-testid={`review-share-active-row-${share.id}`}
+                                            className="rounded-[1.35rem] border border-white/10 bg-black/20 p-4"
+                                        >
                                             {/*
                                               Share history is visible to all project members, but only manage-role members
                                               receive freshly signed project review URLs from the server.
@@ -789,6 +868,7 @@ export function ReviewSharePanel({
                                                     {canManageReviewShares && share.sharePath ? (
                                                         <>
                                                             <button
+                                                                data-testid={`review-share-copy-${share.id}`}
                                                                 type="button"
                                                                 onClick={() => copyShare(share)}
                                                                 disabled={isPending && pendingShareId === share.id}
@@ -797,6 +877,7 @@ export function ReviewSharePanel({
                                                                 {pendingAction === "copy" && pendingShareId === share.id ? "Copying..." : "Copy link"}
                                                             </button>
                                                             <a
+                                                                data-testid={`review-share-open-${share.id}`}
                                                                 href={share.sharePath}
                                                                 target="_blank"
                                                                 rel="noreferrer"
@@ -805,6 +886,7 @@ export function ReviewSharePanel({
                                                                 Open review
                                                             </a>
                                                             <button
+                                                                data-testid={`review-share-revoke-${share.id}`}
                                                                 type="button"
                                                                 onClick={() => revokeShare(share)}
                                                                 disabled={isPending && pendingShareId === share.id}
@@ -856,7 +938,7 @@ export function ReviewSharePanel({
                             )}
                         </div>
 
-                        <div className="rounded-[1.5rem] border border-white/10 bg-white/[0.03] p-4">
+                        <div data-testid="review-share-history-list" className="rounded-[1.5rem] border border-white/10 bg-white/[0.03] p-4">
                             <div className="flex items-center justify-between gap-3">
                                 <div>
                                     <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-neutral-500">Share history</p>
@@ -866,16 +948,22 @@ export function ReviewSharePanel({
                             </div>
 
                             {historicalShares.length === 0 ? (
-                                <EmptyState
-                                    className="mt-4 border-white/10 bg-black/20 p-6 shadow-none"
-                                    eyebrow="History"
-                                    title="No archived shares yet"
-                                    body="Revoked or expired links will accumulate here with their last known access state and audit trail."
-                                />
+                                <div data-testid="review-share-history-empty">
+                                    <EmptyState
+                                        className="mt-4 border-white/10 bg-black/20 p-6 shadow-none"
+                                        eyebrow="History"
+                                        title="No archived shares yet"
+                                        body="Revoked or expired links will accumulate here with their last known access state and audit trail."
+                                    />
+                                </div>
                             ) : (
                                 <div className="mt-4 space-y-3">
                                     {historicalShares.map((share) => (
-                                        <article key={share.id} className="rounded-[1.35rem] border border-white/10 bg-black/20 p-4">
+                                        <article
+                                            key={share.id}
+                                            data-testid={`review-share-history-row-${share.id}`}
+                                            className="rounded-[1.35rem] border border-white/10 bg-black/20 p-4"
+                                        >
                                             <div className="flex flex-wrap items-start justify-between gap-3">
                                                 <div>
                                                     <div className="flex flex-wrap items-center gap-2">
@@ -952,8 +1040,7 @@ export function ReviewSharePanel({
                             )}
                         </div>
                     </div>
-                </>
-            )}
+            </>
         </section>
     );
 }

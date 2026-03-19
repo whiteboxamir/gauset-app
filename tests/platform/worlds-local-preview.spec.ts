@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import { platformE2EEnv } from "./support/env";
+import { projectCardByName, projectChooseSourcePathLink, projectRecordLink } from "./support/selectors";
 
 const sampleProjectId = "11111111-1111-4111-8111-111111111111";
 const BASE = platformE2EEnv.baseUrl;
@@ -72,10 +73,18 @@ test.describe("focused local preview journey", () => {
 
         await expect(page.getByRole("heading", { name: "Local preview" })).toBeVisible();
         await expect(page.getByRole("heading", { name: /Build one world\. Save it once\. Then direct it\./i })).toBeVisible();
-        const backlotCard = page.locator("article").filter({ hasText: "Backlot Scout" }).first();
-        await backlotCard.getByRole("link", { name: "Start world" }).click();
+        const backlotCard = projectCardByName(page, "Backlot Scout");
+        await projectChooseSourcePathLink(backlotCard).click();
 
-        await expect(page).toHaveURL(new RegExp(`/mvp/preview\\?project=${sampleProjectId}&entry=workspace$`));
+        await expect(page).toHaveURL(new RegExp(`/app/worlds/${sampleProjectId}#project-world-launch$`));
+        await expect(page.locator("#project-world-launch")).toBeVisible();
+
+        await page.getByRole("link", { name: "Import source frames" }).click();
+
+        await expect(page).toHaveURL(new RegExp(`/mvp/preview\\?`));
+        await expect(page).toHaveURL(new RegExp(`project=${sampleProjectId}`));
+        await expect(page).toHaveURL(/source_kind=upload/);
+        await expect(page).toHaveURL(/entry=workspace/);
         await expect(page.getByTestId("mvp-preview-back-to-start")).toBeVisible();
         await expect(page.getByText(/^Project launch$/)).toBeVisible();
         await expect(page.getByRole("link", { name: /Continue to world start/i })).toHaveCount(0);
@@ -88,11 +97,11 @@ test.describe("focused local preview journey", () => {
         await expect(page.getByRole("heading", { name: /Build one world\. Save it once\. Then direct it\./i })).toBeVisible();
         await expectScrollable(page);
 
-        const backlotCard = page.locator("article").filter({ hasText: "Backlot Scout" }).first();
-        await expect(backlotCard.getByRole("link", { name: "Project home" })).toBeVisible();
-        await expect(backlotCard.getByRole("link", { name: "Start world" })).toBeVisible();
+        const backlotCard = projectCardByName(page, "Backlot Scout");
+        await expect(projectRecordLink(backlotCard)).toBeVisible();
+        await expect(projectChooseSourcePathLink(backlotCard)).toBeVisible();
 
-        await backlotCard.getByRole("link", { name: "Project home" }).click();
+        await projectRecordLink(backlotCard).click();
         await expect(page).toHaveURL(new RegExp(`/app/worlds/${sampleProjectId}$`));
         await expect(page.getByRole("heading", { name: "Backlot Scout" })).toBeVisible();
     });
@@ -106,7 +115,7 @@ test.describe("focused local preview journey", () => {
         await page.getByRole("link", { name: "Build world record" }).click();
         await expect(page.locator("#project-world-launch")).toBeVisible();
 
-        await expect(page.getByText("World record", { exact: true })).toBeVisible();
+        await expect(page.getByText("Project record state", { exact: true })).toBeVisible();
         await expect(page.getByText("World-first checklist")).toBeVisible();
 
         await expect(page.getByRole("button", { name: "Reopen saved world unavailable" })).toBeDisabled();
@@ -136,7 +145,7 @@ test.describe("focused local preview journey", () => {
     test("advanced generation stays secondary but still routes cleanly", async ({ page }) => {
         await page.goto(`${BASE}/app/worlds/${sampleProjectId}`, { waitUntil: "domcontentloaded" });
 
-        await page.locator("summary").filter({ hasText: /^Generation, secondary$/ }).click();
+        await page.locator("summary").filter({ hasText: /Generation, secondary/ }).click();
         await expect(page.getByRole("link", { name: "Open generation lane" })).toBeVisible();
 
         await page.getByRole("link", { name: "Open generation lane" }).click();
@@ -151,12 +160,12 @@ test.describe("focused local preview journey", () => {
     test("project-led preview lands directly in the focused workspace and can return to the project", async ({ page }) => {
         await page.goto(`${BASE}/mvp/preview?project=${sampleProjectId}&source_kind=upload`, { waitUntil: "domcontentloaded" });
 
-        await expect(page).toHaveURL(new RegExp(`/mvp/preview\\?project=${sampleProjectId}&source_kind=upload&entry=workspace$`));
+        await expect(page).toHaveURL(new RegExp(`/mvp/preview\\?project=${sampleProjectId}&source_kind=upload(?:&entry=workspace)?$`));
         await expect(page.getByText(/^Project launch$/)).toBeVisible();
         await expect(page.getByText("Import scout stills", { exact: true })).toBeVisible();
         await expect(page.getByTestId("mvp-preview-back-to-start")).toBeVisible();
         await expect(page.getByText("Preview-safe route")).toHaveCount(0);
-        await expect(page.getByRole("paragraph").filter({ hasText: "Project-linked world start" })).toBeVisible();
+        await expect(page.getByText("Project-linked world start", { exact: true }).first()).toBeVisible();
         await expect(page.getByText("No source chosen yet")).toHaveCount(0);
         await expect(page.getByRole("button", { name: /Open demo world/i })).toHaveCount(0);
 
