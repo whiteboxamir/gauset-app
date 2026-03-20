@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { toProxyUrl } from "@/lib/mvp-api";
+import type { MvpDirectUploadCapabilitySnapshot } from "@/lib/mvp-upload";
 import { deriveWorldIngestRecord } from "@/lib/world-workflow";
 
 import {
@@ -32,12 +33,14 @@ export function useMvpWorkspaceIntakeController({
     launchBrief,
     launchReferences,
     launchProviderId,
+    initialUploadCapability,
 }: WorkspaceIntakeActions & {
     launchProjectId?: string | null;
     launchIntent?: "generate" | "capture" | "import" | null;
     launchBrief?: string | null;
     launchReferences?: string | null;
     launchProviderId?: string | null;
+    initialUploadCapability?: MvpDirectUploadCapabilitySnapshot;
 }) {
     const [intakeMode, setIntakeMode] = useState<IntakeMode>(launchIntent === "generate" ? "generate" : "import");
     const shouldSeedGeneratePrompt = launchIntent === "generate" && !launchProjectId;
@@ -60,6 +63,7 @@ export function useMvpWorkspaceIntakeController({
         backendWritesDisabled: setup.backendWritesDisabled,
         backendWritesDisabledMessage: setup.backendWritesDisabledMessage,
         handleInputReady,
+        initialUploadCapability,
         selectedProviderMaxReferences: setup.selectedProviderMaxReferences,
         setErrorText,
         setStatusText,
@@ -213,6 +217,12 @@ export function useMvpWorkspaceIntakeController({
         intakeMode,
         setIntakeMode,
         isUploading: uploadTray.isUploading,
+        uploadQueue: uploadTray.uploadQueue,
+        uploadQueueSummary: uploadTray.uploadQueueSummary,
+        directUploadAvailable: uploadTray.directUploadAvailable,
+        directUploadTransport: uploadTray.directUploadTransport,
+        directUploadMaximumSizeInBytes: uploadTray.directUploadMaximumSizeInBytes,
+        legacyProxyMaximumSizeInBytes: uploadTray.legacyProxyMaximumSizeInBytes,
         isGeneratingImage: generation.isGeneratingImage,
         isGeneratingPreview: generation.isGeneratingPreview,
         isGeneratingAsset: generation.isGeneratingAsset,

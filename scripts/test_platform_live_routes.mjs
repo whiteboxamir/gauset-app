@@ -114,7 +114,7 @@ function probeAnonymousMvp(pathname, { expectGate = null } = {}) {
     const location = response.headers.get("location");
     const contentType = response.headers.get("content-type") || "";
     const responseText = contentType.includes("text/html") ? response.body : "";
-    const expectedLoginTarget = pathname === "/mvp/preview" ? "/auth/login?next=%2Fmvp%2Fpreview" : "/auth/login?next=%2Fmvp";
+    const expectedLoginTarget = "/auth/login?next=%2Fmvp";
     const htmlRedirectTarget =
         responseText.match(/http-equiv="refresh" content="1;url=([^"]+)"/)?.[1] ||
         responseText.match(/NEXT_REDIRECT;replace;([^;]+);307/)?.[1] ||

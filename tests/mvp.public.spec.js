@@ -99,7 +99,6 @@ async function expectDeploymentFingerprintBadge(page, testId = "mvp-deployment-f
 async function gotoMvp(page) {
     await page.goto(`${BASE}/mvp?cert=${encodeURIComponent(runLabel)}&ts=${Date.now()}`, { waitUntil: "networkidle" });
     await expect(page.getByTestId("mvp-shell-title")).toBeVisible();
-    await expect(page.getByTestId("mvp-preview-route-badge")).toHaveCount(0);
     await expectDeploymentFingerprintBadge(page);
 }
 
@@ -122,7 +121,7 @@ async function waitForBackendReady(page) {
 
 async function uploadImage(page, filePath) {
     const uploadResponsePromise = page.waitForResponse(
-        (response) => response.url().includes("/api/mvp/upload") && response.request().method() === "POST",
+        (response) => response.request().method() === "POST" && /\/api\/mvp\/upload(?:\?|$)/.test(response.url()),
     );
     await page.setInputFiles('input[type="file"]', filePath);
     const uploadResponse = await uploadResponsePromise;
@@ -390,13 +389,13 @@ test("wave0 public preview lane stays separate from main workspace", async ({ pa
     const screenshot = "wave00-public-preview-launchpad.png";
 
     await page.goto(`${BASE}/mvp/preview?cert=${encodeURIComponent(runLabel)}&ts=${Date.now()}`, { waitUntil: "networkidle" });
-    await expect(page.getByText(/Bring one image\./i)).toBeVisible();
+    await expect(page.getByText(/Build one world\./i)).toBeVisible();
     await expectDeploymentFingerprintBadge(page);
-    await expect(page.getByRole("button", { name: /See the demo world/i })).toBeVisible();
-    await page.getByRole("button", { name: /See the demo world/i }).click();
+    await expect(page.getByRole("link", { name: /Open project library/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Open sample world/i })).toBeVisible();
+    await page.getByRole("button", { name: /Open sample world/i }).click();
     await captureWaveScreenshot(page, screenshot, title);
-    await expect(page.getByTestId("mvp-preview-route-badge")).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByText(/Legacy demo world state/i)).toBeVisible();
+    await expect(page.getByText(/Legacy sample world state/i)).toBeVisible();
     recordWaveEvidence(title, {
         wave_id: "wave00",
         route: "/mvp/preview",

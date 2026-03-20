@@ -32,7 +32,7 @@ export function LocalPreviewNotice({
                 <div className="flex flex-wrap gap-3 sm:justify-end">
                     {showWorldStartAction && canAccessMvp ? (
                         <Link
-                            href="/mvp/preview"
+                            href="/mvp"
                             className="rounded-2xl bg-[#f4efe8] px-4 py-2.5 text-sm font-semibold text-[#101418] transition-colors hover:bg-[#ebe3d8]"
                         >
                             Open world start

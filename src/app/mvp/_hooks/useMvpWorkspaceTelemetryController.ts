@@ -47,7 +47,7 @@ export function useMvpWorkspaceTelemetryController({
     setLastOutputLabel,
     programmaticSceneChangeRef,
 }: UseMvpWorkspaceTelemetryControllerOptions) {
-    const flowName = clarityMode ? "clarity_preview" : "classic";
+    const flowName = clarityMode ? "clarity_world" : "classic";
     const [stepStatus, setStepStatus] = useState<StepStatus | null>(null);
     const [activityLog, setActivityLog] = useState<MvpActivityEntry[]>([]);
 

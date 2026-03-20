@@ -221,13 +221,13 @@ const ViewerLensPresetControls = React.memo(function ViewerLensPresetControls({
 const ViewerStandbyHud = React.memo(function ViewerStandbyHud({
     compact,
     environmentLabel,
-    isPreviewRoute,
+    isLaunchpadRoute,
     leftHudCollapsed,
     onToggleLeftHud,
 }: {
     compact: boolean;
     environmentLabel: string;
-    isPreviewRoute: boolean;
+    isLaunchpadRoute: boolean;
     leftHudCollapsed: boolean;
     onToggleLeftHud?: () => void;
 }) {
@@ -244,11 +244,6 @@ const ViewerStandbyHud = React.memo(function ViewerStandbyHud({
                                 <div className="h-2.5 w-2.5 rounded-full bg-neutral-600" />
                                 <span className="text-[10px] uppercase tracking-[0.22em] text-neutral-500">Standby</span>
                             </div>
-                            {isPreviewRoute ? (
-                                <span className="rounded-full border border-amber-400/20 bg-amber-500/10 px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] text-amber-100/85">
-                                    Preview safe
-                                </span>
-                            ) : null}
                         </div>
                         <p className="mt-2 text-sm font-medium text-white">{environmentLabel}</p>
                         <p className="mt-1 text-[11px] leading-5 text-neutral-400">Directing tools stay dormant until a world is loaded.</p>
@@ -279,11 +274,6 @@ const ViewerStandbyHud = React.memo(function ViewerStandbyHud({
                             <div className="h-2.5 w-2.5 rounded-full bg-neutral-600" />
                             <span className="text-[10px] uppercase tracking-[0.22em] text-neutral-500">Viewer standby</span>
                         </div>
-                        {isPreviewRoute ? (
-                            <span className="rounded-full border border-amber-400/20 bg-amber-500/10 px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] text-amber-100/85">
-                                Preview safe
-                            </span>
-                        ) : null}
                     </div>
                     <p className="mt-3 text-base font-medium text-white">{environmentLabel}</p>
                     <p className="mt-2 text-sm leading-6 text-neutral-300">The viewer is in standby until a world is loaded.</p>
@@ -434,11 +424,11 @@ const ViewerOverlaySurface = React.memo(function ViewerOverlaySurface({
             {shouldUseStaticReferenceViewer && referenceImage ? (
                 <StaticReferenceViewer
                     referenceImage={referenceImage}
-                    title={isReferenceOnlyDemo ? "Reference-only demo" : "Demo world"}
+                    title={isReferenceOnlyDemo ? "Reference-only sample" : "Fallback sample"}
                     description={
                         isReferenceOnlyDemo
                             ? "This draft is reference-only. Build or import a real world before treating the viewer as a persistent environment."
-                            : "Demo worlds are shown as stable reference surfaces here until you load a real renderable scene."
+                            : "Fallback samples are shown as stable reference surfaces here until you load a real renderable scene."
                     }
                 />
             ) : shouldRenderInteractiveViewer ? (
@@ -459,13 +449,13 @@ const ViewerOverlaySurface = React.memo(function ViewerOverlaySurface({
                             <div className="absolute bottom-0 left-0 right-0 p-4">
                                 <p className="text-[10px] uppercase tracking-[0.18em] text-cyan-100/70">Reference view</p>
                                 <p className="mt-2 text-base font-medium text-white">
-                                    {isReferenceOnlyDemo ? "Reference-only demo" : isLegacyDemoWorld ? "Demo world" : "Reference image"}
+                                    {isReferenceOnlyDemo ? "Reference-only sample" : isLegacyDemoWorld ? "Fallback sample" : "Reference image"}
                                 </p>
                                 <p className="mt-2 max-w-xs text-xs leading-5 text-neutral-200">
                                     {isReferenceOnlyDemo
                                         ? "This draft is reference-only. Build or import a real world before treating the viewer as a persistent environment."
                                         : isLegacyDemoWorld
-                                          ? "Recovered an older demo world state. Open the preview intro or replace it with your own world when you are ready."
+                                          ? "Recovered an older sample world state. Replace it with your own world when you are ready."
                                           : "Using the source still as a fallback while the viewer waits for a renderable environment."}
                                 </p>
                             </div>
@@ -645,7 +635,7 @@ const ViewerOverlaySurfaceForSceneSlices = React.memo(function ViewerOverlaySurf
 
 const ViewerDirectorHud = React.memo(function ViewerDirectorHud({
     sceneSlices,
-    isPreviewRoute,
+    isLaunchpadRoute,
     readOnly,
     directorHudCompact,
     leftHudCollapsed,
@@ -678,7 +668,7 @@ const ViewerDirectorHud = React.memo(function ViewerDirectorHud({
 }: {
     sceneSlices: ViewerPanelSceneSlices;
     clarityMode: boolean;
-    isPreviewRoute: boolean;
+    isLaunchpadRoute: boolean;
     readOnly: boolean;
     directorHudCompact: boolean;
     leftHudCollapsed: boolean;
@@ -754,7 +744,7 @@ const ViewerDirectorHud = React.memo(function ViewerDirectorHud({
             <ViewerStandbyHud
                 compact
                 environmentLabel={environmentState.label}
-                isPreviewRoute={isPreviewRoute}
+                isLaunchpadRoute={isLaunchpadRoute}
                 leftHudCollapsed={leftHudCollapsed}
                 onToggleLeftHud={onToggleLeftHud}
             />
@@ -843,14 +833,6 @@ const ViewerDirectorHud = React.memo(function ViewerDirectorHud({
                         <p className="text-[10px] uppercase tracking-[0.22em] text-neutral-500">Environment</p>
                         <span className="truncate text-sm font-medium text-neutral-100">{environmentState.label}</span>
                     </div>
-                    {isPreviewRoute ? (
-                        <span
-                            className="rounded-full border border-amber-400/20 bg-amber-500/10 px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] text-amber-100/85"
-                            data-testid="mvp-preview-route-badge"
-                        >
-                            Preview safe
-                        </span>
-                    ) : null}
                 </div>
 
                 <div className="flex flex-wrap items-center justify-end gap-2">
@@ -1001,7 +983,7 @@ const ViewerSelectionTrayForSceneSlices = React.memo(function ViewerSelectionTra
 
 type ViewerPanelProps = {
     clarityMode?: boolean;
-    routeVariant?: "workspace" | "preview";
+    routeVariant?: "workspace" | "launchpad";
     leftHudCollapsed?: boolean;
     rightHudCollapsed?: boolean;
     directorHudCompact?: boolean;
@@ -1114,7 +1096,7 @@ const ViewerPanelWorkspaceMode = React.memo(function ViewerPanelWorkspaceMode({
                 <ViewerDirectorHud
                     sceneSlices={workspaceViewer.sceneSlices}
                     clarityMode={clarityMode}
-                    isPreviewRoute={workspaceViewer.isPreviewRoute}
+                    isLaunchpadRoute={workspaceViewer.isLaunchpadRoute}
                     readOnly={readOnly}
                     directorHudCompact={workspaceViewer.hudState.directorHudCompact}
                     leftHudCollapsed={workspaceViewer.hudState.leftRailCollapsed}
@@ -1158,7 +1140,7 @@ const ViewerPanelWorkspaceMode = React.memo(function ViewerPanelWorkspaceMode({
                     interactiveViewer={
                         <ThreeOverlayConnected
                             readOnly={readOnly}
-                            backgroundColor={workspaceViewer.isPreviewRoute ? "#040507" : undefined}
+                            backgroundColor={workspaceViewer.isLaunchpadRoute ? "#040507" : undefined}
                             onCapturePose={workspaceViewer.handleCapturePose}
                             onPathRecorded={workspaceViewer.handlePathRecorded}
                         />
@@ -1209,7 +1191,7 @@ const ViewerPanelOverrideMode = React.memo(function ViewerPanelOverrideMode({
     );
     const getCurrentSceneSlices = useCallback(() => overrideSceneSlices, [overrideSceneSlices]);
     const {
-        isPreviewRoute,
+        isLaunchpadRoute,
         combinedFocusRequest,
         captureRequestKey,
         isPinPlacementEnabled,
@@ -1259,7 +1241,7 @@ const ViewerPanelOverrideMode = React.memo(function ViewerPanelOverrideMode({
                 <ViewerDirectorHud
                     sceneSlices={overrideSceneSlices}
                     clarityMode={clarityMode}
-                    isPreviewRoute={isPreviewRoute}
+                    isLaunchpadRoute={isLaunchpadRoute}
                     readOnly={readOnly}
                     directorHudCompact={directorHudCompact}
                     leftHudCollapsed={leftHudCollapsed}
@@ -1309,7 +1291,7 @@ const ViewerPanelOverrideMode = React.memo(function ViewerPanelOverrideMode({
                             onPathRecorded={handlePathRecorded}
                             onViewerReadyChange={setViewerReady}
                             readOnly={readOnly}
-                            backgroundColor={isPreviewRoute ? "#040507" : undefined}
+                            backgroundColor={isLaunchpadRoute ? "#040507" : undefined}
                             selectedPinId={selectedPinId}
                             onSelectPin={onSelectPin}
                         />

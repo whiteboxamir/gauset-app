@@ -24,7 +24,7 @@ import {
 function formatWorkspaceOriginLabel(origin: "blank" | "demo" | "draft" | "linked_version" | "linked_environment") {
     switch (origin) {
         case "demo":
-            return "Demo world";
+            return "Fallback sample";
         case "draft":
             return "Local draft";
         case "linked_version":
@@ -429,7 +429,7 @@ export const RightPanelWorkspaceOverviewSection = React.memo(function RightPanel
                                     </div>
                                 ) : (
                                     <p className="mt-3 text-[11px] leading-5 text-neutral-500">
-                                        Open the demo, build a world, save a version, or export a package to start the activity trail.
+                                        Import a source, start a capture set, save a version, or export a package to start the activity trail.
                                     </p>
                                 )}
 

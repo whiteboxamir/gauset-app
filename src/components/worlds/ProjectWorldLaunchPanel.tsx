@@ -55,7 +55,7 @@ function buildLaunchPath({
         searchParams.set("provider", providerId);
     }
 
-    return sceneId ? `/mvp?${searchParams.toString()}` : `/mvp/preview?${searchParams.toString()}`;
+    return `/mvp?${searchParams.toString()}`;
 }
 
 export function ProjectWorldLaunchPanel({
@@ -189,9 +189,9 @@ export function ProjectWorldLaunchPanel({
                     <div className="flex flex-wrap items-start justify-between gap-4">
                         <div className="max-w-2xl">
                             <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#bfd6de]/78">Saved-world workflow</p>
-                            <h3 className="mt-2 text-xl font-medium text-[var(--foreground)]">Build the world record</h3>
+                            <h3 className="mt-2 text-xl font-medium text-[var(--foreground)]">Build the first world</h3>
                             <p className="mt-3 text-sm leading-6 text-[#b8b1a7]">
-                                Choose one source path first. Continuity memory, review posture, and handoff stay attached to the same saved project record after the first save.
+                                Choose one source path first. The first save anchors the project world record so continuity memory, review posture, and handoff stay attached.
                             </p>
                         </div>
                         <div className="flex flex-wrap gap-2">

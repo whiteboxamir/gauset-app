@@ -38,7 +38,7 @@ import {
 import { useMvpWorkspaceSession } from "../_state/mvpWorkspaceSessionContext";
 
 interface UseMvpWorkspaceViewerControllerOptions {
-    routeVariant?: "workspace" | "preview";
+    routeVariant?: "workspace" | "launchpad";
     readOnly: boolean;
 }
 

@@ -54,7 +54,7 @@ report.checks.preview_shell = {
     status: previewShell.response.status,
     ok: previewShell.response.ok,
     loading_shell_present: /Loading workspace/i.test(previewShell.body),
-    gated_entry_present: includesGatedEntry(previewShell.body, "%2Fmvp%2Fpreview"),
+    gated_entry_present: includesGatedEntry(previewShell.body, "%2Fmvp"),
 };
 
 const health = await fetchText(`${BASE}/api/mvp/health`);
@@ -87,8 +87,8 @@ if (!report.checks.mvp_shell.ok) failures.push("/mvp not reachable");
 if (!report.checks.mvp_shell.loading_shell_present) failures.push("/mvp shell did not render the gated workspace loading surface");
 if (!report.checks.mvp_shell.gated_entry_present) failures.push("/mvp did not preserve the gated login redirect");
 if (!report.checks.preview_shell.ok) failures.push("/mvp/preview not reachable");
-if (!report.checks.preview_shell.loading_shell_present) failures.push("/mvp/preview did not render the gated workspace loading surface");
-if (!report.checks.preview_shell.gated_entry_present) failures.push("/mvp/preview did not preserve the gated login redirect");
+if (!report.checks.preview_shell.loading_shell_present) failures.push("/mvp/preview did not resolve back into the /mvp loading shell");
+if (!report.checks.preview_shell.gated_entry_present) failures.push("/mvp/preview did not preserve the canonical /mvp login redirect");
 if (!report.checks.health.ok || healthPayload.status !== "ok") failures.push("/api/mvp/health failed");
 if (!report.checks.frontend_deployment.ok) {
     failures.push("/api/mvp/deployment failed");

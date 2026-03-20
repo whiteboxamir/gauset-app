@@ -71,9 +71,9 @@ function describeLaunchSource(launchSourceKind?: WorkspaceLaunchSourceKind | nul
             };
         case "demo_world":
             return {
-                title: "Demo world selected",
-                openingSummary: "The demo path is ready.",
-                nextStepLabel: "Open the demo world",
+                title: "Fallback sample selected",
+                openingSummary: "The fallback sample is ready.",
+                nextStepLabel: "Open the fallback sample",
             };
         default:
             return null;
@@ -169,7 +169,7 @@ export function LeftPanelWorkspaceSummary({
                     backendMode === "offline"
                         ? "Reconnect local services, then import one hero still or a small orbit set."
                         : launchProjectId && isFirstWorldStage
-                          ? "This workspace is already attached to one project world record. Choose the first source, then save once to anchor the continuity record."
+                          ? "This workspace is attached to the project record. Choose the first source, build the first world, then save once to anchor it."
                         : isFirstWorldStage
                           ? "Pick one clear source, then build the first world before thinking about review or handoff."
                           : "Import a hero still for preview or asset work, or begin a multi-view capture set for reconstruction.",
@@ -215,9 +215,11 @@ export function LeftPanelWorkspaceSummary({
           : launchSource
             ? launchSource.title
           : launchProjectId
-            ? "Project-linked world start"
+            ? journeyStage === "saved"
+                ? "Project world record"
+                : "Project record attached"
           : isFirstWorldStage
-            ? "No source chosen yet"
+            ? "Choose the first source"
             : "No world source loaded yet";
     const laneAvailabilityLabel =
         connectedLaneCount === laneCards.length
@@ -244,7 +246,7 @@ export function LeftPanelWorkspaceSummary({
         : backendMode === "offline"
           ? "Reconnect intake services, then start with one clear source input."
           : launchProjectId && isFirstWorldStage
-            ? "This project route is already attached to one durable world record."
+            ? "This project route is attached to the project record. The first save anchors the world."
           : isFirstWorldStage && launchSource
             ? launchSource.openingSummary
           : isFirstWorldStage
@@ -283,13 +285,13 @@ export function LeftPanelWorkspaceSummary({
                     <div className="flex flex-col gap-3">
                         <div className="min-w-0">
                             <p className="text-[10px] uppercase tracking-[0.18em] text-[#bfd6de]/78">
-                                {previewWorkspaceNavigation?.eyebrow ?? "Preview"}
+                                {previewWorkspaceNavigation?.eyebrow ?? "World entry"}
                             </p>
                             <p className="mt-2 text-base font-semibold tracking-tight text-white">
                                 {previewWorkspaceNavigation?.title ?? "Current workspace"}
                             </p>
                             <p className="mt-1 text-xs leading-5 text-neutral-400">
-                                {previewWorkspaceNavigation?.note ?? "Return to the prior step without breaking this workspace."}
+                                {previewWorkspaceNavigation?.note ?? "Return to the prior entry without breaking this workspace."}
                             </p>
                         </div>
                         {previewWorkspaceNavigation?.backToStartHref ? (
@@ -299,7 +301,7 @@ export function LeftPanelWorkspaceSummary({
                                 data-testid="mvp-preview-back-to-start"
                             >
                                 <ArrowLeft className="h-3.5 w-3.5" />
-                                {previewWorkspaceNavigation?.backLabel ?? "Back to start"}
+                                {previewWorkspaceNavigation?.backLabel ?? "Return to world entry"}
                             </Link>
                         ) : (
                             <button
@@ -309,7 +311,7 @@ export function LeftPanelWorkspaceSummary({
                                 data-testid="mvp-preview-back-to-start"
                             >
                                 <ArrowLeft className="h-3.5 w-3.5" />
-                                {previewWorkspaceNavigation?.backLabel ?? "Back to start"}
+                                {previewWorkspaceNavigation?.backLabel ?? "Return to world entry"}
                             </button>
                         )}
                     </div>

@@ -3,6 +3,7 @@
 import { useMvpWorkspaceIntakeController } from "@/app/mvp/_hooks/useMvpWorkspaceIntakeController";
 import { useMvpWorkspaceShell } from "@/app/mvp/_state/mvpWorkspaceShellContext";
 import { useMvpWorkspaceSession } from "@/app/mvp/_state/mvpWorkspaceSessionContext";
+import type { MvpDirectUploadCapabilitySnapshot } from "@/lib/mvp-upload";
 
 import { LeftPanelActivityLog } from "./LeftPanelActivityLog";
 import { LeftPanelCaptureWorkspace } from "./LeftPanelCaptureWorkspace";
@@ -14,11 +15,13 @@ import type { LeftPanelPreviewWorkspaceNavigation } from "./leftPanelShared";
 interface LeftPanelProps {
     clarityMode?: boolean;
     previewWorkspaceNavigation?: LeftPanelPreviewWorkspaceNavigation | null;
+    initialUploadCapability?: MvpDirectUploadCapabilitySnapshot;
 }
 
 export default function LeftPanel({
     clarityMode = false,
     previewWorkspaceNavigation = null,
+    initialUploadCapability,
 }: LeftPanelProps) {
     const { replaceSceneEnvironment } = useMvpWorkspaceShell();
     const {
@@ -54,6 +57,7 @@ export default function LeftPanel({
         launchBrief,
         launchReferences,
         launchProviderId,
+        initialUploadCapability,
     });
     const showCondensedOfflineState = intake.backendMode === "offline" && !intake.selectedUpload && (intake.captureSession?.frame_count ?? 0) === 0;
     const showStudioGeneration = isAdvancedDensityEnabled || journeyStage !== "start";
@@ -105,6 +109,12 @@ export default function LeftPanel({
             backendWritesDisabled={intake.backendWritesDisabled}
             backendWritesDisabledMessage={intake.backendWritesDisabledMessage}
             isUploading={intake.isUploading}
+            uploadQueue={intake.uploadQueue}
+            uploadQueueSummary={intake.uploadQueueSummary}
+            directUploadAvailable={intake.directUploadAvailable}
+            directUploadTransport={intake.directUploadTransport}
+            directUploadMaximumSizeInBytes={intake.directUploadMaximumSizeInBytes}
+            legacyProxyMaximumSizeInBytes={intake.legacyProxyMaximumSizeInBytes}
             reconstructionAvailable={intake.reconstructionAvailable}
             triggerFilePicker={intake.triggerFilePicker}
         />

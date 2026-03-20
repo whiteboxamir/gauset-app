@@ -3,6 +3,7 @@
 import React, { useMemo, useRef } from "react";
 
 import { MvpDeploymentFingerprint } from "@/lib/mvp-deployment";
+import type { MvpDirectUploadCapabilitySnapshot } from "@/lib/mvp-upload";
 import { createEmptySceneDocumentV2 } from "@/lib/scene-graph/document.ts";
 import { createMvpEditorSessionStore } from "@/state/mvpEditorSessionStore.ts";
 import { createMvpSceneStore } from "@/state/mvpSceneStore.ts";
@@ -16,7 +17,7 @@ import { useMvpWorkspaceSessionController } from "./_hooks/useMvpWorkspaceSessio
 import { MvpWorkspaceShellProvider } from "./_state/mvpWorkspaceShellContext";
 import { MvpWorkspaceSessionProvider } from "./_state/mvpWorkspaceSessionContext";
 
-type MvpRouteVariant = "workspace" | "preview";
+type MvpRouteVariant = "workspace" | "launchpad";
 
 export default function MVPRouteClient({
     clarityMode = false,
@@ -31,6 +32,7 @@ export default function MVPRouteClient({
     launchSourceKind = null,
     launchWorkspaceHref = null,
     launchPreviewHref = null,
+    initialUploadCapability,
     deploymentFingerprint,
 }: {
     clarityMode?: boolean;
@@ -45,6 +47,7 @@ export default function MVPRouteClient({
     launchSourceKind?: WorkspaceLaunchSourceKind | null;
     launchWorkspaceHref?: string | null;
     launchPreviewHref?: string | null;
+    initialUploadCapability?: MvpDirectUploadCapabilitySnapshot;
     deploymentFingerprint: MvpDeploymentFingerprint;
 }) {
     const sceneStoreRef = useRef(createMvpSceneStore(createEmptySceneDocumentV2()));
@@ -79,6 +82,7 @@ export default function MVPRouteClient({
                             routeVariant={routeVariant}
                             launchWorkspaceHref={launchWorkspaceHref}
                             launchPreviewHref={launchPreviewHref}
+                            initialUploadCapability={initialUploadCapability}
                             deploymentFingerprint={deploymentFingerprint}
                         />
                     </MvpWorkspaceShellProvider>

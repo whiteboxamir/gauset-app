@@ -687,6 +687,8 @@ def _deployment_fingerprint() -> Dict[str, str]:
 CAPTURE_MIN_IMAGES = 8
 CAPTURE_RECOMMENDED_IMAGES = 12
 CAPTURE_MAX_IMAGES = 32
+DIRECT_UPLOAD_MAX_BYTES = 64 * 1024 * 1024
+ALLOWED_REMOTE_UPLOAD_HOST_SUFFIX = ".blob.vercel-storage.com"
 SYNTH_PREVIEW_BASE_SIZE = max(256, int(os.getenv("GAUSET_SYNTH_PREVIEW_SIZE", "384")))
 SYNTH_PREVIEW_DENSITY_MULTIPLIER = max(1, int(os.getenv("GAUSET_SYNTH_PREVIEW_DENSITY_MULTIPLIER", "5")))
 SYNTH_PREVIEW_JITTER_RADIUS = float(os.getenv("GAUSET_SYNTH_PREVIEW_JITTER_RADIUS", "0.38"))
@@ -726,6 +728,14 @@ def _guess_media_type(path: str) -> str:
     if path.endswith(".ply"):
         return "application/octet-stream"
     return "application/octet-stream"
+
+
+def _is_allowed_remote_upload_url(url: str) -> bool:
+    try:
+        parsed = urllib.parse.urlparse(url)
+    except ValueError:
+        return False
+    return parsed.scheme == "https" and parsed.hostname is not None and parsed.hostname.endswith(ALLOWED_REMOTE_UPLOAD_HOST_SUFFIX)
 
 
 def _clamp(value: float, minimum: float, maximum: float) -> float:
@@ -1574,6 +1584,57 @@ def _store_upload_bytes(
         generation_job_id=generation_job_id,
     )
     return _build_upload_response(record)
+
+
+def _store_remote_upload(
+    *,
+    url: str,
+    original_filename: str,
+    content_type: str | None = None,
+    size_bytes: int | None = None,
+) -> Dict[str, Any]:
+    if not _is_allowed_remote_upload_url(url):
+        raise HTTPException(status_code=400, detail="Uploaded blob URL is not allowed")
+
+    expected_content_type = str(content_type or "").strip().lower()
+    if expected_content_type and not expected_content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Only image stills can be ingested into the workspace")
+
+    if isinstance(size_bytes, int) and size_bytes > DIRECT_UPLOAD_MAX_BYTES:
+        raise HTTPException(status_code=400, detail="Uploaded still exceeds the current 64 MB ingest limit")
+
+    request = urllib.request.Request(url, method="GET", headers={"Accept": "image/*"})
+    try:
+        with urllib.request.urlopen(request, timeout=90) as response:
+            resolved_content_type = (response.headers.get_content_type() or "").lower()
+            content_length = response.headers.get("Content-Length")
+            if content_length:
+                try:
+                    if int(content_length) > DIRECT_UPLOAD_MAX_BYTES:
+                        raise HTTPException(status_code=400, detail="Uploaded still exceeds the current 64 MB ingest limit")
+                except ValueError:
+                    pass
+            if resolved_content_type and not resolved_content_type.startswith("image/"):
+                raise HTTPException(status_code=400, detail="Uploaded blob did not resolve to an image still")
+
+            contents = response.read(DIRECT_UPLOAD_MAX_BYTES + 1)
+    except urllib.error.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Could not fetch uploaded still ({exc.code})") from exc
+    except urllib.error.URLError as exc:
+        raise HTTPException(status_code=502, detail=f"Could not fetch uploaded still: {exc.reason}") from exc
+
+    if len(contents) == 0:
+        raise HTTPException(status_code=400, detail="Uploaded still is empty")
+    if len(contents) > DIRECT_UPLOAD_MAX_BYTES:
+        raise HTTPException(status_code=400, detail="Uploaded still exceeds the current 64 MB ingest limit")
+    if isinstance(size_bytes, int) and size_bytes > 0 and len(contents) != size_bytes:
+        raise HTTPException(status_code=400, detail="Uploaded still size changed before ingest completed")
+
+    return _store_upload_bytes(
+        contents=contents,
+        original_filename=original_filename,
+        source_type="upload",
+    )
 
 
 def _load_reference_images(image_ids: List[str]) -> List[Any]:
@@ -2473,6 +2534,13 @@ class GenerateImageRequest(BaseModel):
     reference_image_ids: List[str] = Field(default_factory=list)
 
 
+class RemoteUploadIngestRequest(BaseModel):
+    url: str
+    original_filename: str
+    content_type: str | None = None
+    size_bytes: int | None = None
+
+
 class CaptureSessionCreateRequest(BaseModel):
     target_images: int = CAPTURE_RECOMMENDED_IMAGES
 
@@ -3000,6 +3068,21 @@ async def upload_image(file: UploadFile = File(...)) -> Dict[str, Any]:
         contents=contents,
         original_filename=file.filename,
         source_type="upload",
+    )
+
+
+@app.post("/upload/ingest")
+async def ingest_uploaded_blob(request: RemoteUploadIngestRequest) -> Dict[str, Any]:
+    _require_public_write_storage()
+    original_filename = request.original_filename.strip()
+    if not original_filename:
+        raise HTTPException(status_code=400, detail="Missing filename in uploaded still ingest")
+
+    return _store_remote_upload(
+        url=request.url,
+        original_filename=original_filename,
+        content_type=request.content_type,
+        size_bytes=request.size_bytes,
     )
 
 
