@@ -79,12 +79,11 @@ export default async function MVPPage({
     if (resolvedLaunchEntryMode && !launchSceneId && !directProjectFrontDoor) {
         nextSearchParams.set("entry", resolvedLaunchEntryMode);
     }
-    const nextPath =
-        launchSceneId
-            ? `/mvp?${nextSearchParams.toString()}`
-            : nextSearchParams.size > 0
-              ? `/mvp/preview?${nextSearchParams.toString()}`
-              : "/mvp/preview";
+    const nextPath = launchSceneId
+        ? `/mvp?${nextSearchParams.toString()}`
+        : nextSearchParams.size > 0
+          ? `/mvp/preview?${nextSearchParams.toString()}`
+          : "/app/worlds";
 
     await requireMvpWorkspaceAccess(nextPath);
 
