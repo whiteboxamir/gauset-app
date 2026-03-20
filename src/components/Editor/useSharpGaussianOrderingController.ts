@@ -148,6 +148,7 @@ export function useSharpGaussianOrderingController({
     opacityBoost,
     colorGain,
     renderOrder = 0,
+    transitionActive = false,
 }: {
     payload: SharpGaussianPayload | null;
     material: THREE.ShaderMaterial | null;
@@ -155,6 +156,7 @@ export function useSharpGaussianOrderingController({
     opacityBoost: number;
     colorGain: number;
     renderOrder?: number;
+    transitionActive?: boolean;
 }) {
     const { gl, size } = useThree();
     const meshRef = useRef<THREE.Mesh<THREE.InstancedBufferGeometry, THREE.ShaderMaterial> | null>(null);
@@ -240,6 +242,13 @@ export function useSharpGaussianOrderingController({
             lastFrameCameraQuaternion.identity();
         };
     }, [isSingleImagePreview, material, payload]);
+
+    useEffect(() => {
+        if (!transitionActive) {
+            return;
+        }
+        sortReuseFrameCountRef.current = Number.POSITIVE_INFINITY;
+    }, [transitionActive]);
 
     useFrame(({ camera }) => {
         if (!payload || !material) {
@@ -449,6 +458,7 @@ export function useSharpGaussianOrderingController({
         const reachedReuseFrameBudget = sortReuseFrameCountRef.current >= motionForcedResortFrameBudget;
         const canReuseSort =
             hasSortedRef.current &&
+            !transitionActive &&
             ((pureRotationDelta && angularDelta <= pureRotationAngleThreshold) || translationDelta + payload.sceneRadius * angularDelta <= viewMotionThreshold) &&
             !reachedReuseFrameBudget;
 

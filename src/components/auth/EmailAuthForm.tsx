@@ -11,7 +11,7 @@ import type { AuthActionCode, AuthActionData, AuthActionResponse } from "@/serve
 import { AuthStatusNotice } from "./AuthStatusNotice";
 
 type Mode = "login" | "register";
-const REQUEST_ACCESS_URL = "https://gauset.com";
+const REQUEST_ACCESS_PATH = "/auth/register";
 
 const loginFlow = [
     "Use the approved email already tied to access.",
@@ -280,9 +280,16 @@ export function EmailAuthForm({
                     title="Access is still invite-first"
                     body="This route only works for emails that are already approved or invited into a studio. It will not activate a new account until that approval exists."
                 >
-                    <a href={REQUEST_ACCESS_URL} className="font-medium text-white transition-opacity hover:opacity-80">
-                        Request early access
-                    </a>
+                    <Link
+                        href={buildAuthEntryHref(REQUEST_ACCESS_PATH, {
+                            nextPath,
+                            email: normalizedEmail,
+                            invitationToken,
+                        })}
+                        className="font-medium text-white transition-opacity hover:opacity-80"
+                    >
+                        Open registration
+                    </Link>
                 </AuthStatusNotice>
             ) : null}
 
@@ -311,9 +318,16 @@ export function EmailAuthForm({
                 ) : null}
                 <div className="flex items-center justify-between gap-4 rounded-[1.25rem] border border-white/10 bg-white/[0.02] px-4 py-3">
                     <span>{mode === "login" ? "Need access first?" : "Need approval first?"}</span>
-                    <a href={REQUEST_ACCESS_URL} className="font-medium text-white transition-opacity hover:opacity-80">
-                        Request early access
-                    </a>
+                    <Link
+                        href={buildAuthEntryHref(REQUEST_ACCESS_PATH, {
+                            nextPath,
+                            email: normalizedEmail,
+                            invitationToken,
+                        })}
+                        className="font-medium text-white transition-opacity hover:opacity-80"
+                    >
+                        Open registration
+                    </Link>
                 </div>
             </div>
         </div>

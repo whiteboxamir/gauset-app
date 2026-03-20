@@ -20,8 +20,6 @@ export const EXPECTED_GITHUB_REPO = {
 };
 
 export const BLOCKED_PRODUCTION_HOSTS = new Set([
-    "gauset.com",
-    "www.gauset.com",
     "gnosika.com",
     "www.gnosika.com",
 ]);
@@ -180,10 +178,10 @@ export function evaluateBoundary(snapshot) {
     const blockedHost = [snapshot.projectProductionUrl, snapshot.deploymentUrl].find((host) => BLOCKED_PRODUCTION_HOSTS.has(host));
     if (blockedHost) {
         failures.push({
-            message: "Refusing to build gauset-app for the production gauset-com domain.",
+            message: "Refusing to build gauset-app for the blocked gnosika production domain.",
             details: [
                 `Blocked host: ${blockedHost}`,
-                "gauset.com and gnosika.com must only be built from /Users/amirboz/gauset.",
+                "gnosika.com must only be built from its dedicated production checkout.",
             ],
         });
     }

@@ -67,10 +67,13 @@ type ViewerDeliveryRuntimeState = {
     upgradeVariantLabel: string | null;
     residentLayerCount: number;
     residentPointCount: number;
+    residentByteCount: number;
+    inflightPageCount: number;
     refinePagesLoaded: number;
     refinePagesPending: number;
     deliveryProgressFraction: number;
     evictions: number;
+    pauseReason: string | null;
 };
 
 const DEFAULT_VIEWER_DELIVERY_RUNTIME_STATE: ViewerDeliveryRuntimeState = {
@@ -81,10 +84,13 @@ const DEFAULT_VIEWER_DELIVERY_RUNTIME_STATE: ViewerDeliveryRuntimeState = {
     upgradeVariantLabel: null,
     residentLayerCount: 0,
     residentPointCount: 0,
+    residentByteCount: 0,
+    inflightPageCount: 0,
     refinePagesLoaded: 0,
     refinePagesPending: 0,
     deliveryProgressFraction: 0,
     evictions: 0,
+    pauseReason: null,
 };
 
 function isSingleImagePreviewEnvironment(metadata: unknown) {
@@ -623,10 +629,13 @@ export function useThreeOverlayViewerRuntimeController({
                     : loadState.upgradeVariantLabel ?? null,
                 residentLayerCount: loadState.residentLayerCount ?? current.residentLayerCount,
                 residentPointCount: loadState.residentPointCount ?? current.residentPointCount,
+                residentByteCount: loadState.residentByteCount ?? current.residentByteCount,
+                inflightPageCount: loadState.inflightPageCount ?? current.inflightPageCount,
                 refinePagesLoaded: loadState.refinePagesLoaded ?? current.refinePagesLoaded,
                 refinePagesPending: loadState.refinePagesPending ?? current.refinePagesPending,
                 deliveryProgressFraction: loadState.deliveryProgressFraction ?? current.deliveryProgressFraction,
                 evictions: loadState.evictions ?? current.evictions,
+                pauseReason: loadState.deliveryPauseReason ?? current.pauseReason,
             }));
         },
         [viewerDecision.renderSource.mode],
@@ -661,10 +670,13 @@ export function useThreeOverlayViewerRuntimeController({
         deliveryUpgradeVariantLabel: deliveryRuntimeState.upgradeVariantLabel,
         deliveryResidentLayerCount: deliveryRuntimeState.residentLayerCount,
         deliveryResidentPointCount: deliveryRuntimeState.residentPointCount,
+        deliveryResidentByteCount: deliveryRuntimeState.residentByteCount,
+        deliveryInflightPageCount: deliveryRuntimeState.inflightPageCount,
         deliveryRefinePagesLoaded: deliveryRuntimeState.refinePagesLoaded,
         deliveryRefinePagesPending: deliveryRuntimeState.refinePagesPending,
         deliveryProgressFraction: deliveryRuntimeState.deliveryProgressFraction,
         deliveryEvictions: deliveryRuntimeState.evictions,
+        deliveryPauseReason: deliveryRuntimeState.pauseReason,
         prefersPerformanceMode,
         qualityPolicy,
         effectiveFocusRequest,

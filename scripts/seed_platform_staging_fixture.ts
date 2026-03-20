@@ -16,7 +16,7 @@ if (!loadEnvConfig) {
 
 loadEnvConfig(process.cwd());
 
-const DEFAULT_BASE_URL = "https://gauset-app.vercel.app";
+const DEFAULT_BASE_URL = "https://gauset.com";
 const DEFAULT_OWNER_EMAIL = "design-partner-owner@gauset.dev";
 const DEFAULT_OWNER_NAME = "Design Partner Trial Owner";
 const DEFAULT_STUDIO_NAME = "Design Partner Trial Studio";

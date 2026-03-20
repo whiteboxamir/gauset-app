@@ -8,7 +8,7 @@ const { loadEnvConfig } = nextEnv;
 
 loadEnvConfig(process.cwd());
 
-const baseUrl = (process.env.GAUSET_PLATFORM_E2E_BASE_URL || process.env.GAUSET_PLATFORM_BASE_URL || "https://gauset-app.vercel.app").trim();
+const baseUrl = (process.env.GAUSET_PLATFORM_E2E_BASE_URL || process.env.GAUSET_PLATFORM_BASE_URL || "https://gauset.com").trim();
 const supabaseUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL || "").trim();
 const supabaseAnonKey = (process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "").trim();
 const ownerEmail = (process.env.GAUSET_PLATFORM_FIXTURE_OWNER_EMAIL || process.env.GAUSET_PLATFORM_E2E_OWNER_EMAIL || "").trim().toLowerCase();

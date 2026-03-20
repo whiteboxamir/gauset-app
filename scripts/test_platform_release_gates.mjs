@@ -8,7 +8,7 @@ const { loadEnvConfig } = nextEnv;
 
 loadEnvConfig(process.cwd());
 
-const baseUrl = (process.env.GAUSET_PLATFORM_E2E_BASE_URL || process.env.GAUSET_PLATFORM_BASE_URL || "https://gauset-app.vercel.app").trim();
+const baseUrl = (process.env.GAUSET_PLATFORM_E2E_BASE_URL || process.env.GAUSET_PLATFORM_BASE_URL || "https://gauset.com").trim();
 const runLabel =
     (process.env.GAUSET_PLATFORM_RELEASE_GATES_RUN_LABEL || "").trim() ||
     `platform-release-gates-${new Date().toISOString().replace(/[:.]/g, "-")}`;

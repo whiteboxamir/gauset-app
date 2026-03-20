@@ -80,6 +80,7 @@ export default function LeftPanel({
             generatePreview={intake.generatePreview}
             isGeneratingAsset={intake.isGeneratingAsset}
             isGeneratingPreview={intake.isGeneratingPreview}
+            isUploading={intake.isUploading}
             isStartingReconstruction={intake.isStartingReconstruction}
             isUpdatingCapture={intake.isUpdatingCapture}
             minimumCaptureImages={intake.minimumCaptureImages}

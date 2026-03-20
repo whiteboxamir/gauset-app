@@ -273,10 +273,13 @@ export async function collectViewerDiagnostics(page) {
                       deliveryUpgradeVariantLabel: attr(runtimeDiagnostics, "data-delivery-upgrade-variant-label"),
                       deliveryResidentLayerCount: attr(runtimeDiagnostics, "data-delivery-resident-layer-count"),
                       deliveryResidentPointCount: attr(runtimeDiagnostics, "data-delivery-resident-point-count"),
+                      deliveryResidentByteCount: attr(runtimeDiagnostics, "data-delivery-resident-byte-count"),
+                      deliveryInflightPageCount: attr(runtimeDiagnostics, "data-delivery-inflight-page-count"),
                       deliveryRefinePagesLoaded: attr(runtimeDiagnostics, "data-delivery-refine-pages-loaded"),
                       deliveryRefinePagesPending: attr(runtimeDiagnostics, "data-delivery-refine-pages-pending"),
                       deliveryProgressFraction: attr(runtimeDiagnostics, "data-delivery-progress-fraction"),
                       deliveryEvictions: attr(runtimeDiagnostics, "data-delivery-evictions"),
+                      deliveryPauseReason: attr(runtimeDiagnostics, "data-delivery-pause-reason"),
                       canvasCreatedAtMs: attr(runtimeDiagnostics, "data-canvas-created-at-ms"),
                       viewerReadyAtMs: attr(runtimeDiagnostics, "data-viewer-ready-at-ms"),
                       firstContextLossAtMs: attr(runtimeDiagnostics, "data-first-context-loss-at-ms"),
@@ -296,6 +299,7 @@ export async function collectViewerDiagnostics(page) {
                       posterCurtainStage: attr(runtimeDiagnostics, "data-poster-curtain-stage"),
                       posterCurtainVisible: attr(runtimeDiagnostics, "data-poster-curtain-visible"),
                       renderMegapixels: attr(runtimeDiagnostics, "data-render-megapixels"),
+                      viewerTransitionActive: attr(runtimeDiagnostics, "data-viewer-transition-active"),
                   }
                 : null,
             deliveryDiagnostics: deliveryStatus
@@ -357,6 +361,17 @@ export async function collectViewerDiagnostics(page) {
               deliveryUpgradePending: normalizeBoolean(diagnostics.runtimeDiagnostics.deliveryUpgradePending),
               deliveryActiveVariantLabel: normalizeString(diagnostics.runtimeDiagnostics.deliveryActiveVariantLabel),
               deliveryUpgradeVariantLabel: normalizeString(diagnostics.runtimeDiagnostics.deliveryUpgradeVariantLabel),
+              deliveryHasPageStreaming: normalizeBoolean(diagnostics.runtimeDiagnostics.deliveryHasPageStreaming),
+              deliveryStreamingObserved: normalizeBoolean(diagnostics.runtimeDiagnostics.deliveryStreamingObserved),
+              deliveryResidentLayerCount: normalizeNumber(diagnostics.runtimeDiagnostics.deliveryResidentLayerCount),
+              deliveryResidentPointCount: normalizeNumber(diagnostics.runtimeDiagnostics.deliveryResidentPointCount),
+              deliveryResidentByteCount: normalizeNumber(diagnostics.runtimeDiagnostics.deliveryResidentByteCount),
+              deliveryInflightPageCount: normalizeNumber(diagnostics.runtimeDiagnostics.deliveryInflightPageCount),
+              deliveryRefinePagesLoaded: normalizeNumber(diagnostics.runtimeDiagnostics.deliveryRefinePagesLoaded),
+              deliveryRefinePagesPending: normalizeNumber(diagnostics.runtimeDiagnostics.deliveryRefinePagesPending),
+              deliveryProgressFraction: normalizeNumber(diagnostics.runtimeDiagnostics.deliveryProgressFraction),
+              deliveryEvictions: normalizeNumber(diagnostics.runtimeDiagnostics.deliveryEvictions),
+              deliveryPauseReason: normalizeString(diagnostics.runtimeDiagnostics.deliveryPauseReason),
               canvasCreatedAtMs: normalizeNumber(diagnostics.runtimeDiagnostics.canvasCreatedAtMs),
               viewerReadyAtMs: normalizeNumber(diagnostics.runtimeDiagnostics.viewerReadyAtMs),
               firstContextLossAtMs: normalizeNumber(diagnostics.runtimeDiagnostics.firstContextLossAtMs),
@@ -376,6 +391,7 @@ export async function collectViewerDiagnostics(page) {
               posterCurtainStage: normalizeString(diagnostics.runtimeDiagnostics.posterCurtainStage),
               posterCurtainVisible: normalizeBoolean(diagnostics.runtimeDiagnostics.posterCurtainVisible),
               renderMegapixels: normalizeNumber(diagnostics.runtimeDiagnostics.renderMegapixels),
+              viewerTransitionActive: normalizeBoolean(diagnostics.runtimeDiagnostics.viewerTransitionActive),
           }
         : null;
     const normalizedCanvasMetrics = diagnostics.canvasMetrics

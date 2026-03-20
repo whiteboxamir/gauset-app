@@ -170,6 +170,7 @@ precision highp int;
 precision highp sampler2DArray;
 
 uniform float uOpacityBoost;
+uniform float uLayerOpacity;
 uniform float uColorGain;
 uniform float uColorContrast;
 uniform float uColorSaturation;
@@ -307,7 +308,7 @@ void main() {
     float haloGaussian = exp(-max(4.4, gaussianSharpness - 1.2) * radiusSquared);
     float gaussian = mix(softGaussian, max(coreGaussian, haloGaussian * 0.92), clamp(uCoreHaloMix, 0.0, 1.0));
     float edgeFade = 1.0 - smoothstep(1.0 - edgeWidth, 1.0 + edgeWidth, radiusSquared);
-    float alpha = clamp(vAlpha * uOpacityBoost * gaussian * edgeFade, 0.0, 1.0);
+    float alpha = clamp(vAlpha * uOpacityBoost * uLayerOpacity * gaussian * edgeFade, 0.0, 1.0);
     float projectedCoverage = clamp(minorAxisPx / 1.35, 0.0, 1.0);
     float alphaDiscardThreshold = mix(0.00145, 0.00085, projectedCoverage) * (1.0 + subPixelSoftness * 0.25);
 
@@ -343,6 +344,7 @@ export function createSharpGaussianMaterial({
             uMinAxisPx: { value: DIRECT_REST_MIN_AXIS_PX },
             uMaxAxisPx: { value: 96.0 },
             uOpacityBoost: { value: 1.0 },
+            uLayerOpacity: { value: 1.0 },
             uColorGain: { value: 1.0 },
             uColorContrast: { value: richnessEnabled ? (hasSphericalHarmonics ? 1.07 : 1.04) : 1.0 },
             uColorSaturation: { value: richnessEnabled ? (hasSphericalHarmonics ? 1.12 : 1.07) : 1.0 },

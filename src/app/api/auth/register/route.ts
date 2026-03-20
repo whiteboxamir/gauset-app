@@ -44,7 +44,7 @@ export async function POST(request: NextRequest) {
             throw createAuthRouteError({
                 code: "launch_access_required",
                 status: 403,
-                message: "Account creation is limited to approved or invited emails. Request early access on gauset.com before registering here.",
+                message: "Account creation is limited to approved or invited emails. Request approval from the registration route before creating an account here.",
                 data: {
                     email: normalizedEmail,
                     nextStep: "request_access",

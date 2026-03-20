@@ -15,6 +15,7 @@ type EnvironmentSplatProps = {
     onPreviewBounds?: (bounds: PreviewBounds) => void;
     onFatalError?: (message: string, reason: ViewerFallbackReason) => void;
     onSharpLiveStateChange?: (state: { isLiveReady: boolean; loadState: SharpGaussianLoadState }) => void;
+    onSharpTransitionActiveChange?: (active: boolean) => void;
 };
 
 export default function EnvironmentSplat(props: EnvironmentSplatProps) {
@@ -33,6 +34,7 @@ export default function EnvironmentSplat(props: EnvironmentSplatProps) {
                 onPreviewBounds={props.onPreviewBounds}
                 onFatalError={props.onFatalError}
                 onLiveStateChange={props.onSharpLiveStateChange}
+                onTransitionActiveChange={props.onSharpTransitionActiveChange}
             />
         );
     }

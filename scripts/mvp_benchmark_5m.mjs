@@ -157,6 +157,7 @@ function summarizeRuntimeQuality(snapshot) {
               posterCurtainStage: runtimeDiagnostics.posterCurtainStage,
               posterCurtainVisible: runtimeDiagnostics.posterCurtainVisible,
               renderMegapixels: runtimeDiagnostics.renderMegapixels,
+              viewerTransitionActive: runtimeDiagnostics.viewerTransitionActive,
               deliveryManifestFirst: runtimeDiagnostics.deliveryManifestFirst,
               deliveryHasProgressiveVariants: runtimeDiagnostics.deliveryHasProgressiveVariants,
               deliveryHasCompressedVariants: runtimeDiagnostics.deliveryHasCompressedVariants,
@@ -168,10 +169,13 @@ function summarizeRuntimeQuality(snapshot) {
               upgradeVariantLabel: runtimeDiagnostics.deliveryUpgradeVariantLabel,
               residentLayerCount: runtimeDiagnostics.deliveryResidentLayerCount,
               residentPointCount: runtimeDiagnostics.deliveryResidentPointCount,
+              residentByteCount: runtimeDiagnostics.deliveryResidentByteCount,
+              inflightPageCount: runtimeDiagnostics.deliveryInflightPageCount,
               refinePagesLoaded: runtimeDiagnostics.deliveryRefinePagesLoaded,
               refinePagesPending: runtimeDiagnostics.deliveryRefinePagesPending,
               deliveryProgressFraction: runtimeDiagnostics.deliveryProgressFraction,
               deliveryEvictions: runtimeDiagnostics.deliveryEvictions,
+              deliveryPauseReason: runtimeDiagnostics.deliveryPauseReason,
           }
         : null;
 }
@@ -543,6 +547,15 @@ function resolveMotionVerdict(runtimeQuality) {
     if (runtimeQuality.streamingObserved && (runtimeQuality.refinePagesLoaded ?? 0) + (runtimeQuality.refinePagesPending ?? 0) <= 0) {
         reasons.push("streaming_truth_missing");
     }
+    if ((runtimeQuality.deliveryEvictions ?? 0) > 3) {
+        reasons.push(`excessive_evictions:${runtimeQuality.deliveryEvictions}`);
+    }
+    if ((runtimeQuality.inflightPageCount ?? 0) > 2) {
+        reasons.push(`streaming_pressure:${runtimeQuality.inflightPageCount}`);
+    }
+    if (runtimeQuality.viewerTransitionActive) {
+        reasons.push("transition_not_settled");
+    }
 
     if (reasons.length > 0) {
         return {
@@ -865,8 +878,11 @@ try {
         window.localStorage.setItem("gauset:mvp:draft:v1", JSON.stringify(draft));
     }, buildDraft(fixture));
 
+    const benchmarkUrl = new URL(url);
+    benchmarkUrl.searchParams.set("scene", fixture.sceneId);
+
     const coldStart = Date.now();
-    await page.goto(url, { waitUntil: "networkidle", timeout: 180000 });
+    await page.goto(benchmarkUrl.toString(), { waitUntil: "networkidle", timeout: 180000 });
     const coldDiagnostics = await waitForViewerLoaded(page, "cold-load");
     report.timings.coldLoadMs = Date.now() - coldStart;
     report.diagnostics.coldDiagnostics = coldDiagnostics;

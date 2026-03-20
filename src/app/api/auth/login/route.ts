@@ -40,7 +40,7 @@ export async function POST(request: NextRequest) {
             throw createAuthRouteError({
                 code: "launch_access_required",
                 status: 403,
-                message: "That email does not have design-partner access yet. Request early access on gauset.com before logging in here.",
+                message: "That email does not have design-partner access yet. Open the registration route to request approval before logging in here.",
                 data: {
                     email: normalizedEmail,
                     nextStep: "request_access",

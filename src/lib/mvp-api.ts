@@ -7,10 +7,18 @@ type ErrorPayload = {
     checklist?: string[];
 };
 
+function isLowSignalErrorDetail(value?: string) {
+    if (!value) return false;
+    const normalized = value.trim().toLowerCase();
+    return normalized === "fetch failed" || normalized === "failed to fetch" || normalized === "network request failed";
+}
+
 export async function extractApiError(response: Response, fallback: string) {
     try {
         const payload = (await response.json()) as ErrorPayload;
-        const primary = payload.detail || payload.message || fallback;
+        const detail = payload.detail?.trim();
+        const message = payload.message?.trim();
+        const primary = detail && !isLowSignalErrorDetail(detail) ? detail : message || detail || fallback;
         const checklist =
             Array.isArray(payload.checklist) && payload.checklist.length > 0
                 ? `\n\nNext steps:\n- ${payload.checklist.join("\n- ")}`

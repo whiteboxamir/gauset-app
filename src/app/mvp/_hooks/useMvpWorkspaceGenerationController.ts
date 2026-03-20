@@ -118,7 +118,11 @@ export function useMvpWorkspaceGenerationController({
                     detail: `Turning ${upload.sourceName} into a persistent world preview.`,
                     inputLabel: upload.sourceName,
                 });
-                setStatusText("Analyzing selected still and building the world preview...");
+                setStatusText(
+                    previewCapability?.lane_truth === "single_image_lrm_preview"
+                        ? "Analyzing the selected still and building the world preview. This local single-image lane can take a couple of minutes."
+                        : "Analyzing selected still and building the world preview...",
+                );
 
                 const response = await fetch(`${MVP_API_BASE_URL}/generate/environment`, {
                     method: "POST",
@@ -135,7 +139,11 @@ export function useMvpWorkspaceGenerationController({
                     throw new Error("Missing job id from preview generation response.");
                 }
 
-                setStatusText("World preview queued. Current output stays visible until the new preview is ready...");
+                setStatusText(
+                    previewCapability?.lane_truth === "single_image_lrm_preview"
+                        ? "World preview queued. This local single-image preview can take a couple of minutes; current output stays visible until the new preview is ready..."
+                        : "World preview queued. Current output stays visible until the new preview is ready...",
+                );
 
                 upsertJob({
                     id: jobId,

@@ -65,7 +65,7 @@ export async function PUT(request: NextRequest) {
             throw createAuthRouteError({
                 code: "launch_access_required",
                 status: 403,
-                message: "That email does not have access yet. Request early access on gauset.com or use the invited address.",
+                message: "That email does not have access yet. Use the invited address or open the registration route to request approval first.",
                 data: {
                     email: normalizedEmail,
                     nextStep: "request_access",

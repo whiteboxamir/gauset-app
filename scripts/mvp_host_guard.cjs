@@ -1,6 +1,6 @@
-const FORBIDDEN_PRODUCTION_HOSTS = new Set(["gauset.com", "www.gauset.com", "gnosika.com", "www.gnosika.com"]);
+const FORBIDDEN_PRODUCTION_HOSTS = new Set(["gnosika.com", "www.gnosika.com"]);
 const STRICT_LOCAL_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
-const DEFAULT_PUBLIC_CERT_ALLOWED_HOSTS = new Set(["gauset-app.vercel.app"]);
+const DEFAULT_PUBLIC_CERT_ALLOWED_HOSTS = new Set(["gauset.com", "www.gauset.com", "gauset-app.vercel.app"]);
 const PUBLIC_WRITE_ACK_VALUE = "I_UNDERSTAND_PUBLIC_WRITES";
 const PUBLIC_CERT_ALLOWED_HOSTS_ENV = "GAUSET_PUBLIC_CERT_ALLOWED_HOSTS";
 const RUN_LABEL_PATTERN = /^[a-z0-9][a-z0-9._-]{2,47}$/;
@@ -34,7 +34,7 @@ function assertNoForbiddenProductionHost(rawValue, label) {
     const hostname = url.hostname.toLowerCase();
     if (FORBIDDEN_PRODUCTION_HOSTS.has(hostname)) {
         throw new Error(
-            `${label} resolved to forbidden host "${hostname}". This repo must never target gauset.com or gnosika.com.`,
+            `${label} resolved to forbidden host "${hostname}". This repo must never target gnosika.com.`,
         );
     }
     return url;

@@ -30,8 +30,8 @@ export default async function AuthLoginPage({
             footer={
                 <p className="text-sm text-neutral-500">
                     Need access first?{" "}
-                    <a href="https://gauset.com" className="font-medium text-white transition-opacity hover:opacity-80">
-                        Request early access
+                    <a href={`/auth/register?next=${encodeURIComponent(nextPath)}`} className="font-medium text-white transition-opacity hover:opacity-80">
+                        Open registration
                     </a>
                 </p>
             }

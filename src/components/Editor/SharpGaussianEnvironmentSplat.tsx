@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 
 import type { GeneratedEnvironmentMetadata } from "@/lib/mvp-product";
@@ -12,16 +12,20 @@ import type { PreviewBounds, SharpGaussianLoadState, SharpGaussianResidentPayloa
 import { useSharpGaussianOrderingController } from "./useSharpGaussianOrderingController";
 import { useSharpGaussianPayloadController } from "./useSharpGaussianPayloadController";
 
+const PAGE_LAYER_FADE_IN_MS = 360;
+
 function SharpGaussianPayloadLayerMesh({
     layer,
     isSingleImagePreview,
     opacityBoost,
     colorGain,
+    transitionActive,
 }: {
     layer: SharpGaussianResidentPayload;
     isSingleImagePreview: boolean;
     opacityBoost: number;
     colorGain: number;
+    transitionActive: boolean;
 }) {
     const material = useMemo(
         () =>
@@ -31,6 +35,7 @@ function SharpGaussianPayloadLayerMesh({
             }),
         [isSingleImagePreview, layer.payload],
     );
+    const fadeStartedAtRef = useRef<number | null>(null);
     const meshRef = useSharpGaussianOrderingController({
         payload: layer.payload,
         material,
@@ -38,6 +43,7 @@ function SharpGaussianPayloadLayerMesh({
         opacityBoost,
         colorGain,
         renderOrder: layer.role === "bootstrap" ? 0 : 100 + (layer.pageIndex ?? layer.priority),
+        transitionActive,
     });
 
     useEffect(() => {
@@ -45,6 +51,18 @@ function SharpGaussianPayloadLayerMesh({
             material.dispose();
         };
     }, [material]);
+
+    useFrame(() => {
+        const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+        if (fadeStartedAtRef.current === null) {
+            fadeStartedAtRef.current = now;
+        }
+        const shouldAnimate = layer.role === "page";
+        const nextOpacity = shouldAnimate
+            ? Math.min(1, (now - fadeStartedAtRef.current) / PAGE_LAYER_FADE_IN_MS)
+            : 1;
+        material.uniforms.uLayerOpacity.value = nextOpacity;
+    });
 
     return <mesh ref={meshRef} geometry={layer.payload.geometry} material={material} frustumCulled={false} />;
 }
@@ -56,6 +74,7 @@ export function SharpGaussianEnvironmentSplat({
     onPreviewBounds,
     onFatalError,
     onLiveStateChange,
+    onTransitionActiveChange,
 }: {
     source: string;
     metadata?: GeneratedEnvironmentMetadata | null;
@@ -63,6 +82,7 @@ export function SharpGaussianEnvironmentSplat({
     onPreviewBounds?: (bounds: PreviewBounds) => void;
     onFatalError?: (message: string, reason: ViewerFallbackReason) => void;
     onLiveStateChange?: (state: { isLiveReady: boolean; loadState: SharpGaussianLoadState }) => void;
+    onTransitionActiveChange?: (active: boolean) => void;
 }) {
     const { gl } = useThree();
     const sharpGaussian = useSharpGaussianPayloadController({
@@ -76,6 +96,30 @@ export function SharpGaussianEnvironmentSplat({
     const candidateLiveReady = sharpGaussian.loadState.phase === "ready" && sharpGaussian.payloadLayers.length > 0;
     const reportedLiveStateRef = useRef<boolean | null>(null);
     const pendingLiveStateRef = useRef(false);
+    const transitionActiveRef = useRef(false);
+    const [transitionActive, setTransitionActive] = useState(false);
+
+    useFrame(() => {
+        const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+        const nextTransitionActive = sharpGaussian.payloadLayers.some(
+            (layer) => layer.role === "page" && now - layer.residentAt < PAGE_LAYER_FADE_IN_MS,
+        );
+        if (nextTransitionActive !== transitionActiveRef.current) {
+            transitionActiveRef.current = nextTransitionActive;
+            setTransitionActive(nextTransitionActive);
+            onTransitionActiveChange?.(nextTransitionActive);
+        }
+    });
+
+    useEffect(() => {
+        return () => {
+            if (transitionActiveRef.current) {
+                transitionActiveRef.current = false;
+                setTransitionActive(false);
+                onTransitionActiveChange?.(false);
+            }
+        };
+    }, [onTransitionActiveChange]);
 
     useEffect(() => {
         if (!onLiveStateChange) {
@@ -131,6 +175,7 @@ export function SharpGaussianEnvironmentSplat({
                         ),
                         "data-refine-pages-loaded": String(sharpGaussian.loadState.refinePagesLoaded ?? 0),
                         "data-refine-pages-pending": String(sharpGaussian.loadState.refinePagesPending ?? 0),
+                        "data-delivery-pause-reason": sharpGaussian.loadState.deliveryPauseReason ?? "",
                     }}
                 />
             ) : null}
@@ -141,6 +186,7 @@ export function SharpGaussianEnvironmentSplat({
                     isSingleImagePreview={sharpGaussian.isSingleImagePreview}
                     opacityBoost={sharpGaussian.opacityBoost}
                     colorGain={sharpGaussian.colorGain}
+                    transitionActive={transitionActive}
                 />
             ))}
         </>

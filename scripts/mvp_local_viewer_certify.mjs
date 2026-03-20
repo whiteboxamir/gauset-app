@@ -745,7 +745,12 @@ async function runViewerScenario({ scenarioId, draft, sceneId, forceWebgl2Unavai
     }
 
     try {
-        await page.goto(`${baseUrl}/mvp`, { waitUntil: "networkidle", timeout: 180000 });
+        const scenarioUrl = new URL("/mvp", baseUrl);
+        if (sceneId) {
+            scenarioUrl.searchParams.set("scene", sceneId);
+        }
+
+        await page.goto(scenarioUrl.toString(), { waitUntil: "networkidle", timeout: 180000 });
         const resumeDraftButton = page.getByRole("button", { name: /Return to my last world|Resume last draft/i });
         if (await resumeDraftButton.count()) {
             await resumeDraftButton.first().click();

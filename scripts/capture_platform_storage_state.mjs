@@ -11,7 +11,7 @@ const SUPABASE_JWT_KEY_PATTERN = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]
 
 loadEnvConfig(process.cwd());
 
-const baseUrl = (process.env.GAUSET_PLATFORM_E2E_BASE_URL || process.env.GAUSET_PLATFORM_BASE_URL || "https://gauset-app.vercel.app").trim();
+const baseUrl = (process.env.GAUSET_PLATFORM_E2E_BASE_URL || process.env.GAUSET_PLATFORM_BASE_URL || "https://gauset.com").trim();
 const ownerEmail = (process.env.GAUSET_PLATFORM_E2E_OWNER_EMAIL || process.env.GAUSET_PLATFORM_FIXTURE_OWNER_EMAIL || "").trim().toLowerCase();
 const ownerPassword = (process.env.GAUSET_PLATFORM_E2E_OWNER_PASSWORD || process.env.GAUSET_PLATFORM_FIXTURE_OWNER_PASSWORD || "").trim();
 const mailboxEmail = (process.env.GAUSET_PLATFORM_MAILBOX_EMAIL || ownerEmail).trim().toLowerCase();

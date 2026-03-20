@@ -453,10 +453,13 @@ const ViewerRuntimeBadge = React.memo(function ViewerRuntimeBadge({
         upgradeVariantLabel: string | null;
         residentLayerCount: number;
         residentPointCount: number;
+        residentByteCount: number;
+        inflightPageCount: number;
         refinePagesLoaded: number;
         refinePagesPending: number;
         progressFraction: number;
         evictions: number;
+        pauseReason: string | null;
     };
 }) {
     const qualityToneClass =
@@ -503,11 +506,15 @@ const ViewerRuntimeBadge = React.memo(function ViewerRuntimeBadge({
             : null;
     const deliveryBadge = deliveryStatus.upgradePending
         ? deliveryStatus.streamingObserved
-            ? `Detail arriving · ${Math.round(deliveryStatus.progressFraction * 100)}%`
+            ? deliveryStatus.pauseReason
+                ? `Detail arriving · ${Math.round(deliveryStatus.progressFraction * 100)}% · ${deliveryStatus.pauseReason}`
+                : `Detail arriving · ${Math.round(deliveryStatus.progressFraction * 100)}%`
             : `Refining from ${deliveryStatus.activeVariantLabel ?? "starter"} to ${deliveryStatus.upgradeVariantLabel ?? "full"}`
         : deliveryStatus.stagedObserved
           ? deliveryStatus.streamingObserved
-              ? `Live and refining · ${deliveryStatus.residentLayerCount} layers resident`
+              ? deliveryStatus.evictions > 0
+                  ? `Live and refining · ${deliveryStatus.residentLayerCount} layers · focus-aware`
+                  : `Live and refining · ${deliveryStatus.residentLayerCount} layers · ${Math.round(deliveryStatus.residentByteCount / (1024 * 1024))} MB resident`
               : `${deliveryStatus.activeVariantLabel ?? "Live scene"} ready`
           : null;
     const toneClass =
@@ -694,11 +701,14 @@ const ViewerLiveWarmupMatte = React.memo(function ViewerLiveWarmupMatte({
         streamingObserved?: boolean;
         refinePagesLoaded?: number;
         refinePagesPending?: number;
+        pauseReason?: string | null;
     };
 }) {
     const detail = deliveryStatus.upgradePending
         ? deliveryStatus.streamingObserved
-            ? `Starting with ${deliveryStatus.activeVariantLabel ?? "first light"} while ${deliveryStatus.refinePagesPending ?? 0} detail pages settle into the live scene.`
+            ? deliveryStatus.pauseReason
+                ? `Starting with ${deliveryStatus.activeVariantLabel ?? "first light"} while ${deliveryStatus.refinePagesPending ?? 0} detail pages settle into the live scene. ${deliveryStatus.pauseReason}.`
+                : `Starting with ${deliveryStatus.activeVariantLabel ?? "first light"} while ${deliveryStatus.refinePagesPending ?? 0} detail pages settle into the live scene.`
             : `Starting with ${deliveryStatus.activeVariantLabel ?? "a safe first-light variant"} while ${deliveryStatus.upgradeVariantLabel ?? "the fuller live scene"} prepares.`
         : qualityPolicy.summary;
 
@@ -796,6 +806,7 @@ const ThreeOverlay = React.memo(function ThreeOverlay({
     const [adaptiveQualityTier, setAdaptiveQualityTier] = useState<AdaptiveViewerQualityTier>(initialAdaptiveQualityTier);
     const [lowestAdaptiveQualityTier, setLowestAdaptiveQualityTier] = useState<AdaptiveViewerQualityTier>(initialAdaptiveQualityTier);
     const [runtimeTelemetry, setRuntimeTelemetry] = useState<ViewerRuntimeTelemetrySnapshot>(DEFAULT_VIEWER_RUNTIME_TELEMETRY);
+    const [viewerTransitionActive, setViewerTransitionActive] = useState(false);
     const [posterCurtainStage, setPosterCurtainStage] = useState<PosterCurtainStage>("hidden");
     const posterCurtainTimerRef = useRef<number | null>(null);
     const posterCurtainLockedRef = useRef(false);
@@ -803,6 +814,7 @@ const ThreeOverlay = React.memo(function ThreeOverlay({
         setAdaptiveQualityTier(initialAdaptiveQualityTier);
         setLowestAdaptiveQualityTier(initialAdaptiveQualityTier);
         setRuntimeTelemetry(DEFAULT_VIEWER_RUNTIME_TELEMETRY);
+        setViewerTransitionActive(false);
     }, [initialAdaptiveQualityTier, overlaySurface.environmentSplatUrl, overlaySurface.environmentViewerUrl, overlaySurface.renderMode]);
     useEffect(() => {
         setLowestAdaptiveQualityTier((current) =>
@@ -975,7 +987,7 @@ const ThreeOverlay = React.memo(function ThreeOverlay({
                         onMetricsChange={setRuntimeTelemetry}
                     />
                     <SceneBackgroundLock backgroundColor={backgroundColor} />
-                    {enablePremiumCompositor ? <TemporalAntialiasingComposer /> : null}
+                    {enablePremiumCompositor ? <TemporalAntialiasingComposer transitionActive={viewerTransitionActive} /> : null}
                     <ambientLight
                         intensity={
                             overlaySurface.isSingleImagePreview
@@ -1039,6 +1051,7 @@ const ThreeOverlay = React.memo(function ThreeOverlay({
                                 onPreviewBounds={overlaySurface.handlePreviewBounds}
                                 onFatalError={overlaySurface.handleEnvironmentFatalError}
                                 onSharpLiveStateChange={overlaySurface.handleSharpLiveStateChange}
+                                onSharpTransitionActiveChange={setViewerTransitionActive}
                             />
                         </Suspense>
                     ) : null}
@@ -1209,10 +1222,13 @@ const ThreeOverlay = React.memo(function ThreeOverlay({
                 data-delivery-upgrade-variant-label={overlaySurface.deliveryUpgradeVariantLabel ?? ""}
                 data-delivery-resident-layer-count={String(overlaySurface.deliveryResidentLayerCount)}
                 data-delivery-resident-point-count={String(overlaySurface.deliveryResidentPointCount)}
+                data-delivery-resident-byte-count={String(overlaySurface.deliveryResidentByteCount)}
+                data-delivery-inflight-page-count={String(overlaySurface.deliveryInflightPageCount)}
                 data-delivery-refine-pages-loaded={String(overlaySurface.deliveryRefinePagesLoaded)}
                 data-delivery-refine-pages-pending={String(overlaySurface.deliveryRefinePagesPending)}
                 data-delivery-progress-fraction={formatNumericRuntimeDiagnostic(overlaySurface.deliveryProgressFraction)}
                 data-delivery-evictions={String(overlaySurface.deliveryEvictions)}
+                data-delivery-pause-reason={overlaySurface.deliveryPauseReason ?? ""}
                 data-canvas-created-at-ms={formatNumericRuntimeDiagnostic(overlaySurface.runtimeDiagnostics.canvasCreatedAtMs)}
                 data-viewer-ready-at-ms={formatNumericRuntimeDiagnostic(overlaySurface.runtimeDiagnostics.viewerReadyAtMs)}
                 data-first-context-loss-at-ms={formatNumericRuntimeDiagnostic(overlaySurface.runtimeDiagnostics.firstContextLossAtMs)}
@@ -1232,6 +1248,7 @@ const ThreeOverlay = React.memo(function ThreeOverlay({
                 data-poster-curtain-stage={posterCurtainStage}
                 data-poster-curtain-visible={posterCurtainVisible ? "true" : "false"}
                 data-render-megapixels={formatNumericRuntimeDiagnostic(renderMegapixels)}
+                data-viewer-transition-active={viewerTransitionActive ? "true" : "false"}
                 hidden
             />
             {posterCurtainVisible && posterRevealImageUrl ? (
@@ -1252,6 +1269,7 @@ const ThreeOverlay = React.memo(function ThreeOverlay({
                         streamingObserved: overlaySurface.deliveryStreamingObserved,
                         refinePagesLoaded: overlaySurface.deliveryRefinePagesLoaded,
                         refinePagesPending: overlaySurface.deliveryRefinePagesPending,
+                        pauseReason: overlaySurface.deliveryPauseReason,
                     }}
                 />
             ) : null}
@@ -1276,10 +1294,13 @@ const ThreeOverlay = React.memo(function ThreeOverlay({
                     upgradeVariantLabel: overlaySurface.deliveryUpgradeVariantLabel,
                     residentLayerCount: overlaySurface.deliveryResidentLayerCount,
                     residentPointCount: overlaySurface.deliveryResidentPointCount,
+                    residentByteCount: overlaySurface.deliveryResidentByteCount,
+                    inflightPageCount: overlaySurface.deliveryInflightPageCount,
                     refinePagesLoaded: overlaySurface.deliveryRefinePagesLoaded,
                     refinePagesPending: overlaySurface.deliveryRefinePagesPending,
                     progressFraction: overlaySurface.deliveryProgressFraction,
                     evictions: overlaySurface.deliveryEvictions,
+                    pauseReason: overlaySurface.deliveryPauseReason,
                 }}
             />
             {surfaceContent}

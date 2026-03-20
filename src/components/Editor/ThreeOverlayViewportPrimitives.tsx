@@ -11,7 +11,11 @@ type TAARenderPassInternal = TAARenderPass & { accumulateIndex: number };
 
 const sceneBackgroundScratchColor = new THREE.Color();
 
-export const TemporalAntialiasingComposer = React.memo(function TemporalAntialiasingComposer() {
+export const TemporalAntialiasingComposer = React.memo(function TemporalAntialiasingComposer({
+    transitionActive = false,
+}: {
+    transitionActive?: boolean;
+}) {
     const { camera, gl, scene, size } = useThree();
     const composerRef = useRef<EffectComposer | null>(null);
     const taaPassRef = useRef<TAARenderPassInternal | null>(null);
@@ -57,6 +61,15 @@ export const TemporalAntialiasingComposer = React.memo(function TemporalAntialia
         taaPass.accumulateIndex = -1;
     }, [gl, size.height, size.width]);
 
+    useEffect(() => {
+        const taaPass = taaPassRef.current;
+        if (!taaPass) {
+            return;
+        }
+        taaPass.accumulate = !transitionActive;
+        taaPass.accumulateIndex = -1;
+    }, [transitionActive]);
+
     useFrame((_, delta) => {
         const composer = composerRef.current;
         const taaPass = taaPassRef.current;
@@ -73,6 +86,13 @@ export const TemporalAntialiasingComposer = React.memo(function TemporalAntialia
             lastCameraPositionRef.current.copy(camera.position);
             lastCameraQuaternionRef.current.copy(camera.quaternion);
             lastProjectionMatrixRef.current.copy(camera.projectionMatrix);
+        }
+
+        if (transitionActive) {
+            taaPass.accumulate = false;
+            taaPass.accumulateIndex = -1;
+        } else {
+            taaPass.accumulate = true;
         }
 
         composer.render(delta);

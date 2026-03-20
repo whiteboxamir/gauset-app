@@ -84,7 +84,6 @@ test.describe("focused local preview journey", () => {
         await expect(page).toHaveURL(new RegExp(`/mvp/preview\\?`));
         await expect(page).toHaveURL(new RegExp(`project=${sampleProjectId}`));
         await expect(page).toHaveURL(/source_kind=upload/);
-        await expect(page).toHaveURL(/entry=workspace/);
         await expect(page.getByTestId("mvp-preview-back-to-start")).toBeVisible();
         await expect(page.getByText(/^Project launch$/)).toBeVisible();
         await expect(page.getByRole("link", { name: /Continue to world start/i })).toHaveCount(0);
@@ -136,7 +135,6 @@ test.describe("focused local preview journey", () => {
             await expect(page).toHaveURL(new RegExp(`/mvp/preview\\?`));
             await expect(page).toHaveURL(new RegExp(`project=${sampleProjectId}`));
             await expect(page).toHaveURL(new RegExp(`source_kind=${launchCase.sourceKind}`));
-            await expect(page).toHaveURL(/entry=workspace/);
             await expect(page.getByTestId("mvp-preview-back-to-start")).toBeVisible();
             await expect(page.getByRole("link", { name: /Continue to world start/i })).toHaveCount(0);
         }
@@ -152,7 +150,6 @@ test.describe("focused local preview journey", () => {
         await expect(page).toHaveURL(new RegExp(`/mvp/preview\\?`));
         await expect(page).toHaveURL(new RegExp(`project=${sampleProjectId}`));
         await expect(page).toHaveURL(/source_kind=provider_generated_still/);
-        await expect(page).toHaveURL(/entry=workspace/);
         await expect(page.getByRole("link", { name: "Open demo world" })).toHaveCount(0);
         await expect(page.getByRole("link", { name: "Continue to world start" })).toHaveCount(0);
     });

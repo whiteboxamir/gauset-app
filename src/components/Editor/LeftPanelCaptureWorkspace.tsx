@@ -25,6 +25,7 @@ type LeftPanelCaptureWorkspaceProps = Pick<
     | "generatePreview"
     | "isGeneratingAsset"
     | "isGeneratingPreview"
+    | "isUploading"
     | "isStartingReconstruction"
     | "isUpdatingCapture"
     | "minimumCaptureImages"
@@ -63,6 +64,7 @@ export function LeftPanelCaptureWorkspace({
     generatePreview,
     isGeneratingAsset,
     isGeneratingPreview,
+    isUploading,
     isStartingReconstruction,
     isUpdatingCapture,
     minimumCaptureImages,
@@ -193,30 +195,46 @@ export function LeftPanelCaptureWorkspace({
                     <div className="space-y-3">
                         <button
                             onClick={generatePreview}
-                            disabled={!selectedUpload || isGeneratingPreview || isGeneratingAsset || backendMode === "offline" || backendWritesDisabled || !previewCapability?.available}
+                            disabled={
+                                !selectedUpload ||
+                                isUploading ||
+                                isGeneratingPreview ||
+                                isGeneratingAsset ||
+                                backendMode === "offline" ||
+                                backendWritesDisabled ||
+                                !previewCapability?.available
+                            }
                             className="w-full py-3.5 px-4 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-black font-medium flex items-center justify-center gap-2 transition-all disabled:opacity-50 disabled:hover:bg-emerald-500 shadow-lg shadow-emerald-950/20"
                         >
-                            {isGeneratingPreview ? <Loader2 className="animate-spin h-5 w-5" /> : <ImageIcon className="h-5 w-5" />}
-                            {isGeneratingPreview ? "Building world preview..." : previewButtonLabel}
+                            {isGeneratingPreview || isUploading ? <Loader2 className="animate-spin h-5 w-5" /> : <ImageIcon className="h-5 w-5" />}
+                            {isUploading ? "Upload in progress..." : isGeneratingPreview ? "Building world preview..." : previewButtonLabel}
                         </button>
 
                         <button
                             onClick={addSelectedToCaptureSet}
-                            disabled={!selectedUpload || isUpdatingCapture || backendMode === "offline" || backendWritesDisabled}
+                            disabled={!selectedUpload || isUploading || isUpdatingCapture || backendMode === "offline" || backendWritesDisabled}
                             className="w-full py-3.5 px-4 rounded-2xl bg-white/[0.04] hover:bg-white/[0.08] text-white font-medium flex items-center justify-center gap-2 transition-all border border-white/10 disabled:opacity-50 disabled:hover:bg-white/[0.04]"
                         >
-                            {isUpdatingCapture ? <Loader2 className="animate-spin h-5 w-5" /> : <Upload className="h-5 w-5" />}
-                            {isUpdatingCapture ? "Adding frame to capture set..." : "Add frame to capture set"}
+                            {isUpdatingCapture || isUploading ? <Loader2 className="animate-spin h-5 w-5" /> : <Upload className="h-5 w-5" />}
+                            {isUploading ? "Upload still in progress..." : isUpdatingCapture ? "Adding frame to capture set..." : "Add frame to capture set"}
                         </button>
 
                         {allowAssetActions ? (
                             <button
                                 onClick={generateAsset}
-                                disabled={!selectedUpload || isGeneratingPreview || isGeneratingAsset || backendMode === "offline" || backendWritesDisabled || !assetCapability?.available}
+                                disabled={
+                                    !selectedUpload ||
+                                    isUploading ||
+                                    isGeneratingPreview ||
+                                    isGeneratingAsset ||
+                                    backendMode === "offline" ||
+                                    backendWritesDisabled ||
+                                    !assetCapability?.available
+                                }
                                 className="w-full py-3.5 px-4 rounded-2xl bg-sky-500 hover:bg-sky-400 text-black font-medium flex items-center justify-center gap-2 transition-all disabled:opacity-50 disabled:hover:bg-sky-500 shadow-lg shadow-sky-950/20"
                             >
-                                {isGeneratingAsset ? <Loader2 className="animate-spin h-5 w-5" /> : <Box className="h-5 w-5" />}
-                                {isGeneratingAsset ? "Extracting 3D asset..." : "Extract 3D asset"}
+                                {isGeneratingAsset || isUploading ? <Loader2 className="animate-spin h-5 w-5" /> : <Box className="h-5 w-5" />}
+                                {isUploading ? "Upload in progress..." : isGeneratingAsset ? "Extracting 3D asset..." : "Extract 3D asset"}
                             </button>
                         ) : (
                             <div className="rounded-2xl border border-white/8 bg-black/20 px-4 py-3 text-[11px] leading-5 text-neutral-400">

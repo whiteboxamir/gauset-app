@@ -77,8 +77,8 @@ export function AuthPanelShell({
                         <div className="mt-10 rounded-[1.6rem] border border-white/10 bg-black/25 p-5">
                             <p className="text-[10px] font-semibold uppercase tracking-[0.28em] text-cyan-100/70">Launch rule</p>
                             <p className="mt-3 text-sm leading-7 text-neutral-300">
-                                Marketing stays on <span className="font-medium text-white">gauset.com</span>. Authentication and product access stay on the
-                                dedicated app surface so the public landing page never gets dragged into app routing.
+                                <span className="font-medium text-white">gauset.com</span> is now the saved-world front door. Authentication stays on the
+                                same product surface so project records, review, and reopen flows stay coherent from the first click.
                             </p>
                         </div>
                     </div>

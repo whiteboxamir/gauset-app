@@ -6,7 +6,7 @@ import hostGuard from "./mvp_host_guard.cjs";
 const { assertPublicCertificationContext, assertPublicMvpBaseUrl } = hostGuard;
 
 const BASE = assertPublicMvpBaseUrl(
-  process.env.GAUSET_MVP_BASE_URL || "https://gauset-app.vercel.app",
+  process.env.GAUSET_MVP_BASE_URL || "https://gauset.com",
   "scripts/hostile_public_audit.mjs base",
 );
 const STORAGE_BASE = assertPublicMvpBaseUrl(

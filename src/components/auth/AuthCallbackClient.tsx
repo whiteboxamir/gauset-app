@@ -193,9 +193,12 @@ export function AuthCallbackClient({
                     title="Access still needs approval"
                     body="The provider authenticated the email, but the platform did not confirm launch access for it. This surface will not create live access without approval."
                 >
-                    <a href="https://gauset.com" className="font-medium text-white transition-opacity hover:opacity-80">
-                        Request early access
-                    </a>
+                    <Link
+                        href={buildAuthEntryHref("/auth/register", nextPath, invitationToken)}
+                        className="font-medium text-white transition-opacity hover:opacity-80"
+                    >
+                        Open registration
+                    </Link>
                 </AuthStatusNotice>
             ) : null}
 
@@ -238,9 +241,9 @@ export function AuthCallbackClient({
                     >
                         Back to login
                     </Link>
-                    <a href="https://gauset.com" className="transition-opacity hover:opacity-80">
-                        Request early access
-                    </a>
+                    <Link href={buildAuthEntryHref("/auth/register", nextPath, invitationToken)} className="transition-opacity hover:opacity-80">
+                        Open registration
+                    </Link>
                 </div>
             ) : null}
         </div>

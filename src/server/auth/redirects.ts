@@ -1,4 +1,4 @@
-export function sanitizeNextPath(input?: string | null, fallback = "/app/dashboard") {
+export function sanitizeNextPath(input?: string | null, fallback = "/app/worlds") {
     const value = String(input || "").trim();
     if (!value) return fallback;
     if (!value.startsWith("/")) return fallback;

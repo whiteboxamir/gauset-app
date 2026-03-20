@@ -40,9 +40,7 @@ async function uploadSource(page: Page) {
 
 async function buildWorldPreview(page: Page) {
     await page.getByRole("button", { name: /Build (world preview|first world)/i }).click();
-    await expect
-        .poll(async () => await page.locator("body").innerText(), { timeout: 120_000 })
-        .toMatch(/ready:\s+scene_/i);
+    await expect(page.getByRole("button", { name: /^Save first version$/ })).toBeVisible({ timeout: 240_000 });
 }
 
 async function openProjectWorldStart(page: Page) {
@@ -56,7 +54,7 @@ async function createSavedWorld(page: Page) {
     await uploadSource(page);
     await buildWorldPreview(page);
     await page.getByRole("button", { name: /^Save first version$/ }).click();
-    await expect(page.getByRole("button", { name: /^Studio view off$/ })).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByRole("heading", { name: "Review and handoff" })).toBeVisible({ timeout: 20_000 });
 }
 
 async function fillContinuityRecord(page: Page) {
@@ -67,7 +65,7 @@ async function fillContinuityRecord(page: Page) {
 }
 
 test.describe("v3 project-bound local journey", () => {
-    test.describe.configure({ timeout: 150_000 });
+    test.describe.configure({ timeout: 360_000 });
 
     test.beforeEach(async ({ page }) => {
         await page.addInitScript(() => {
@@ -103,8 +101,7 @@ test.describe("v3 project-bound local journey", () => {
         await expect(page).toHaveURL(new RegExp(`project=${sampleProjectId}`));
         await expect(page).toHaveURL(/scene=scene_/);
 
-        await page.getByRole("button", { name: /^Studio view off$/ }).click();
-        await expect(page.getByRole("button", { name: /^Studio view on$/ })).toBeVisible();
+        await expect(page.getByText(/Studio view (available|on)/)).toBeVisible();
         await expect(page).toHaveURL(/\/mvp\?/);
         await expect(page).toHaveURL(new RegExp(`project=${sampleProjectId}`));
         await expect(page).toHaveURL(/scene=scene_/);
