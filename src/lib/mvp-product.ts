@@ -1,4 +1,4 @@
-import { normalizeSplatDeliveryState } from "./mvp-splat-delivery";
+import { normalizeSplatDeliveryState } from "./mvp-splat-delivery.ts";
 
 export type BackendMode = "checking" | "ready" | "degraded" | "offline";
 
