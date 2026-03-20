@@ -77,7 +77,7 @@ export default async function PlatformProjectDetailPage({
                                     href="#project-world-launch"
                                     className="rounded-2xl bg-[#f4efe8] px-4 py-2.5 text-sm font-semibold text-[#101418] transition-colors hover:bg-[#ebe3d8]"
                                 >
-                                    Build world record
+                                    Start world
                                 </Link>
                                 <Link
                                     href="/app/worlds"
@@ -106,7 +106,7 @@ export default async function PlatformProjectDetailPage({
                         resumeSceneId={detail.project.primarySceneId}
                     />
                     <section className="rounded-[1.85rem] border border-[var(--border-soft)] bg-[linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.02))] p-5 shadow-[0_18px_60px_rgba(0,0,0,0.16)]">
-                        <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#9d978f]">Project record state</p>
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#9d978f]">Current shell</p>
                         <div className="mt-4 rounded-[1.2rem] border border-[var(--border-soft)] bg-[rgba(244,239,232,0.035)] p-4">
                             <div className="flex flex-wrap gap-2">
                                 <span className="rounded-full border border-[#c7d7c8]/35 bg-[#c7d7c8]/10 px-3 py-1 text-[10px] uppercase tracking-[0.16em] text-[#dce7dd]">

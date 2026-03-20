@@ -42,7 +42,7 @@ export default async function MVPPreviewPage({
         const canonicalWorkspacePath = `/mvp?${workspaceSearchParams.toString()}`;
 
         await requireMvpWorkspaceAccess(canonicalWorkspacePath);
-        redirect(canonicalWorkspacePath);
+        redirect(`/mvp?${workspaceSearchParams.toString()}`);
     }
 
     const directProjectFrontDoor = Boolean(launchProjectId) && !launchSceneId;

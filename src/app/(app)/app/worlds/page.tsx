@@ -78,8 +78,8 @@ export default async function PlatformWorldsPage() {
                             <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#bfd6de]/78">Project records</p>
                             <h1 className="mt-3 text-3xl font-medium tracking-tight text-[var(--foreground)]">Build one world. Save it once. Then direct it.</h1>
                             <p className="mt-3 max-w-2xl text-sm leading-6 text-[#d3ccc2]">
-                                Gauset is the persistent world and continuity record for AI filmmaking. Choose a project to test upload, save, reopen, and handoff posture without pretending the rest
-                                of production is live.
+                                Gauset is the persistent world and continuity record for AI filmmaking. Choose a project. Build one world. Save it once. Then test upload, reopen, and handoff posture
+                                without pretending the rest of production is live.
                             </p>
                         </div>
 
@@ -141,7 +141,7 @@ export default async function PlatformWorldsPage() {
                                                 href={`/app/worlds/${project.projectId}#project-world-launch`}
                                                 className="rounded-2xl bg-[#f4efe8] px-4 py-2.5 text-sm font-semibold text-[#101418] transition-colors hover:bg-[#ebe3d8]"
                                             >
-                                                Choose source path
+                                                Start world
                                             </Link>
                                         ) : null}
                                         <Link
