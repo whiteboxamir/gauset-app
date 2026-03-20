@@ -2,6 +2,7 @@ import fs from "fs/promises";
 import path from "path";
 import crypto from "crypto";
 import hostGuard from "./mvp_host_guard.cjs";
+import { uploadStillFixtureToMvp } from "./mvp_upload_client.mjs";
 
 const { assertLocalMvpBaseUrl } = hostGuard;
 
@@ -46,17 +47,9 @@ async function jsonFetch(url, init) {
 }
 
 async function uploadFixture(filePath, index) {
-  const bytes = await fs.readFile(filePath);
-  const formData = new FormData();
-  formData.set("file", new Blob([bytes], { type: "image/png" }), `${path.parse(filePath).name}-${index + 1}.png`);
-  const { response, payload } = await jsonFetch(`${API_BASE}/upload`, {
-    method: "POST",
-    body: formData,
+  return uploadStillFixtureToMvp(BASE, filePath, {
+    filename: `${path.parse(filePath).name}-${index + 1}.png`,
   });
-  if (!response.ok) {
-    throw new Error(`upload failed: ${response.status} ${JSON.stringify(payload)}`);
-  }
-  return payload;
 }
 
 async function createCaptureSession() {
@@ -298,7 +291,7 @@ async function main() {
     const capture = await createCaptureSession();
     const captureReady = await addCaptureFrames(
       capture.session_id,
-      uploads.map((upload) => upload.image_id),
+      uploads.map((upload) => upload.payload.image_id),
     );
 
     if (!reconstructionAvailable) {
@@ -314,6 +307,7 @@ async function main() {
         capture_ready: Boolean(captureReady.ready_for_reconstruction),
         capture_status: captureReady.status,
         frame_count: captureReady.frame_count,
+        upload_transports: uploads.map((upload) => upload.transport),
         reconstruction_blockers: captureReady.reconstruction_blockers ?? [],
         reconstruction_probe: reconstructionProbe,
         hostile_failures: failures,
@@ -338,6 +332,7 @@ async function main() {
       name: wave.name,
       fixture: wave.file,
       session_id: capture.session_id,
+      upload_transports: uploads.map((upload) => upload.transport),
       scene_id: job.result.scene_id,
       duration_ms: Date.now() - startedAt,
       capture_ready: Boolean(captureReady.ready_for_reconstruction),

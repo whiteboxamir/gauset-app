@@ -81,11 +81,10 @@ ${(summary.steps || [])
 
 ## Read-Only Preflight
 
-- \`/mvp\` shell: ${formatPassFail(Boolean(preflight.checks?.mvp_shell?.ok && preflight.checks?.mvp_shell?.title_present))}
-- \`/mvp/preview\` shell: ${formatPassFail(
-    Boolean(preflight.checks?.preview_shell?.ok && preflight.checks?.preview_shell?.launchpad_present),
+- \`/mvp\` launchpad shell: ${formatPassFail(
+    Boolean(preflight.checks?.mvp_shell?.ok && preflight.checks?.mvp_shell?.title_present && preflight.checks?.mvp_shell?.launchpad_present),
 )}
-- Preview safe-lane copy: ${formatPassFail(Boolean(preflight.checks?.preview_shell?.safe_lane_copy_present))}
+- \`/mvp/preview\` compatibility redirect: ${formatPassFail(Boolean(preflight.checks?.preview_compatibility?.ok))}
 - Frontend deployment fingerprint: ${formatValue(preflight.checks?.frontend_deployment?.fingerprint?.build_label)}
 - Health API: ${formatPassFail(Boolean(preflight.checks?.health?.ok && preflight.checks?.health?.payload?.status === "ok"))}
 - Setup status API: ${formatPassFail(Boolean(preflight.checks?.setup_status?.ok))}
@@ -147,8 +146,8 @@ ${formatList(screenshotFiles.map((filename) => `Review \`${relativeArtifactPath(
 ## Manual Review Checklist
 
 - Confirm the frontend build badge is visible in each screenshot and matches \`/api/mvp/deployment\`.
-- Confirm the main \`/mvp\` workspace screenshots do not show the preview-route badge.
-- Confirm the \`/mvp/preview\` launchpad screenshot shows the demo lane and, after opening the demo world, the route badge is visible.
+- Confirm the main \`/mvp\` screenshots keep the project/world-record posture, with sample clearly secondary and no preview-route debug copy.
+- Confirm the compatibility check still keeps \`/mvp/preview\` redirecting cleanly into the matching \`/mvp\` route.
 - Confirm the review-page screenshot shows the public review shell rather than a blank or fallback state.
 - Confirm the hostile audit summary remains at zero failed hostile checks before marking Phase 1 public certification complete.
 

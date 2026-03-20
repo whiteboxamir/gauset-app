@@ -2,6 +2,7 @@ import fs from "fs/promises";
 import path from "path";
 import crypto from "crypto";
 import hostGuard from "./mvp_host_guard.cjs";
+import { uploadStillFixtureToMvp } from "./mvp_upload_client.mjs";
 
 const { assertPublicCertificationContext, assertPublicMvpBaseUrl } = hostGuard;
 
@@ -65,17 +66,7 @@ function resolveStorageUrl(relativePath) {
 }
 
 async function uploadFixture(filePath) {
-  const bytes = await fs.readFile(filePath);
-  const formData = new FormData();
-  formData.set("file", new Blob([bytes], { type: "image/png" }), path.basename(filePath));
-  const { response, payload } = await jsonFetch(`${BASE}/api/mvp/upload`, {
-    method: "POST",
-    body: formData,
-  });
-  if (!response.ok) {
-    throw new Error(`upload failed: ${response.status} ${JSON.stringify(payload)}`);
-  }
-  return payload;
+  return uploadStillFixtureToMvp(BASE, filePath);
 }
 
 async function generateEnvironment(imageId) {
@@ -295,7 +286,7 @@ async function main() {
     const fixturePath = path.join(FIXTURE_DIR, wave.file);
     const startedAt = Date.now();
     const upload = await uploadFixture(fixturePath);
-    const generation = await generateEnvironment(upload.image_id);
+    const generation = await generateEnvironment(upload.payload.image_id);
     const job = await pollJob(generation.job_id);
 
     const metadataUrl = resolveStorageUrl(job.result?.urls?.metadata || `/storage/scenes/${job.result.scene_id}/environment/metadata.json`);
@@ -315,7 +306,8 @@ async function main() {
     report.waves.push({
       name: wave.name,
       fixture: wave.file,
-      image_id: upload.image_id,
+      image_id: upload.payload.image_id,
+      upload_transport: upload.transport,
       scene_id: job.result.scene_id,
       duration_ms: Date.now() - startedAt,
       metadata,

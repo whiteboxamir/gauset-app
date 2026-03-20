@@ -680,9 +680,11 @@ function testSharedTruthContractDocs() {
     assert.match(packageJson.scripts["test:platform-release-gates"], /scripts\/test_platform_release_gates\.mjs/);
     assert.match(packageJson.scripts["test:platform-live-routes"], /scripts\/test_platform_live_routes\.mjs/);
     assert.match(packageJson.scripts["certify:platform-rollout"], /scripts\/certify_platform_rollout\.mjs/);
+    const releaseWorkflow = readTextFixture(".github/workflows/platform-release-gates.yml");
+    assert.match(releaseWorkflow, /node-version:\s*24/);
     const liveRoutesScript = readTextFixture("scripts/test_platform_live_routes.mjs");
     assert.match(liveRoutesScript, /\/mvp\/preview/);
-    assert.match(liveRoutesScript, /expectGate: true/);
+    assert.match(liveRoutesScript, /expectedCanonicalPath/);
     const releaseGatesScript = readTextFixture("scripts/test_platform_release_gates.mjs");
     assert.match(releaseGatesScript, /\["npm", "run", "test:platform-live-routes"\]/);
     assert.match(releaseGatesScript, /GAUSET_PLATFORM_EXPECT_MVP_GATE:\s*"1"/);
@@ -991,9 +993,10 @@ function testSingleJourneyRouteContracts() {
     const openWorkspaceButton = readTextFixture("src/components/worlds/OpenWorkspaceButton.tsx");
 
     assert.match(appHome, /redirect\("\/app\/worlds"\)/);
-    assert.match(mvpPage, /routeVariant="preview"/);
+    assert.match(mvpPage, /routeVariant="launchpad"/);
     assert.match(mvpPage, /const nextPath = nextSearchParams\.size > 0 \? `\/mvp\?/);
-    assert.match(previewPage, /if \(launchSceneId\) \{[\s\S]*redirect\(`\/mvp\?/);
+    assert.match(previewPage, /if \(launchSceneId\) \{[\s\S]*const canonicalWorkspacePath = `\/mvp\?/);
+    assert.match(previewPage, /redirect\(canonicalWorkspacePath\)/);
     assert.match(previewPage, /redirect\(nextPath\)/);
     assert.match(projectDetailPage, /resumeSceneId=\{detail\.project\.primarySceneId\}/);
     assert.match(openWorkspaceButton, /router\.push\("\/app\/worlds"\)/);
@@ -1011,15 +1014,16 @@ function testLocalPreviewJourneyContracts() {
     assert.match(worldsPage, /if \(!authSurfaceStatus\.authConfigured\)/);
     assert.match(worldsPage, /LocalPreviewNotice/);
     assert.match(worldsPage, /listLocalPreviewProjectReadinessCardsForSession/);
-    assert.match(worldsPage, /Choose a project\. Build one world\. Save it once\./);
-    assert.match(worldsPage, /Start world/);
+    assert.match(worldsPage, /Build one world\. Save it once\. Then direct it\./);
+    assert.match(worldsPage, /Choose source path/);
+    assert.match(worldsPage, /Open project record/);
     assert.match(worldsPage, /CreateProjectPanel id="project-composer"/);
 
     assert.match(projectDetailPage, /if \(!authSurfaceStatus\.authConfigured\)/);
     assert.match(projectDetailPage, /getLocalPreviewProjectReadinessDetailForId/);
     assert.match(projectDetailPage, /LocalPreviewNotice/);
-    assert.match(projectDetailPage, /Start world/);
-    assert.match(projectDetailPage, /Current shell/);
+    assert.match(projectDetailPage, /Build world record/);
+    assert.match(projectDetailPage, /Project record state/);
     assert.match(projectDetailPage, /World-first checklist/);
     assert.doesNotMatch(projectDetailPage, /requireAuthSession\("\/app\/worlds"\);[\s\S]*if \(!authSurfaceStatus\.authConfigured\)/);
 

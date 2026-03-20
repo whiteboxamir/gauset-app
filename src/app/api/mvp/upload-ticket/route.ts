@@ -42,10 +42,14 @@ export async function POST(request: NextRequest) {
         return toErrorResponse("Direct backend upload is unavailable on this deployment.", 409);
     }
 
-    return NextResponse.json(
-        issueBrowserDirectUploadGrant({
-            ...payload,
-            uploadUrl: capability.directUploadUrl,
-        }),
-    );
+    try {
+        return NextResponse.json(
+            issueBrowserDirectUploadGrant({
+                ...payload,
+                uploadUrl: capability.directUploadUrl,
+            }),
+        );
+    } catch (error) {
+        return toErrorResponse(error instanceof Error ? error.message : "Direct backend upload is unavailable on this deployment.", 503);
+    }
 }

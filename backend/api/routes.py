@@ -41,6 +41,7 @@ for directory in [UPLOADS_DIR, SCENES_DIR, ASSETS_DIR]:
 jobs: Dict[str, Dict[str, Any]] = {}
 capture_sessions: Dict[str, Dict[str, Any]] = {}
 upload_records: Dict[str, Dict[str, Any]] = {}
+browser_upload_grant_nonces: Dict[str, int] = {}
 
 CAPTURE_MIN_IMAGES = 8
 CAPTURE_RECOMMENDED_IMAGES = 12
@@ -55,7 +56,7 @@ HANDOFF_MANIFEST_VERSION = "gauset.handoff_manifest.v1"
 HANDOFF_TARGETS = ["scene_document_v2", "external_world_package", "unreal_handoff_manifest"]
 WORLD_INGEST_RECORD_VERSION = "world-ingest/v1"
 SCENE_DOCUMENT_GRAPH_MISMATCH_CODE = "SCENE_DOCUMENT_GRAPH_MISMATCH"
-BROWSER_UPLOAD_GRANT_VERSION = "gauset-browser-upload-v1"
+BROWSER_UPLOAD_GRANT_VERSION = "gauset-browser-upload-v2"
 
 
 def _utc_now() -> str:
@@ -104,7 +105,11 @@ def _is_allowed_remote_upload_url(url: str) -> bool:
 
 
 def _worker_token() -> str:
-    return os.getenv("GAUSET_WORKER_TOKEN", "").strip()
+    return (
+        os.getenv("GAUSET_BACKEND_WORKER_TOKEN", "").strip()
+        or os.getenv("GAUSET_IMAGE_TO_SPLAT_BACKEND_TOKEN", "").strip()
+        or os.getenv("GAUSET_WORKER_TOKEN", "").strip()
+    )
 
 
 def _request_has_worker_auth(request: Request) -> bool:
@@ -127,11 +132,52 @@ def _browser_upload_grant_secret() -> str:
     return (
         os.getenv("GAUSET_BROWSER_UPLOAD_SECRET", "").strip()
         or os.getenv("GAUSET_BACKEND_WORKER_TOKEN", "").strip()
+        or os.getenv("GAUSET_IMAGE_TO_SPLAT_BACKEND_TOKEN", "").strip()
         or _worker_token()
     )
 
 
-def _browser_upload_grant_message(filename: str, content_type: str, size_bytes: int, expires_at: int) -> str:
+def _normalize_upload_audience(value: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    try:
+        parsed = urllib.parse.urlparse(text)
+    except ValueError:
+        return ""
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return ""
+    normalized_path = (parsed.path or "/").rstrip("/") or "/"
+    return f"{parsed.scheme}://{parsed.netloc}{normalized_path}"
+
+
+def _current_request_upload_audience(request: Request) -> str:
+    return _normalize_upload_audience(str(request.url))
+
+
+def _prune_browser_upload_grant_nonces() -> None:
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    stale_nonces = [nonce for nonce, expires_at in browser_upload_grant_nonces.items() if expires_at <= now_ms]
+    for nonce in stale_nonces:
+        browser_upload_grant_nonces.pop(nonce, None)
+
+
+def _reserve_browser_upload_grant_nonce(nonce: str, expires_at: int) -> bool:
+    _prune_browser_upload_grant_nonces()
+    if nonce in browser_upload_grant_nonces:
+        return False
+    browser_upload_grant_nonces[nonce] = expires_at
+    return True
+
+
+def _browser_upload_grant_message(
+    filename: str,
+    content_type: str,
+    size_bytes: int,
+    expires_at: int,
+    audience: str,
+    nonce: str,
+) -> str:
     normalized_content_type = str(content_type or "").strip().lower()
     return "\n".join(
         [
@@ -140,45 +186,69 @@ def _browser_upload_grant_message(filename: str, content_type: str, size_bytes: 
             normalized_content_type,
             str(int(size_bytes)),
             str(int(expires_at)),
+            str(audience or "").strip(),
+            str(nonce or "").strip(),
         ]
     )
 
 
-def _has_valid_browser_upload_grant(request: Request, *, filename: str, content_type: str, size_bytes: int) -> bool:
+def _validate_browser_upload_grant_headers(request: Request, *, filename: str, content_type: str) -> Dict[str, int] | None:
     secret = _browser_upload_grant_secret()
     if not secret:
-        return False
+        return None
 
     signed_filename = request.headers.get("x-gauset-upload-filename", "").strip()
     signed_content_type = request.headers.get("x-gauset-upload-content-type", "").strip().lower()
     signed_size = request.headers.get("x-gauset-upload-size", "").strip()
     signed_expires = request.headers.get("x-gauset-upload-expires", "").strip()
+    signed_audience = request.headers.get("x-gauset-upload-audience", "").strip()
+    signed_nonce = request.headers.get("x-gauset-upload-nonce", "").strip()
     provided_signature = request.headers.get("x-gauset-upload-signature", "").strip()
-    if not (signed_filename and signed_content_type and signed_size and signed_expires and provided_signature):
-        return False
+    if not (signed_filename and signed_content_type and signed_size and signed_expires and signed_audience and signed_nonce and provided_signature):
+        return None
 
     if signed_filename != str(filename or "").strip():
-        return False
+        return None
     if signed_content_type != str(content_type or "").strip().lower():
-        return False
+        return None
 
     try:
         expected_size = int(signed_size)
         expires_at = int(signed_expires)
     except ValueError:
-        return False
+        return None
 
-    if expected_size != int(size_bytes) or int(size_bytes) <= 0:
-        return False
+    request_audience = _current_request_upload_audience(request)
+    if not request_audience or signed_audience != request_audience:
+        return None
+    if expected_size <= 0 or expected_size > DIRECT_UPLOAD_MAX_BYTES:
+        return None
     if expires_at < int(datetime.now(timezone.utc).timestamp() * 1000):
-        return False
+        return None
+    if len(signed_nonce) < 16 or not all(character.isalnum() or character in "-_" for character in signed_nonce):
+        return None
 
     expected_signature = hmac.new(
         secret.encode("utf-8"),
-        _browser_upload_grant_message(signed_filename, signed_content_type, expected_size, expires_at).encode("utf-8"),
+        _browser_upload_grant_message(
+            signed_filename,
+            signed_content_type,
+            expected_size,
+            expires_at,
+            signed_audience,
+            signed_nonce,
+        ).encode("utf-8"),
         hashlib.sha256,
     ).hexdigest()
-    return hmac.compare_digest(provided_signature, expected_signature)
+    if not hmac.compare_digest(provided_signature, expected_signature):
+        return None
+    if not _reserve_browser_upload_grant_nonce(signed_nonce, expires_at):
+        return None
+
+    return {
+        "expected_size": expected_size,
+        "expires_at": expires_at,
+    }
 
 
 def _job_context_from_request(request: Request) -> Dict[str, Any]:
@@ -1859,18 +1929,21 @@ async def upload_image(http_request: Request, file: UploadFile = File(...)):
     if not file.filename:
         raise HTTPException(status_code=400, detail="Missing filename in upload")
 
-    contents = await file.read()
-    if not contents:
-        raise HTTPException(status_code=400, detail="Uploaded file is empty")
-
+    grant_headers = None
     if not _request_has_worker_auth(http_request):
-        if not _has_valid_browser_upload_grant(
+        grant_headers = _validate_browser_upload_grant_headers(
             http_request,
             filename=file.filename,
             content_type=(file.content_type or "application/octet-stream"),
-            size_bytes=len(contents),
-        ):
+        )
+        if not grant_headers:
             raise HTTPException(status_code=401, detail="Unauthorized worker request")
+
+    contents = await file.read()
+    if not contents:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty")
+    if grant_headers and len(contents) != grant_headers["expected_size"]:
+        raise HTTPException(status_code=400, detail="Uploaded file size did not match the signed upload grant")
 
     return _store_upload_bytes(contents, file.filename, source_type="upload")
 

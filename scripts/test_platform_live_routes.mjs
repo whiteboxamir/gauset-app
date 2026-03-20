@@ -144,9 +144,41 @@ function probeAnonymousMvp(pathname, { expectGate = null } = {}) {
     };
 }
 
+function probeCompatibilityRedirect(pathname, { expectedCanonicalPath } = {}) {
+    const response = request(pathname, { method: "GET" });
+    const location = response.headers.get("location");
+    const contentType = response.headers.get("content-type") || "";
+    const responseText = contentType.includes("text/html") ? response.body : "";
+    const htmlRedirectTarget =
+        responseText.match(/http-equiv="refresh" content="1;url=([^"]+)"/)?.[1] ||
+        responseText.match(/NEXT_REDIRECT;replace;([^;]+);307/)?.[1] ||
+        null;
+    const resolvedRedirectTarget = location || htmlRedirectTarget;
+    const redirectObserved = response.status === 307 || response.status === 308 || Boolean(resolvedRedirectTarget);
+    const ok = Boolean(redirectObserved && resolvedRedirectTarget?.includes(expectedCanonicalPath) && !response.error);
+
+    return {
+        pathname,
+        method: "GET",
+        status: response.status,
+        ok,
+        location,
+        htmlRedirectTarget,
+        expectedCanonicalPath,
+        error: response.error,
+    };
+}
+
+const sampleProjectId = "11111111-1111-4111-8111-111111111111";
+
 const checks = {
     mvp: await probeAnonymousMvp("/mvp", { expectGate: expectMvpGate }),
-    mvpPreview: await probeAnonymousMvp("/mvp/preview", { expectGate: true }),
+    mvpPreviewCompatibility: await probeCompatibilityRedirect(
+        `/mvp/preview?project=${sampleProjectId}&source_kind=upload&entry=workspace`,
+        {
+            expectedCanonicalPath: `/mvp?project=${sampleProjectId}&source_kind=upload&entry=workspace`,
+        },
+    ),
     teamPageAnonymous: await probe("/app/team", {
         expectedStatus: 307,
         expectedLocationIncludes: "/auth/login?next=%2Fapp%2Fteam",

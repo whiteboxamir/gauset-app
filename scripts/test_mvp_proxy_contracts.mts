@@ -8,6 +8,7 @@ import {
     resolveInternalBackendBaseUrlForOrigin,
     resolveBackendWorkerToken,
 } from "../src/server/mvp/proxyBackend.ts";
+import { issueBrowserDirectUploadGrant, resolveDirectUploadCapability } from "../src/server/mvp/upload.ts";
 import {
     buildAccessDeniedResponse,
     buildUnavailableResponse,
@@ -99,6 +100,36 @@ function testProxyUrlAndHeaders() {
     assert.equal(responseHeaders.get("etag"), "etag-1");
 }
 
+function testDirectUploadCapabilityAndGrant() {
+    const backendCapability = resolveDirectUploadCapability({
+        GAUSET_BACKEND_URL: "https://backend.example.com",
+        GAUSET_BACKEND_WORKER_TOKEN: "worker-a",
+    });
+    assert.equal(backendCapability.available, true);
+    assert.equal(backendCapability.transport, "backend");
+    assert.equal(backendCapability.directUploadUrl, "https://backend.example.com/upload");
+
+    const unsignedBackendCapability = resolveDirectUploadCapability({
+        GAUSET_BACKEND_URL: "https://backend.example.com",
+    });
+    assert.equal(unsignedBackendCapability.available, false);
+    assert.equal(unsignedBackendCapability.transport, null);
+
+    const grant = issueBrowserDirectUploadGrant({
+        filename: "source.jpeg",
+        contentType: "image/jpeg",
+        size: 1024,
+        uploadUrl: "https://backend.example.com/upload",
+        env: {
+            GAUSET_BACKEND_WORKER_TOKEN: "worker-a",
+        },
+    });
+    assert.equal(grant.uploadUrl, "https://backend.example.com/upload");
+    assert.equal(grant.headers["x-gauset-upload-audience"], "https://backend.example.com/upload");
+    assert.match(grant.headers["x-gauset-upload-nonce"], /^[a-z0-9]{32}$/i);
+    assert.ok(grant.headers["x-gauset-upload-signature"]);
+}
+
 async function testSharedProxyHelpers() {
     assert.equal(isPublicProxyPath("health", "GET"), true);
     assert.equal(isPublicProxyPath("scene/test", "OPTIONS"), true);
@@ -141,5 +172,6 @@ async function testSharedProxyHelpers() {
 await testSharedProxyHelpers();
 testBackendResolution();
 testProxyUrlAndHeaders();
+testDirectUploadCapabilityAndGrant();
 
 console.log("MVP proxy contract checks passed.");

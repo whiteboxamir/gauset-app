@@ -28,7 +28,7 @@
     "test:scene-fanout": "node scripts/check_scene_graph_prop_fanout.mjs",
     "test:scene-panels": "node scripts/check_scene_panel_isolation.mjs",
     "test:mvp-proxy": "node scripts/check_mvp_proxy_isolation.mjs",
-    "test:mvp-proxy-contracts": "node --experimental-strip-types --experimental-specifier-resolution=node scripts/test_mvp_proxy_contracts.mts",
+    "test:mvp-proxy-contracts": "node --experimental-loader ./scripts/node-path-alias-loader.mjs --experimental-strip-types --experimental-specifier-resolution=node scripts/test_mvp_proxy_contracts.mts",
     "test:mvp-job-listing-contracts": "backend_venv/bin/python -m unittest tests.test_mvp_job_listing_contracts",
     "test:mvp-provider-generation-contracts": "backend_venv/bin/python -m unittest tests.test_mvp_provider_generation_contracts",
     "test:mvp-public-parity": "node scripts/test_mvp_public_parity.mjs",

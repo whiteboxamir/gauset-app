@@ -206,17 +206,18 @@ export function useMvpWorkspaceUploadTrayController({
             })
             .catch(() => {
                 const resolvedCapability = {
-                    available: false,
-                    transport: null,
-                    directUploadUrl: "",
-                    maximumSizeInBytes: MVP_DIRECT_UPLOAD_MAX_BYTES,
-                    legacyProxyMaximumSizeInBytes: MVP_LEGACY_PROXY_UPLOAD_MAX_BYTES,
+                    available: initialUploadCapability?.available ?? false,
+                    transport: initialUploadCapability?.transport ?? null,
+                    directUploadUrl: initialUploadCapability?.directUploadUrl ?? "",
+                    maximumSizeInBytes: initialUploadCapability?.maximumSizeInBytes ?? MVP_DIRECT_UPLOAD_MAX_BYTES,
+                    legacyProxyMaximumSizeInBytes:
+                        initialUploadCapability?.legacyProxyMaximumSizeInBytes ?? MVP_LEGACY_PROXY_UPLOAD_MAX_BYTES,
                 } satisfies ResolvedDirectUploadCapability;
-                setDirectUploadAvailable(false);
-                setDirectUploadTransport(null);
-                setDirectUploadUrl("");
-                setDirectUploadMaximumSizeInBytes(MVP_DIRECT_UPLOAD_MAX_BYTES);
-                setLegacyProxyMaximumSizeInBytes(MVP_LEGACY_PROXY_UPLOAD_MAX_BYTES);
+                setDirectUploadAvailable(resolvedCapability.available);
+                setDirectUploadTransport(resolvedCapability.transport);
+                setDirectUploadUrl(resolvedCapability.directUploadUrl);
+                setDirectUploadMaximumSizeInBytes(resolvedCapability.maximumSizeInBytes);
+                setLegacyProxyMaximumSizeInBytes(resolvedCapability.legacyProxyMaximumSizeInBytes);
                 return resolvedCapability;
             })
             .finally(() => {
@@ -224,7 +225,7 @@ export function useMvpWorkspaceUploadTrayController({
             });
 
         return uploadCapabilityRequestRef.current;
-    }, [backendMode, backendWritesDisabled]);
+    }, [backendMode, backendWritesDisabled, initialUploadCapability]);
 
     useEffect(() => {
         void loadDirectUploadCapability();

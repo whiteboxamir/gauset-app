@@ -21,15 +21,15 @@ function testDraftKeyIsolation() {
     assert.equal(LOCAL_DRAFT_KEY_PREFIX, "gauset:mvp:draft:v2");
     assert.equal(LOCAL_DRAFT_SESSION_KEY_PREFIX, "gauset:mvp:draft-session:v1");
     assert.equal(buildLocalDraftSessionKey("workspace"), "gauset:mvp:draft-session:v1:workspace");
-    assert.equal(buildLocalDraftSessionKey("preview"), "gauset:mvp:draft-session:v1:preview");
+    assert.equal(buildLocalDraftSessionKey("launchpad"), "gauset:mvp:draft-session:v1:preview");
 
     const workspaceKey = buildLocalDraftStorageKey({
         routeVariant: "workspace",
         studioId: "studio-123",
         userId: "user-abc",
     });
-    const previewKey = buildLocalDraftStorageKey({
-        routeVariant: "preview",
+    const launchpadKey = buildLocalDraftStorageKey({
+        routeVariant: "launchpad",
         studioId: "studio-123",
         userId: "user-abc",
     });
@@ -37,17 +37,17 @@ function testDraftKeyIsolation() {
         routeVariant: "workspace",
         sessionId: "session-abc",
     });
-    const anonymousPreviewKey = buildLocalDraftStorageKey({
-        routeVariant: "preview",
+    const anonymousLaunchpadKey = buildLocalDraftStorageKey({
+        routeVariant: "launchpad",
         sessionId: "session-abc",
     });
 
-    assert.notEqual(workspaceKey, previewKey);
+    assert.notEqual(workspaceKey, launchpadKey);
     assert.equal(workspaceKey, "gauset:mvp:draft:v2:workspace:studio_studio-123:user_user-abc");
-    assert.equal(previewKey, "gauset:mvp:draft:v2:preview:studio_studio-123:user_user-abc");
+    assert.equal(launchpadKey, "gauset:mvp:draft:v2:preview:studio_studio-123:user_user-abc");
     assert.equal(anonymousWorkspaceKey, "gauset:mvp:draft:v2:workspace:studio_none:session_session-abc");
-    assert.equal(anonymousPreviewKey, "gauset:mvp:draft:v2:preview:studio_none:session_session-abc");
-    assert.notEqual(anonymousWorkspaceKey, anonymousPreviewKey);
+    assert.equal(anonymousLaunchpadKey, "gauset:mvp:draft:v2:preview:studio_none:session_session-abc");
+    assert.notEqual(anonymousWorkspaceKey, anonymousLaunchpadKey);
 }
 
 function testLegacyDraftSelection() {
