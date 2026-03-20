@@ -6,6 +6,8 @@ const BASE = platformE2EEnv.baseUrl;
 const sampleProjectId = "11111111-1111-4111-8111-111111111111";
 const envImage = "/Users/amirboz/gauset-app/backend/ml-sharp/data/teaser.jpg";
 const envImageName = "teaser.jpg";
+const largeEnvImage = "/Users/amirboz/gauset-app/uploads/images/69dd947d6b00404f8a2358f0e74a5395.jpeg";
+const largeEnvImageName = "69dd947d6b00404f8a2358f0e74a5395.jpeg";
 
 async function uploadSource(page: Page) {
     await expect(page.getByText(/^Import scout stills$/)).toBeVisible();
@@ -44,7 +46,7 @@ async function buildWorldPreview(page: Page) {
 }
 
 async function openProjectWorldStart(page: Page) {
-    await page.goto(`${BASE}/mvp/preview?project=${sampleProjectId}&source_kind=upload&ts=${Date.now()}`, { waitUntil: "domcontentloaded" });
+    await page.goto(`${BASE}/mvp?project=${sampleProjectId}&source_kind=upload&entry=workspace&ts=${Date.now()}`, { waitUntil: "domcontentloaded" });
     await expect(page.getByTestId("mvp-preview-back-to-start")).toBeVisible();
     await expect(page.getByText(/^Import scout stills$/)).toBeVisible();
 }
@@ -79,7 +81,7 @@ test.describe("v3 project-bound local journey", () => {
         await uploadSource(page);
         await buildWorldPreview(page);
 
-        await expect(page.getByText("Project-linked world start")).toBeVisible();
+        await expect(page.getByText("Project record attached")).toBeVisible();
         await expect(page.getByRole("button", { name: /^Save first version$/ })).toBeVisible();
         await expect(page.getByText("Review share locked until save")).toBeVisible();
         await expect(page.getByText("Handoff locked until save")).toBeVisible();
@@ -93,14 +95,43 @@ test.describe("v3 project-bound local journey", () => {
         await expect(page.getByText("Version History")).toHaveCount(0);
     });
 
+    test("local direct backend intake accepts larger stills without proxying through /api/mvp/upload", async ({ page }) => {
+        const proxyUploadRequests: string[] = [];
+        const directUploadRequests: string[] = [];
+        page.on("request", (request) => {
+            if (request.method() !== "POST") {
+                return;
+            }
+
+            if (/\/api\/mvp\/upload(?:\?|$)/.test(request.url())) {
+                proxyUploadRequests.push(request.url());
+                return;
+            }
+
+            if (/\/upload(?:\?|$)/.test(request.url())) {
+                directUploadRequests.push(request.url());
+            }
+        });
+
+        await openProjectWorldStart(page);
+        await expect(page.getByText("Direct backend intake is available here for stills up to 64 MB.")).toBeVisible();
+        await expect(page.getByTestId("mvp-upload-cap-warning")).toHaveCount(0);
+
+        const importTrigger = page.getByText(/^Bring in scout stills$/).first();
+        await importTrigger.click();
+        const fileInput = page.locator('input[type="file"]').first();
+        await fileInput.setInputFiles(largeEnvImage);
+
+        await expect(page.getByTestId("mvp-capture-tray")).toBeVisible({ timeout: 60_000 });
+        await expect(page.getByText(largeEnvImageName, { exact: true })).toBeVisible();
+        await expect.poll(() => directUploadRequests.length).toBeGreaterThan(0);
+        await expect.poll(() => proxyUploadRequests.length).toBe(0);
+    });
+
     test("first manual save unlocks review, version history, and studio controls without changing route", async ({ page }) => {
         await createSavedWorld(page);
         await expect(page.getByText("Version History")).toBeVisible();
         await expect(page.getByRole("heading", { name: "Review and handoff" })).toBeVisible();
-        await expect(page).toHaveURL(/\/mvp\?/);
-        await expect(page).toHaveURL(new RegExp(`project=${sampleProjectId}`));
-        await expect(page).toHaveURL(/scene=scene_/);
-
         await expect(page.getByText(/Studio view (available|on)/)).toBeVisible();
         await expect(page).toHaveURL(/\/mvp\?/);
         await expect(page).toHaveURL(new RegExp(`project=${sampleProjectId}`));

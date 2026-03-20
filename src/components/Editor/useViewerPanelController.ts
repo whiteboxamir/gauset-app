@@ -68,7 +68,7 @@ export function pickViewerOverlaySceneSlices(sceneSlices: ViewerPanelSceneSlices
 }
 
 interface ViewerPanelInteractionControllerOptions {
-    routeVariant?: "workspace" | "preview";
+    routeVariant?: "workspace" | "launchpad";
     readOnly: boolean;
     pinCount: number;
     getCurrentSceneSlices: () => ViewerPanelInteractionSceneSlices;

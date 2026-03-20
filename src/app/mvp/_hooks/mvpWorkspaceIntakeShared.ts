@@ -1,6 +1,12 @@
 "use client";
 
 import { extractApiError, MVP_API_BASE_URL } from "@/lib/mvp-api";
+import {
+    hasAllowedDirectUploadExtension,
+    isAllowedDirectUploadContentType,
+    MVP_DIRECT_UPLOAD_ALLOWED_CONTENT_TYPES,
+    MVP_DIRECT_UPLOAD_ALLOWED_EXTENSIONS,
+} from "@/lib/mvp-upload";
 import type {
     BackendLaneCapability,
     CaptureSessionResponse,
@@ -64,6 +70,23 @@ export interface UploadItem extends UploadResponse {
     uploadedAt: string;
 }
 
+export interface UploadQueueItem {
+    id: string;
+    fileName: string;
+    sizeBytes: number;
+    progressPercent: number;
+    transport: "blob" | "backend" | "legacy";
+    phase: "queued" | "uploading" | "registering" | "complete" | "error";
+    errorMessage?: string;
+}
+
+export interface UploadQueueSummary {
+    activeFileName: string;
+    activeTransport: "blob" | "backend" | "legacy" | null;
+    completedCount: number;
+    totalCount: number;
+}
+
 export type WorkspaceIntakeActions = Pick<MvpWorkspaceShellController, "replaceSceneEnvironment"> &
     Pick<
         MvpWorkspaceSessionController,
@@ -109,8 +132,8 @@ export type MvpWorkspaceIntakeSetupState = {
     backendWritesDisabledMessage: string;
 };
 
-export const ACCEPTED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
-export const ACCEPTED_IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp"]);
+export const ACCEPTED_IMAGE_TYPES = new Set(MVP_DIRECT_UPLOAD_ALLOWED_CONTENT_TYPES);
+export const ACCEPTED_IMAGE_EXTENSIONS = new Set(MVP_DIRECT_UPLOAD_ALLOWED_EXTENSIONS);
 
 export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -171,11 +194,11 @@ export const getFileExtension = (value: string) => {
 };
 
 export const isSupportedImageFile = (file: File) => {
-    if (file.type && ACCEPTED_IMAGE_TYPES.has(file.type.toLowerCase())) {
+    if (isAllowedDirectUploadContentType(file.type)) {
         return true;
     }
 
-    return ACCEPTED_IMAGE_EXTENSIONS.has(getFileExtension(file.name));
+    return hasAllowedDirectUploadExtension(file.name);
 };
 
 export async function pollJob(jobId: string): Promise<JobStatusResponse> {

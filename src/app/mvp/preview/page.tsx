@@ -1,8 +1,6 @@
 import { redirect } from "next/navigation";
 
-import { getMvpDeploymentFingerprint } from "@/lib/mvp-deployment";
 import { requireMvpWorkspaceAccess } from "@/server/mvp/access";
-import MVPRouteClient from "../MVPRouteClient";
 import {
     normalizeLaunchEntryMode,
     normalizeLaunchIntent,
@@ -45,8 +43,6 @@ export default async function MVPPreviewPage({
         redirect(`/mvp?${workspaceSearchParams.toString()}`);
     }
 
-    const directProjectFrontDoor = Boolean(launchProjectId) && !launchSceneId;
-    const resolvedLaunchEntryMode = directProjectFrontDoor ? null : launchEntryMode;
     const previewSearchParams = new URLSearchParams();
     if (launchProjectId) {
         previewSearchParams.set("project", launchProjectId);
@@ -66,46 +62,11 @@ export default async function MVPPreviewPage({
     if (launchSourceKind) {
         previewSearchParams.set("source_kind", launchSourceKind);
     }
-    if (resolvedLaunchEntryMode) {
-        previewSearchParams.set("entry", resolvedLaunchEntryMode);
+    if (launchEntryMode) {
+        previewSearchParams.set("entry", launchEntryMode);
     }
-    const canonicalPreviewPath = `/mvp/preview?${previewSearchParams.toString()}`;
-    const launchPreviewParams = new URLSearchParams(previewSearchParams);
-    const launchPreviewHref =
-        launchProjectId && !launchSceneId
-            ? `/app/worlds/${launchProjectId}#project-world-launch`
-            : (() => {
-                  launchPreviewParams.delete("entry");
-                  return launchPreviewParams.size > 0 ? `/mvp/preview?${launchPreviewParams.toString()}` : "/mvp/preview";
-              })();
-    const nextPath = directProjectFrontDoor ? canonicalPreviewPath : launchPreviewHref;
-    const workspaceSearchParams = new URLSearchParams(launchPreviewParams);
-    if (!directProjectFrontDoor) {
-        workspaceSearchParams.set("entry", "workspace");
-    }
-    const launchWorkspaceHref = directProjectFrontDoor ? canonicalPreviewPath : `/mvp/preview?${workspaceSearchParams.toString()}`;
+    const nextPath = previewSearchParams.size > 0 ? `/mvp?${previewSearchParams.toString()}` : "/mvp";
 
     await requireMvpWorkspaceAccess(nextPath);
-
-    if (directProjectFrontDoor && launchEntryMode === "workspace") {
-        redirect(canonicalPreviewPath);
-    }
-
-    return (
-        <MVPRouteClient
-            clarityMode
-            routeVariant="preview"
-            launchSceneId={launchSceneId}
-            launchProjectId={launchProjectId}
-            launchIntent={launchIntent}
-            launchBrief={launchBrief}
-            launchReferences={launchReferences}
-            launchProviderId={launchProviderId}
-            launchEntryMode={resolvedLaunchEntryMode}
-            launchSourceKind={launchSourceKind}
-            launchWorkspaceHref={launchWorkspaceHref}
-            launchPreviewHref={launchPreviewHref}
-            deploymentFingerprint={getMvpDeploymentFingerprint()}
-        />
-    );
+    redirect(nextPath);
 }

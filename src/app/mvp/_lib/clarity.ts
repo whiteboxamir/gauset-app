@@ -116,8 +116,8 @@ export function createDemoWorldPreset(): DemoWorldPreset {
         id: "demo_world_cafe",
         label: "Neighborhood cafe",
         previewImage: DEMO_REFERENCE_IMAGE,
-        sourceLabel: "Demo world still",
-        statusLabel: "Demo world loaded",
+        sourceLabel: "Fallback sample still",
+        statusLabel: "Fallback sample loaded",
     });
     demoAssets.forEach((asset) => {
         sceneDocument = appendMeshAssetToSceneDocument(sceneDocument, asset);
@@ -129,8 +129,8 @@ export function createDemoWorldPreset(): DemoWorldPreset {
 
     return {
         title: "Neighborhood cafe",
-        summary: "A preloaded world that shows the persistent room state before you upload anything.",
-        inputLabel: "Demo world still",
+        summary: "A preloaded sample world that shows the persistent room state before you upload anything.",
+        inputLabel: "Fallback sample still",
         sceneDocument,
         assetsList: demoAssets.map((asset) => ({
             id: asset.id,
@@ -172,18 +172,18 @@ export function describeWorkspaceContinuity(sceneDocument: SceneDocumentV2): Wor
         (renderState.isReferenceOnlyDemo
             ? "Reference-only onboarding state."
             : renderState.isLegacyDemoWorld
-              ? "Legacy demo world state."
+              ? "Legacy sample world state."
               : renderState.hasRenderableOutput
                 ? "Renderable world output is available."
                 : "World output is still pending.");
     const worldSummary = !environment
         ? continuityFieldCount > 0
             ? "No persistent world is loaded yet, but continuity memory is already being recorded for the first save."
-            : "No persistent world loaded yet. Open the demo, import a still, or recover a saved draft."
+            : "No persistent world loaded yet. Open the fallback sample, import a still, or recover a saved draft."
         : renderState.isReferenceOnlyDemo
           ? "Reference imagery is visible, but this state is only for shell onboarding and fallback direction."
           : renderState.isLegacyDemoWorld
-            ? "A legacy demo world is loaded. Replace it with a real preview or saved world before review handoff."
+            ? "A legacy fallback sample is loaded. Replace it with a real preview or saved world before review handoff."
             : renderState.hasRenderableOutput
               ? `${formatPlural(assetCount, "placed asset")} stay attached to this world across scene revisions. ${continuityFieldCount > 0 ? `${continuityFieldCount} continuity block${continuityFieldCount === 1 ? "" : "s"} are already recorded.` : "Continuity memory is ready to be recorded against the saved world."}`
               : "The world source is present, but renderable output has not finished loading yet.";

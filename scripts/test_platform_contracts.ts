@@ -991,9 +991,10 @@ function testSingleJourneyRouteContracts() {
     const openWorkspaceButton = readTextFixture("src/components/worlds/OpenWorkspaceButton.tsx");
 
     assert.match(appHome, /redirect\("\/app\/worlds"\)/);
-    assert.match(mvpPage, /redirect\(nextPath\)/);
-    assert.match(mvpPage, /const nextPath =[\s\S]*launchSceneId[\s\S]*`\/mvp\?/);
+    assert.match(mvpPage, /routeVariant="preview"/);
+    assert.match(mvpPage, /const nextPath = nextSearchParams\.size > 0 \? `\/mvp\?/);
     assert.match(previewPage, /if \(launchSceneId\) \{[\s\S]*redirect\(`\/mvp\?/);
+    assert.match(previewPage, /redirect\(nextPath\)/);
     assert.match(projectDetailPage, /resumeSceneId=\{detail\.project\.primarySceneId\}/);
     assert.match(openWorkspaceButton, /router\.push\("\/app\/worlds"\)/);
     assert.doesNotMatch(openWorkspaceButton, /router\.push\(searchParams\.size > 0 \? `\/mvp/);

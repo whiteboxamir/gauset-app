@@ -23,7 +23,7 @@ export const PROGRAMMATIC_CHANGE_RESET_MS = 80;
 
 export type SaveState = "idle" | "saving" | "saved" | "recovered" | "error";
 export type WorkspaceEntryMode = "launchpad" | "workspace";
-export type WorkspaceRouteVariant = "workspace" | "preview";
+export type WorkspaceRouteVariant = "workspace" | "launchpad";
 export type WorkspaceOrigin = "blank" | "demo" | "draft" | "linked_version" | "linked_environment";
 export type WorkspaceLaunchSourceKind =
     | "upload"
@@ -90,6 +90,10 @@ function normalizeDraftKeyPart(value: string | null | undefined, fallback: strin
     return normalized && normalized.length > 0 ? normalized : fallback;
 }
 
+function storageScopeForRouteVariant(routeVariant: WorkspaceRouteVariant) {
+    return routeVariant === "launchpad" ? "preview" : routeVariant;
+}
+
 export interface DraftStorageNamespace {
     routeVariant: WorkspaceRouteVariant;
     userId?: string | null;
@@ -106,15 +110,16 @@ export const buildLocalDraftStorageKey = ({
     studioId,
     sessionId,
 }: DraftStorageNamespace) => {
+    const storageScope = storageScopeForRouteVariant(routeVariant);
     const studioScope = `studio_${normalizeDraftKeyPart(studioId, "none")}`;
     const userScope = userId
         ? `user_${normalizeDraftKeyPart(userId, "anonymous")}`
         : `session_${normalizeDraftKeyPart(sessionId, "anonymous")}`;
-    return `${LOCAL_DRAFT_KEY_PREFIX}:${routeVariant}:${studioScope}:${userScope}`;
+    return `${LOCAL_DRAFT_KEY_PREFIX}:${storageScope}:${studioScope}:${userScope}`;
 };
 
 export const buildLocalDraftSessionKey = (routeVariant: WorkspaceRouteVariant) =>
-    `${LOCAL_DRAFT_SESSION_KEY_PREFIX}:${routeVariant}`;
+    `${LOCAL_DRAFT_SESSION_KEY_PREFIX}:${storageScopeForRouteVariant(routeVariant)}`;
 
 function normalizeCompatibilityWorkspaceGraphResources<T extends WorkspaceSceneGraph>(sceneGraph: T): T {
     return normalizeWorkspaceSceneGraphResources(sceneGraph);
@@ -184,7 +189,7 @@ export const formatTimestamp = (value?: string | null) => {
 };
 
 export const createDefaultHudState = (routeVariant: WorkspaceRouteVariant): WorkspaceHudState =>
-    routeVariant === "preview"
+    routeVariant === "launchpad"
         ? {
               leftRailCollapsed: false,
               rightRailCollapsed: true,
@@ -213,4 +218,5 @@ export const normalizeHudState = (routeVariant: WorkspaceRouteVariant, value: un
     };
 };
 
-export const hudStorageKey = (routeVariant: WorkspaceRouteVariant) => `${HUD_LAYOUT_STORAGE_KEY_PREFIX}:${routeVariant}`;
+export const hudStorageKey = (routeVariant: WorkspaceRouteVariant) =>
+    `${HUD_LAYOUT_STORAGE_KEY_PREFIX}:${storageScopeForRouteVariant(routeVariant)}`;

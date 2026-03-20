@@ -11,6 +11,19 @@ import {
 import { authorizeProxyRequest, ensureProxyResponseSceneAccess } from "@/server/mvp/proxyAccess";
 import { buildBackendProxyErrorResponse, buildUnavailableResponse, extractJsonResponsePayload } from "@/server/mvp/proxyShared";
 
+function shouldBufferRequestBody(method: string, contentType: string | null) {
+    if (method === "GET" || method === "HEAD") {
+        return false;
+    }
+
+    if (!contentType) {
+        return false;
+    }
+
+    const normalized = contentType.toLowerCase();
+    return normalized.includes("application/json") || normalized.includes("+json");
+}
+
 function shouldSyncUsageDebit(pathname: string, method: string) {
     return method === "GET" && /^jobs\/[^/]+$/.test(pathname);
 }
@@ -55,7 +68,7 @@ export async function proxyMvpRequest(request: NextRequest, context: { params: P
     }
 
     let bodyBuffer: ArrayBuffer | undefined;
-    if (request.method !== "GET" && request.method !== "HEAD") {
+    if (shouldBufferRequestBody(request.method, request.headers.get("content-type"))) {
         bodyBuffer = await request.arrayBuffer();
     }
 
@@ -81,13 +94,21 @@ export async function proxyMvpRequest(request: NextRequest, context: { params: P
     });
 
     try {
-        const upstream = await fetch(upstreamUrl, {
+        const upstreamRequestInit: RequestInit & { duplex?: "half" } = {
             method: request.method,
             headers,
-            body: bodyBuffer,
             cache: "no-store",
             signal: request.signal,
-        });
+        };
+
+        if (bodyBuffer) {
+            upstreamRequestInit.body = bodyBuffer;
+        } else if (request.method !== "GET" && request.method !== "HEAD" && request.body) {
+            upstreamRequestInit.body = request.body;
+            upstreamRequestInit.duplex = "half";
+        }
+
+        const upstream = await fetch(upstreamUrl, upstreamRequestInit);
 
         const accessFailure = await ensureProxyResponseSceneAccess({
             pathname,

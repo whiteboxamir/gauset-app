@@ -64,9 +64,10 @@ async function expectScrollable(page) {
 
 test.describe("focused local preview journey", () => {
     test("generic preview keeps the intro, but project starts skip it", async ({ page }) => {
-        await page.goto(`${BASE}/mvp/preview`, { waitUntil: "domcontentloaded" });
+        await page.goto(`${BASE}/mvp`, { waitUntil: "domcontentloaded" });
 
-        await expect(page.getByRole("button", { name: "Open demo world" })).toBeVisible();
+        await expect(page.getByRole("link", { name: "Open project library" })).toBeVisible();
+        await expect(page.getByRole("button", { name: "Open sample world" })).toBeVisible();
         await expect(page.getByRole("link", { name: /Continue to world start/i })).toHaveCount(0);
 
         await page.goto(`${BASE}/app/worlds`, { waitUntil: "domcontentloaded" });
@@ -81,11 +82,12 @@ test.describe("focused local preview journey", () => {
 
         await page.getByRole("link", { name: "Import source frames" }).click();
 
-        await expect(page).toHaveURL(new RegExp(`/mvp/preview\\?`));
+        await expect(page).toHaveURL(new RegExp(`/mvp\\?`));
         await expect(page).toHaveURL(new RegExp(`project=${sampleProjectId}`));
         await expect(page).toHaveURL(/source_kind=upload/);
+        await expect(page).toHaveURL(/entry=workspace/);
         await expect(page.getByTestId("mvp-preview-back-to-start")).toBeVisible();
-        await expect(page.getByText(/^Project launch$/)).toBeVisible();
+        await expect(page.getByText(/^Project record attached$/).first()).toBeVisible();
         await expect(page.getByRole("link", { name: /Continue to world start/i })).toHaveCount(0);
     });
 
@@ -132,9 +134,10 @@ test.describe("focused local preview journey", () => {
             await expect(page.getByRole("heading", { name: "Backlot Scout" })).toBeVisible();
 
             await page.getByRole("link", { name: launchCase.label }).click();
-            await expect(page).toHaveURL(new RegExp(`/mvp/preview\\?`));
+            await expect(page).toHaveURL(new RegExp(`/mvp\\?`));
             await expect(page).toHaveURL(new RegExp(`project=${sampleProjectId}`));
             await expect(page).toHaveURL(new RegExp(`source_kind=${launchCase.sourceKind}`));
+            await expect(page).toHaveURL(/entry=workspace/);
             await expect(page.getByTestId("mvp-preview-back-to-start")).toBeVisible();
             await expect(page.getByRole("link", { name: /Continue to world start/i })).toHaveCount(0);
         }
@@ -147,24 +150,25 @@ test.describe("focused local preview journey", () => {
         await expect(page.getByRole("link", { name: "Open generation lane" })).toBeVisible();
 
         await page.getByRole("link", { name: "Open generation lane" }).click();
-        await expect(page).toHaveURL(new RegExp(`/mvp/preview\\?`));
+        await expect(page).toHaveURL(new RegExp(`/mvp\\?`));
         await expect(page).toHaveURL(new RegExp(`project=${sampleProjectId}`));
         await expect(page).toHaveURL(/source_kind=provider_generated_still/);
-        await expect(page.getByRole("link", { name: "Open demo world" })).toHaveCount(0);
+        await expect(page).toHaveURL(/entry=workspace/);
+        await expect(page.getByRole("button", { name: "Open sample world" })).toHaveCount(0);
         await expect(page.getByRole("link", { name: "Continue to world start" })).toHaveCount(0);
     });
 
     test("project-led preview lands directly in the focused workspace and can return to the project", async ({ page }) => {
-        await page.goto(`${BASE}/mvp/preview?project=${sampleProjectId}&source_kind=upload`, { waitUntil: "domcontentloaded" });
+        await page.goto(`${BASE}/mvp?project=${sampleProjectId}&source_kind=upload&entry=workspace`, { waitUntil: "domcontentloaded" });
 
-        await expect(page).toHaveURL(new RegExp(`/mvp/preview\\?project=${sampleProjectId}&source_kind=upload(?:&entry=workspace)?$`));
-        await expect(page.getByText(/^Project launch$/)).toBeVisible();
+        await expect(page).toHaveURL(new RegExp(`/mvp\\?project=${sampleProjectId}&source_kind=upload&entry=workspace$`));
+        await expect(page.getByText(/^Project record attached$/).first()).toBeVisible();
         await expect(page.getByText("Import scout stills", { exact: true })).toBeVisible();
         await expect(page.getByTestId("mvp-preview-back-to-start")).toBeVisible();
         await expect(page.getByText("Preview-safe route")).toHaveCount(0);
-        await expect(page.getByText("Project-linked world start", { exact: true }).first()).toBeVisible();
+        await expect(page.getByText("Project record attached", { exact: true }).first()).toBeVisible();
         await expect(page.getByText("No source chosen yet")).toHaveCount(0);
-        await expect(page.getByRole("button", { name: /Open demo world/i })).toHaveCount(0);
+        await expect(page.getByRole("button", { name: /Open sample world/i })).toHaveCount(0);
 
         await page.getByTestId("mvp-preview-back-to-start").click();
         await expect(page).toHaveURL(new RegExp(`/app/worlds/${sampleProjectId}#project-world-launch$`));

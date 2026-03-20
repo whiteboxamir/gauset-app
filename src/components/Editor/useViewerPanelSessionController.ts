@@ -16,7 +16,7 @@ export type ViewerPanelSessionActions = Pick<
 >;
 
 interface UseViewerPanelSessionControllerOptions {
-    routeVariant?: "workspace" | "preview";
+    routeVariant?: "workspace" | "launchpad";
     pinCount: number;
     focusRequest?: FocusRequest;
     sessionState?: ViewerPanelSessionState;
@@ -210,7 +210,7 @@ export function useViewerPanelSessionController({
     }, [isRecordingPath, setRecordingPathEnabled]);
 
     return {
-        isPreviewRoute: routeVariant === "preview",
+        isLaunchpadRoute: routeVariant === "launchpad",
         combinedFocusRequest,
         captureRequestKey,
         isPinPlacementEnabled,

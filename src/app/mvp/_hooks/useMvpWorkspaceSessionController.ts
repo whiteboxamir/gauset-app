@@ -58,7 +58,7 @@ export function useMvpWorkspaceSessionController({
     editorSessionActions,
 }: UseMvpWorkspaceSessionControllerOptions) {
     const demoPreset = useMemo(() => createDemoWorldPreset(), []);
-    const flowName = clarityMode ? "clarity_preview" : "classic";
+    const flowName = clarityMode ? "clarity_world" : "classic";
     const router = useRouter();
     const getRenderableSceneDocumentSnapshot = useMemo(() => createRenderableSceneDocumentSnapshotGetter(sceneStore), [sceneStore]);
     const renderableSceneDocument = useSyncExternalStore(
@@ -70,7 +70,7 @@ export function useMvpWorkspaceSessionController({
     const programmaticSceneChangeRef = useRef(false);
     const handledLaunchSceneIdRef = useRef<string | null>(null);
     const linkedProjectSceneIdsRef = useRef<Set<string>>(new Set());
-    const canonicalizedPreviewSceneIdsRef = useRef<Set<string>>(new Set());
+    const canonicalizedLaunchpadSceneIdsRef = useRef<Set<string>>(new Set());
     const seededLaunchContinuityRef = useRef(false);
     const [linkedLaunchStatus, setLinkedLaunchStatus] = useState<"idle" | "opening" | "opened" | "unavailable">(
         routeVariant === "workspace" && launchSceneId ? "opening" : "idle",
@@ -92,8 +92,7 @@ export function useMvpWorkspaceSessionController({
         },
         [sceneStore],
     );
-    const directProjectPreviewFrontDoor = routeVariant === "preview" && Boolean(launchProjectId) && !launchSceneId;
-    const startInWorkspace = (routeVariant === "workspace" && Boolean(launchSceneId)) || launchEntryMode === "workspace" || directProjectPreviewFrontDoor;
+    const startInWorkspace = (routeVariant === "workspace" && Boolean(launchSceneId)) || launchEntryMode === "workspace";
 
     const workspacePersistence = useMvpWorkspacePersistenceController({
         clarityMode,
@@ -230,16 +229,16 @@ export function useMvpWorkspaceSessionController({
     }, [launchSceneId, routeVariant]);
 
     useEffect(() => {
-        if (routeVariant !== "preview" || !launchProjectId || !workspacePersistence.activeScene || !hasSavedVersion) {
+        if (routeVariant !== "launchpad" || !launchProjectId || !workspacePersistence.activeScene || !hasSavedVersion) {
             return;
         }
 
         const canonicalKey = `${launchProjectId}:${workspacePersistence.activeScene}`;
-        if (canonicalizedPreviewSceneIdsRef.current.has(canonicalKey)) {
+        if (canonicalizedLaunchpadSceneIdsRef.current.has(canonicalKey)) {
             return;
         }
 
-        canonicalizedPreviewSceneIdsRef.current.add(canonicalKey);
+        canonicalizedLaunchpadSceneIdsRef.current.add(canonicalKey);
         const searchParams = new URLSearchParams({
             project: launchProjectId,
             scene: workspacePersistence.activeScene,
@@ -294,14 +293,14 @@ export function useMvpWorkspaceSessionController({
     const openDemoWorld = useCallback(() => {
         workspacePersistence.openDemoWorld();
         workspaceTelemetry.clearStepStatus();
-        workspaceTelemetry.appendActivity("Demo world opened", "Loaded a sample world so persistence is visible immediately.", "info");
+        workspaceTelemetry.appendActivity("Fallback sample opened", "Loaded the fallback sample so the save-first workflow is visible immediately.", "info");
         trackMvpEvent("mvp_demo_open", { flow: flowName });
     }, [flowName, workspacePersistence, workspaceTelemetry]);
 
     const startBlankWorkspace = useCallback(() => {
         workspacePersistence.startBlankWorkspace();
         workspaceTelemetry.clearStepStatus();
-        workspaceTelemetry.appendActivity("Workspace ready", "Upload one still or return to the demo world.", "neutral");
+        workspaceTelemetry.appendActivity("Workspace ready", "Choose one source path first. The first save anchors the record.", "neutral");
     }, [workspacePersistence, workspaceTelemetry]);
 
     const resumeStoredDraft = useCallback(() => {
@@ -311,7 +310,7 @@ export function useMvpWorkspaceSessionController({
             workspaceTelemetry.appendActivity("Draft resumed", "Recovered the last local /mvp draft.", "info");
             return;
         }
-        workspaceTelemetry.appendActivity("Workspace ready", "Upload one still or return to the demo world.", "neutral");
+        workspaceTelemetry.appendActivity("Workspace ready", "Choose one source path first. The first save anchors the record.", "neutral");
     }, [workspacePersistence, workspaceTelemetry]);
 
     const manualSave = useCallback(async () => {

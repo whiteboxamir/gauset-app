@@ -152,7 +152,7 @@ export function useMvpWorkspacePersistenceController({
     const [assetsList, setAssetsList] = useState<any[]>([]);
     const [saveState, setSaveState] = useState<SaveState>("idle");
     const [saveMessage, setSaveMessage] = useState(
-        clarityMode ? "Open the demo world or choose one source to begin the world record." : "Scene is empty.",
+        clarityMode ? "Choose one source path to begin the world. The first save anchors the record." : "Scene is empty.",
     );
     const [saveError, setSaveError] = useState("");
     const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
@@ -161,7 +161,7 @@ export function useMvpWorkspacePersistenceController({
     const [storedDraft, setStoredDraft] = useState<StoredDraft | null>(null);
     const [workspaceOrigin, setWorkspaceOrigin] = useState<WorkspaceOrigin>("blank");
     const [workspaceOriginDetail, setWorkspaceOriginDetail] = useState(
-        clarityMode ? "Choose a world entry path to start this workspace." : "Workspace is ready for a first world.",
+        clarityMode ? "Choose a project route or one source path to start this workspace." : "Workspace is ready for a first world.",
     );
     const [currentInputLabel, setCurrentInputLabel] = useState<string | null>(null);
     const [lastOutputInputLabel, setLastOutputInputLabel] = useState<string | null>(null);
@@ -301,14 +301,14 @@ export function useMvpWorkspacePersistenceController({
                 sceneDocument: demoPreset.sceneDocument,
                 assetsList: demoPreset.assetsList,
                 saveState: "recovered",
-                saveMessage: "Demo world loaded. Save a version when you are ready to anchor the world record.",
+                saveMessage: "Fallback sample loaded. Save a version when you are ready to anchor the world record.",
                 currentInputLabel: demoPreset.inputLabel,
-                lastOutputLabel: "Demo world",
+                lastOutputLabel: "Fallback sample",
             },
             {
                 keepAsLastOutput: true,
                 origin: "demo",
-                originDetail: "Loaded the demo world so persistent state is visible before you import anything.",
+                originDetail: "Loaded the fallback sample so the save-first workflow is visible before you import anything.",
             },
         );
     }, [applyWorkspaceSnapshot, demoPreset]);
@@ -320,14 +320,14 @@ export function useMvpWorkspacePersistenceController({
                 sceneDocument: createEmptySceneDocumentV2(),
                 assetsList: [],
                 saveState: "idle",
-                saveMessage: "Upload one still to build your first persistent world record.",
+                saveMessage: "Bring in one source to build the first world. The first save anchors the record.",
                 currentInputLabel: null,
                 lastOutputLabel: "No world output yet",
             },
             {
                 keepAsLastOutput: false,
                 origin: "blank",
-                originDetail: "Blank workspace ready. Import one still or reopen a linked world.",
+                originDetail: "Blank workspace ready. Bring in one source path or reopen a linked world.",
             },
         );
     }, [applyWorkspaceSnapshot]);
@@ -385,7 +385,7 @@ export function useMvpWorkspacePersistenceController({
                 setSaveState("idle");
                 setSaveError("");
                 setSaveMessage(
-                    clarityMode ? "Open the demo world or build your own world before saving." : "Scene is empty.",
+                    clarityMode ? "Build the first world before saving." : "Scene is empty.",
                 );
                 return null;
             }

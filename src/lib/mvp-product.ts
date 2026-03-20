@@ -746,9 +746,9 @@ export function describeEnvironment(environment: any) {
     const legacyLabel = normalizeEnvironmentString(environment?.label);
     const label =
         renderState.isReferenceOnlyDemo
-            ? "Reference-only Demo"
+            ? "Reference-only Sample"
             : renderState.isLegacyDemoWorld
-              ? legacyStatusLabel || legacyLabel || "Demo World Loaded"
+              ? legacyStatusLabel || legacyLabel || "Sample World Loaded"
             : lane === "reconstruction"
             ? environment?.metadata?.release_gates?.world_class_ready
                 ? "Benchmarked Reconstruction Loaded"
@@ -774,7 +774,7 @@ export function describeEnvironment(environment: any) {
         renderState.isReferenceOnlyDemo
             ? "Reference-only onboarding state"
         : renderState.isLegacyDemoWorld
-          ? "Legacy demo world state"
+          ? "Legacy sample world state"
         : lane === "reconstruction"
             ? environment?.metadata?.release_gates?.world_class_ready
                 ? "Benchmarked multi-view reconstruction"

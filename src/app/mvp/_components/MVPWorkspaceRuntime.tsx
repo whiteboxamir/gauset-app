@@ -9,13 +9,14 @@ import RightPanel from "@/components/Editor/RightPanel";
 import DeploymentFingerprintBadge from "@/components/Editor/DeploymentFingerprintBadge";
 import type { LeftPanelPreviewWorkspaceNavigation } from "@/components/Editor/leftPanelShared";
 import type { MvpDeploymentFingerprint } from "@/lib/mvp-deployment";
+import type { MvpDirectUploadCapabilitySnapshot } from "@/lib/mvp-upload";
 import { useRenderableSceneDocumentFromContext } from "@/state/mvpSceneStoreContext.tsx";
 
 import { describeWorkspaceContinuity } from "../_lib/clarity";
 import { useMvpWorkspaceSession } from "../_state/mvpWorkspaceSessionContext";
 import MVPClarityLaunchpad from "./MVPClarityLaunchpad";
 
-type MvpRouteVariant = "workspace" | "preview";
+type MvpRouteVariant = "workspace" | "launchpad";
 
 const leftRailClassName = (collapsed: boolean) =>
     collapsed ? "h-11 w-full xl:h-full xl:w-14" : "h-auto min-h-[18rem] w-full xl:h-full xl:w-[18rem] 2xl:w-[19rem]";
@@ -40,7 +41,7 @@ const saveStateLabel = (
     if (state === "recovered") {
         if (workspaceOrigin === "draft") return "Draft recovered";
         if (workspaceOrigin === "linked_version" || workspaceOrigin === "linked_environment") return "Reopened";
-        if (workspaceOrigin === "demo") return "Demo loaded";
+        if (workspaceOrigin === "demo") return "Sample loaded";
         return "Recovered";
     }
     if (state === "error") return "Needs attention";
@@ -64,11 +65,12 @@ const describeWorkspaceOrigin = (
     detail: string,
     sceneId?: string | null,
     projectId?: string | null,
+    hasSavedVersion = false,
 ) => {
     switch (origin) {
         case "demo":
             return {
-                title: "Demo world",
+                title: "Fallback sample",
                 detail,
             };
         case "draft":
@@ -89,8 +91,12 @@ const describeWorkspaceOrigin = (
         case "blank":
         default:
             return {
-                title: projectId ? "Project-linked world start" : "Blank workspace",
-                detail: projectId ? "This workspace is already attached to a project world record." : detail,
+                title: projectId ? (hasSavedVersion ? "Project world record" : "Project record attached") : "World workspace",
+                detail: projectId
+                    ? hasSavedVersion
+                        ? "This workspace is attached to the saved project world record."
+                        : "This workspace is attached to the project record. The first save anchors the world."
+                    : detail,
             };
     }
 };
@@ -108,7 +114,7 @@ const describeLaunchSourceLabel = (sourceKind?: string | null) => {
         case "linked_scene_version":
             return "Linked world";
         case "demo_world":
-            return "Demo world";
+            return "Fallback sample";
         case "upload":
             return "Scout stills";
         default:
@@ -131,27 +137,30 @@ const MVPWorkspaceStatusRibbon = React.memo(function MVPWorkspaceStatusRibbon({
         workspaceSession.workspaceOriginDetail,
         workspaceSession.activeScene ?? workspaceSession.draftSceneId,
         workspaceSession.launchProjectId,
+        workspaceSession.hasSavedVersion,
     );
     const sourceLabel = describeLaunchSourceLabel(workspaceSession.launchSourceKind);
-    const showPreviewRouteBadge = routeVariant === "preview" && !workspaceSession.launchProjectId;
+    const projectWorkspaceLabel = workspaceSession.hasSavedVersion ? "Project world record" : "Project record attached";
     const showFallbackMessage =
         !continuity.hasWorld &&
-        (!workspaceSession.saveMessage ||
-            workspaceSession.saveMessage === "Scene is empty." ||
-            workspaceSession.saveMessage === "Open the demo world or upload a still to begin.");
+        (!workspaceSession.saveMessage || workspaceSession.saveMessage === "Scene is empty.");
     const defaultMessage =
         workspaceSession.linkedLaunchStatus === "opening"
             ? workspaceSession.linkedLaunchMessage || "Opening the project-linked world."
             : workspaceSession.launchProjectId && !continuity.hasWorld
-              ? "This workspace is already attached to one project world record. Choose the first source, then save once to anchor continuity."
+              ? "This workspace is attached to the project record. Choose the first source, build the first world, then save once to anchor it."
             : showFallbackMessage
-              ? `Start with ${sourceLabel.toLowerCase()} to establish the saved world record.`
+              ? workspaceSession.launchSourceKind
+                  ? `Start with ${sourceLabel.toLowerCase()} to establish the saved world record.`
+                  : "Start with one source path to establish the saved world record."
               : workspaceSession.saveMessage || "World workspace ready.";
     const stageMessage =
         workspaceSession.journeyStage === "start"
             ? workspaceSession.launchProjectId
-                ? "Choose the first source, then save once to anchor the project world record."
-                : `Build the first world from ${sourceLabel.toLowerCase()}.`
+                ? "Choose the first source, build the first world, then save once to anchor the project record."
+                : workspaceSession.launchSourceKind
+                  ? `Build the first world from ${sourceLabel.toLowerCase()}.`
+                  : "Choose one source path, then build the first world."
             : workspaceSession.journeyStage === "unsaved"
               ? "Save the first version to lock review, handoff, and continuity to one durable world."
               : workspaceSession.isAdvancedDensityEnabled
@@ -187,11 +196,6 @@ const MVPWorkspaceStatusRibbon = React.memo(function MVPWorkspaceStatusRibbon({
                         <p className="text-[10px] uppercase tracking-[0.2em] text-cyan-100/60">
                             {clarityMode ? "Persistent world workspace" : "World workspace"}
                         </p>
-                        {showPreviewRouteBadge ? (
-                            <span className="rounded-full border border-amber-300/20 bg-amber-400/10 px-2 py-1 text-[10px] uppercase tracking-[0.14em] text-amber-100">
-                                Preview-safe route
-                            </span>
-                        ) : null}
                         {workspaceSession.launchSourceKind ? (
                             <span className="rounded-full border border-white/8 bg-white/[0.03] px-2 py-1 text-[10px] uppercase tracking-[0.14em] text-neutral-400">
                                 {sourceLabel}
@@ -205,7 +209,7 @@ const MVPWorkspaceStatusRibbon = React.memo(function MVPWorkspaceStatusRibbon({
                     </div>
                     <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
                         <p className="text-sm font-medium tracking-tight text-white">
-                            {continuity.hasWorld ? continuity.worldTitle : workspaceSession.launchProjectId ? "Project-linked world start" : "Awaiting first world"}
+                            {continuity.hasWorld ? continuity.worldTitle : workspaceSession.launchProjectId ? projectWorkspaceLabel : "Awaiting first world"}
                         </p>
                         {criticalAlert || modeLine ? <p className="max-w-2xl text-xs leading-5 text-neutral-400">{criticalAlert || modeLine}</p> : null}
                     </div>
@@ -253,15 +257,15 @@ const MVPWorkspaceClarityHeader = React.memo(function MVPWorkspaceClarityHeader(
     onReturnToLaunchpad: () => void;
     returnToLaunchpadHref?: string | null;
 }) {
-    const returnLabel = returnToLaunchpadHref?.includes("/app/worlds/") ? "Back to project record" : "Back to preview intro";
+    const returnLabel = returnToLaunchpadHref?.includes("/app/worlds/") ? "Return to project record" : "Return to world entry";
     return (
         <div className="border-b border-white/8 bg-[linear-gradient(180deg,rgba(20,25,30,0.94),rgba(16,20,24,0.96))] px-4 py-3 lg:px-5">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                 <div className="max-w-3xl">
                     <div className="flex flex-wrap items-center gap-2">
-                        <p className="text-[10px] uppercase tracking-[0.18em] text-[#bfd6de]/72">World-first flow</p>
+                        <p className="text-[10px] uppercase tracking-[0.18em] text-[#bfd6de]/72">Project-first flow</p>
                         <span className="rounded-full border border-white/8 bg-white/[0.03] px-2 py-1 text-[10px] uppercase tracking-[0.14em] text-neutral-400">
-                            Focused start
+                            Sample available
                         </span>
                     </div>
                     <p className="mt-2 text-sm font-medium tracking-tight text-white">
@@ -296,11 +300,13 @@ const MVPWorkspaceClarityHeader = React.memo(function MVPWorkspaceClarityHeader(
 const MVPWorkspaceLeftRail = React.memo(function MVPWorkspaceLeftRail({
     clarityMode,
     previewWorkspaceNavigation,
+    initialUploadCapability,
     collapsed,
     onToggle,
 }: {
     clarityMode: boolean;
     previewWorkspaceNavigation?: LeftPanelPreviewWorkspaceNavigation | null;
+    initialUploadCapability?: MvpDirectUploadCapabilitySnapshot;
     collapsed: boolean;
     onToggle: () => void;
 }) {
@@ -339,7 +345,11 @@ const MVPWorkspaceLeftRail = React.memo(function MVPWorkspaceLeftRail({
                         </button>
                     </div>
                     <div className="min-h-0 flex-1 overflow-hidden">
-                        <LeftPanel clarityMode={clarityMode} previewWorkspaceNavigation={previewWorkspaceNavigation} />
+                        <LeftPanel
+                            clarityMode={clarityMode}
+                            previewWorkspaceNavigation={previewWorkspaceNavigation}
+                            initialUploadCapability={initialUploadCapability}
+                        />
                     </div>
                 </>
             )}
@@ -408,11 +418,13 @@ const MVPWorkspaceFrame = React.memo(function MVPWorkspaceFrame({
     clarityMode = false,
     routeVariant = "workspace",
     launchPreviewHref = null,
+    initialUploadCapability,
     deploymentFingerprint,
 }: {
     clarityMode?: boolean;
     routeVariant?: MvpRouteVariant;
     launchPreviewHref?: string | null;
+    initialUploadCapability?: MvpDirectUploadCapabilitySnapshot;
     deploymentFingerprint: MvpDeploymentFingerprint;
 }) {
     const workspaceSession = useMvpWorkspaceSession();
@@ -421,14 +433,20 @@ const MVPWorkspaceFrame = React.memo(function MVPWorkspaceFrame({
     const rightRailCollapsed =
         workspaceSession.journeyStage === "start" ? true : workspaceSession.journeyStage === "unsaved" ? false : workspaceSession.hudState.rightRailCollapsed;
     const previewWorkspaceNavigation =
-        clarityMode && routeVariant === "preview"
+        clarityMode && routeVariant === "launchpad"
             ? {
-                  eyebrow: workspaceSession.launchProjectId ? "Project" : "Preview",
-                  title: workspaceSession.launchProjectId ? "Project launch" : "Focused world start",
+                  eyebrow: workspaceSession.launchProjectId ? "Project record" : "World entry",
+                  title: workspaceSession.launchProjectId
+                      ? workspaceSession.hasSavedVersion
+                          ? "Project world record"
+                          : "Project record"
+                      : "Fallback sample",
                   note: workspaceSession.launchProjectId
-                      ? "Return to the project launch surface."
-                      : "Return to the preview intro without changing the current route.",
-                  backLabel: workspaceSession.launchProjectId ? "Return to project" : "Back to start",
+                      ? workspaceSession.hasSavedVersion
+                          ? "Return to the project world record."
+                          : "Return to the project record."
+                      : "Return to the world entry without losing this workspace.",
+                  backLabel: workspaceSession.launchProjectId ? "Return to project" : "Return to world entry",
                   backToStartHref: launchPreviewHref,
                   onBackToStart: workspaceSession.returnToLaunchpad,
               }
@@ -436,7 +454,7 @@ const MVPWorkspaceFrame = React.memo(function MVPWorkspaceFrame({
 
     return (
         <div className="flex min-h-screen w-full flex-col overflow-x-hidden bg-[#11161b] font-sans text-white supports-[min-height:100dvh]:min-h-dvh xl:h-screen xl:overflow-hidden supports-[height:100dvh]:xl:h-dvh">
-            {clarityMode && routeVariant === "preview" && !workspaceSession.launchProjectId && workspaceSession.journeyStage === "start" ? (
+            {clarityMode && routeVariant === "launchpad" && !workspaceSession.launchProjectId && workspaceSession.journeyStage === "start" ? (
                 <MVPWorkspaceClarityHeader
                     onReturnToLaunchpad={workspaceSession.returnToLaunchpad}
                     returnToLaunchpadHref={launchPreviewHref}
@@ -449,6 +467,7 @@ const MVPWorkspaceFrame = React.memo(function MVPWorkspaceFrame({
                 <MVPWorkspaceLeftRail
                     clarityMode={clarityMode}
                     previewWorkspaceNavigation={previewWorkspaceNavigation}
+                    initialUploadCapability={initialUploadCapability}
                     collapsed={leftRailCollapsed}
                     onToggle={workspaceSession.toggleLeftRail}
                 />
@@ -476,12 +495,14 @@ export default function MVPWorkspaceRuntime({
     routeVariant = "workspace",
     launchWorkspaceHref = null,
     launchPreviewHref = null,
+    initialUploadCapability,
     deploymentFingerprint,
 }: {
     clarityMode?: boolean;
     routeVariant?: MvpRouteVariant;
     launchWorkspaceHref?: string | null;
     launchPreviewHref?: string | null;
+    initialUploadCapability?: MvpDirectUploadCapabilitySnapshot;
     deploymentFingerprint: MvpDeploymentFingerprint;
 }) {
     const workspaceSession = useMvpWorkspaceSession();
@@ -513,6 +534,7 @@ export default function MVPWorkspaceRuntime({
             clarityMode={clarityMode}
             routeVariant={routeVariant}
             launchPreviewHref={launchPreviewHref}
+            initialUploadCapability={initialUploadCapability}
             deploymentFingerprint={deploymentFingerprint}
         />
     );
