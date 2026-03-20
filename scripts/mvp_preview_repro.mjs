@@ -1,7 +1,7 @@
-import fs from "fs/promises";
 import path from "path";
 import { chromium } from "@playwright/test";
 import hostGuard from "./mvp_host_guard.cjs";
+import { uploadStillFixtureToMvp } from "./mvp_upload_client.mjs";
 
 const { assertLocalMvpBaseUrl } = hostGuard;
 
@@ -49,17 +49,8 @@ async function jsonFetch(url, init) {
 }
 
 async function uploadFixture() {
-    const bytes = await fs.readFile(fixturePath);
-    const formData = new FormData();
-    formData.set("file", new Blob([bytes], { type: "image/png" }), path.basename(fixturePath));
-    const { response, payload } = await jsonFetch(`${baseUrl}/api/mvp/upload`, {
-        method: "POST",
-        body: formData,
-    });
-    if (!response.ok) {
-        throw new Error(`upload failed: ${response.status} ${JSON.stringify(payload)}`);
-    }
-    return payload;
+    const upload = await uploadStillFixtureToMvp(baseUrl, fixturePath);
+    return upload.payload;
 }
 
 async function generatePreview(imageId) {

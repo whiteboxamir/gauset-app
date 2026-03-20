@@ -1,7 +1,9 @@
 import fs from "node:fs/promises";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { chromium } from "@playwright/test";
 import hostGuard from "./mvp_host_guard.cjs";
+import { uploadStillFixtureToMvp } from "./mvp_upload_client.mjs";
 import { samplePngVisual } from "./png_visual_sample.mjs";
 import {
     collectCanvasVisualSample,
@@ -190,17 +192,8 @@ async function resolveCertInput(rawInput) {
 }
 
 async function uploadFixture(fixturePath) {
-    const bytes = await fs.readFile(fixturePath);
-    const formData = new FormData();
-    formData.set("file", new Blob([bytes], { type: "image/png" }), path.basename(fixturePath));
-    const { response, payload } = await jsonFetch(`${baseUrl}/api/mvp/upload`, {
-        method: "POST",
-        body: formData,
-    });
-    if (!response.ok) {
-        throw new Error(`upload failed: ${response.status} ${JSON.stringify(payload)}`);
-    }
-    return payload;
+    const upload = await uploadStillFixtureToMvp(baseUrl, fixturePath);
+    return upload.payload;
 }
 
 async function generatePreview(imageId) {
@@ -246,8 +239,8 @@ function buildDraft({ sceneId, urls, metadata, files }) {
     let cameraViews = [];
     let directorPath = [];
     try {
-        if (fs.existsSync(goldSceneRegistryPath)) {
-            const registry = JSON.parse(fs.readFileSync(goldSceneRegistryPath, "utf8"));
+        if (existsSync(goldSceneRegistryPath)) {
+            const registry = JSON.parse(readFileSync(goldSceneRegistryPath, "utf8"));
             const sceneEntry = Array.isArray(registry) ? registry.find((entry) => entry?.scene_id === sceneId) : null;
             cameraViews = Array.isArray(sceneEntry?.camera_views) ? sceneEntry.camera_views : [];
             directorPath = Array.isArray(sceneEntry?.director_path) ? sceneEntry.director_path : [];

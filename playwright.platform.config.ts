@@ -9,6 +9,7 @@ const baseURL = process.env.GAUSET_PLATFORM_E2E_BASE_URL ?? process.env.GAUSET_P
 const jsonReportPath = process.env.GAUSET_PLATFORM_E2E_JSON_REPORT ?? "playwright-report/platform-e2e/results.json";
 const storageStateCandidate = (process.env.GAUSET_PLATFORM_E2E_STORAGE_STATE ?? "").trim();
 const storageState = storageStateCandidate && existsSync(storageStateCandidate) ? storageStateCandidate : undefined;
+const browserChannel = (process.env.PW_CHANNEL ?? "").trim() || undefined;
 
 export default defineConfig({
     testDir: "./tests/platform",
@@ -38,6 +39,7 @@ export default defineConfig({
             name: "chromium",
             use: {
                 ...devices["Desktop Chrome"],
+                ...(browserChannel ? { channel: browserChannel } : {}),
             },
         },
         {

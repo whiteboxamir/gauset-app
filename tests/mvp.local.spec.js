@@ -176,27 +176,25 @@ async function detectWebgl2Support(page) {
 test.describe.configure({ mode: "serial" });
 test.setTimeout(240000);
 
-test("wave0 focused preview drops project-led starts straight into workspace and locks advanced density", async ({ page }) => {
-    await page.goto(`${BASE}/mvp/preview?project=11111111-1111-4111-8111-111111111111&source_kind=upload`, { waitUntil: "domcontentloaded" });
-    await expect(page.getByTestId("mvp-preview-back-to-start")).toBeVisible();
-    await expect(page.getByText(/Project launch/i)).toBeVisible();
-    await expect(page.getByText(/^Import scout stills$/)).toBeVisible();
-    await expect(page.getByRole("link", { name: /Continue to world start/i })).toHaveCount(0);
-    await expect(page.getByText(/Review and handoff/i)).toHaveCount(0);
-    await expect(page.getByText(/Studio view on|Studio view off/i)).toHaveCount(0);
-    await expect(page.getByRole("button", { name: /Open demo world/i })).toHaveCount(0);
+test("wave0 project-bound launchpad keeps the world record flow primary", async ({ page }) => {
+    await page.goto(`${BASE}/mvp?project=11111111-1111-4111-8111-111111111111&source_kind=upload`, { waitUntil: "domcontentloaded" });
+    await expect(page.getByText(/Build one project world\./i)).toBeVisible();
+    await expect(page.getByRole("link", { name: /Open project world workspace/i })).toBeVisible();
+    await expect(page.getByText(/Project identity stays attached/i)).toBeVisible();
+    await expect(page.getByRole("button", { name: /Open sample world/i })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /Resume local draft/i })).toHaveCount(0);
 });
 
 test("wave0 worlds local preview fallback stays inspectable without auth env", async ({ page }) => {
     await page.goto(`${BASE}/app/worlds`, { waitUntil: "domcontentloaded" });
     await expect(page.getByText(/^Local preview$/i).first()).toBeVisible();
     await expect(page.getByText(/Choose a project\. Build one world\. Save it once\./i)).toBeVisible();
-    await expect(page.getByRole("link", { name: /Project home/i }).first()).toBeVisible();
+    await expect(page.getByRole("link", { name: /Open project record/i }).first()).toBeVisible();
 
-    await page.getByRole("link", { name: /Project home/i }).first().click();
+    await page.getByRole("link", { name: /Open project record/i }).first().click();
     await expect(page).toHaveURL(/\/app\/worlds\/11111111-1111-4111-8111-111111111111$/);
     await expect(page.getByRole("heading", { name: "Backlot Scout" })).toBeVisible();
-    await expect(page.getByRole("link", { name: /Import real source/i })).toBeVisible();
+    await expect(page.getByRole("link", { name: /Import source frames/i })).toBeVisible();
 });
 
 test("wave1 local shell and backend state", async ({ page }) => {
@@ -328,10 +326,11 @@ test("wave6 capture set progress", async ({ page }) => {
 });
 
 test("wave7 local preview shell", async ({ page }) => {
-    await page.goto(`${BASE}/mvp/preview?ts=${Date.now()}`, { waitUntil: "domcontentloaded" });
-    await expect(page.getByText(/Bring one image\./i)).toBeVisible();
+    await page.goto(`${BASE}/mvp?ts=${Date.now()}`, { waitUntil: "domcontentloaded" });
+    await expect(page.getByText(/Build one world\./i)).toBeVisible();
     await expectDeploymentFingerprintBadge(page);
-    await expect(page.getByRole("button", { name: /See the demo world/i })).toBeVisible();
+    await expect(page.getByRole("link", { name: /Open project library/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Open sample world/i })).toBeVisible();
     await page.screenshot({ path: "/tmp/qa-wave7-preview-shell.png", fullPage: true });
 });
 
@@ -443,14 +442,14 @@ test("wave12 duplicate-heavy capture set is blocked", async ({ page }) => {
 });
 
 test("wave13 focused preview stays simple before save and keeps advanced density locked", async ({ page }) => {
-    await page.goto(`${BASE}/mvp/preview?ts=${Date.now()}`, { waitUntil: "domcontentloaded" });
+    await page.goto(`${BASE}/mvp?ts=${Date.now()}`, { waitUntil: "domcontentloaded" });
     await expect(page.getByText(/Build one world\./i)).toBeVisible();
-    await expect(page.getByRole("button", { name: /Open demo world/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Open sample world/i })).toBeVisible();
     await expect(page.getByRole("button", { name: /Resume local draft/i })).toHaveCount(0);
     await expect(page.getByRole("button", { name: /Studio view on|Studio view off/i })).toHaveCount(0);
     await expect(page.getByText(/Richer direction, review, and handoff unlock after the first save\./i)).toBeVisible();
 
-    await page.getByRole("button", { name: /Open demo world/i }).click();
+    await page.getByRole("button", { name: /Open sample world/i }).click();
     await expect(page.getByTestId("mvp-viewer-surface")).toBeVisible();
     await expect(page.getByRole("button", { name: /Studio view on|Studio view off/i })).toHaveCount(0);
 });
@@ -464,8 +463,6 @@ test("wave13 classic route keeps viewer area on laptop viewports", async ({ brow
         const page = await context.newPage();
         await page.goto(`${BASE}/mvp`, { waitUntil: "networkidle" });
         await waitForBackendReady(page);
-        await expect(page.getByText(/Bring one image\./i)).toHaveCount(0);
-        await expect(page.getByTestId("mvp-preview-route-badge")).toHaveCount(0);
 
         const viewerBox = await page.getByTestId("mvp-viewer-surface").boundingBox();
         expect(viewerBox?.height ?? 0).toBeGreaterThan(viewport.height * 0.52);
@@ -475,18 +472,17 @@ test("wave13 classic route keeps viewer area on laptop viewports", async ({ brow
     }
 });
 
-test("wave14 preview demo stays static and keeps the viewer tray closed", async ({ browser }) => {
+test("wave14 preview sample stays static and keeps the viewer tray closed", async ({ browser }) => {
     const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
     const page = await context.newPage();
 
-    await page.goto(`${BASE}/mvp/preview`, { waitUntil: "networkidle" });
-    await page.getByRole("button", { name: /Open demo world/i }).click();
+    await page.goto(`${BASE}/mvp`, { waitUntil: "networkidle" });
+    await page.getByRole("button", { name: /Open sample world/i }).click();
 
     await expect(page.getByTestId("mvp-preview-back-to-start")).toBeVisible({ timeout: 15000 });
     await expect(page.getByRole("button", { name: /Show left HUD/i })).toBeVisible({ timeout: 15000 });
-    await expect(page.getByText(/Demo world loaded/i)).toBeVisible({ timeout: 15000 });
-    await expect(page.getByText(/^Demo world$/i).first()).toBeVisible({ timeout: 15000 });
-    await expect(page.getByTestId("mvp-preview-route-badge")).toContainText(/Preview safe/i);
+    await expect(page.getByText(/Sample world loaded/i)).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText(/^Sample world$/i).first()).toBeVisible({ timeout: 15000 });
     await expect(page.getByText(/Preview Loaded/i)).toHaveCount(0);
     await expect(page.getByTestId("mvp-viewer-selection-tray")).toHaveCount(0);
 
@@ -498,10 +494,10 @@ test("wave14 preview demo stays static and keeps the viewer tray closed", async 
 });
 
 test("wave15 preview workspace can return to start and resume the same session", async ({ page }) => {
-    await page.goto(`${BASE}/mvp/preview`, { waitUntil: "networkidle" });
-    await page.getByRole("button", { name: /Open demo world/i }).click();
+    await page.goto(`${BASE}/mvp`, { waitUntil: "networkidle" });
+    await page.getByRole("button", { name: /Open sample world/i }).click();
     await expect(page.getByTestId("mvp-preview-back-to-start")).toBeVisible({ timeout: 15000 });
-    await expect.poll(async () => Boolean(await readLocalDraft(page)), { timeout: 15000 }).toBe(true);
+    await expect.poll(async () => Boolean(await readLocalDraft(page, "preview")), { timeout: 15000 }).toBe(true);
     await expect.poll(async () => await listLocalDraftKeys(page), { timeout: 15000 }).toContainEqual(expect.stringContaining(":preview:"));
 
     await page.getByTestId("mvp-preview-back-to-start").click();
@@ -510,8 +506,8 @@ test("wave15 preview workspace can return to start and resume the same session",
 
     await page.getByRole("button", { name: /Resume local draft/i }).click();
     await expect(page.getByTestId("mvp-preview-back-to-start")).toBeVisible({ timeout: 15000 });
-    await expect(page.getByText(/Demo world loaded/i)).toBeVisible({ timeout: 15000 });
-    await expect(page.getByText(/^Demo world$/i).first()).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText(/Sample world loaded/i)).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText(/^Sample world$/i).first()).toBeVisible({ timeout: 15000 });
 });
 
 test("wave16 preview route keeps back control visible on laptop viewports", async ({ browser }) => {
@@ -522,8 +518,8 @@ test("wave16 preview route keeps back control visible on laptop viewports", asyn
         const context = await browser.newContext({ viewport });
         const page = await context.newPage();
 
-        await page.goto(`${BASE}/mvp/preview`, { waitUntil: "networkidle" });
-        await page.getByRole("button", { name: /See the demo world/i }).click();
+        await page.goto(`${BASE}/mvp`, { waitUntil: "networkidle" });
+        await page.getByRole("button", { name: /Open sample world/i }).click();
 
         const backButton = page.getByTestId("mvp-preview-back-to-start");
         await expect(backButton).toBeVisible({ timeout: 15000 });
@@ -827,12 +823,12 @@ test("wave21 workspace and preview drafts stay on separate v2 namespaces", async
 
     const previewPage = await context.newPage();
     await setAuthSessionRouteMock(previewPage, sessionPayload);
-    await previewPage.goto(`${BASE}/mvp/preview`, { waitUntil: "networkidle" });
+    await previewPage.goto(`${BASE}/mvp`, { waitUntil: "networkidle" });
     await waitForBackendReady(previewPage);
-    await expect(previewPage.getByText(/Bring one image\./i)).toBeVisible();
+    await expect(previewPage.getByText(/Build one world\./i)).toBeVisible();
     await expect(await readNamespacedLocalDraft(previewPage, "preview")).toBeNull();
     await expect(await readLocalDraft(previewPage, "preview")).toBeNull();
-    await previewPage.getByRole("button", { name: /See the demo world/i }).click();
+    await previewPage.getByRole("button", { name: /Open sample world/i }).click();
     await expect(previewPage.getByTestId("mvp-preview-back-to-start")).toBeVisible({ timeout: 15000 });
 
     const previewKey = await getNamespacedLocalDraftKey(previewPage, "preview");
@@ -1040,7 +1036,7 @@ test("wave26 auth transitions keep anonymous and authenticated workspace drafts 
 
     await page.reload({ waitUntil: "networkidle" });
     await waitForBackendReady(page);
-    await expect(page.getByText(/Bring one image\./i)).toBeVisible();
+    await expect(page.getByTestId("mvp-shell-title")).toBeVisible();
     const authenticatedDraft = await createSavedWorkspaceDraft(page, {
         directorBrief: "Authenticated draft for auth transition.",
         marker: "authenticated",

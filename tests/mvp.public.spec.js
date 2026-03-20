@@ -120,16 +120,33 @@ async function waitForBackendReady(page) {
 }
 
 async function uploadImage(page, filePath) {
-    const uploadResponsePromise = page.waitForResponse(
-        (response) => response.request().method() === "POST" && /\/api\/mvp\/upload(?:\?|$)/.test(response.url()),
-    );
-    await page.setInputFiles('input[type="file"]', filePath);
-    const uploadResponse = await uploadResponsePromise;
-    expect(uploadResponse.ok()).toBeTruthy();
-    const payload = await uploadResponse.json();
-    expect(payload.image_id).toMatch(/^[a-z0-9_-]{12,}$/i);
-    await expect(page.getByTestId("mvp-capture-tray")).toBeVisible({ timeout: 15_000 });
-    return payload;
+    let uploadPayload = null;
+    const handleResponse = async (response) => {
+        if (response.request().method() !== "POST") {
+            return;
+        }
+        if (!/\/api\/mvp\/upload(?:\?|$)|\/upload(?:\?|$)/.test(response.url())) {
+            return;
+        }
+        try {
+            const payload = await response.json();
+            if (payload?.image_id) {
+                uploadPayload = payload;
+            }
+        } catch {}
+    };
+
+    page.on("response", handleResponse);
+    try {
+        await page.setInputFiles('input[type="file"]', filePath);
+        await expect(page.getByTestId("mvp-capture-tray")).toBeVisible({ timeout: 30_000 });
+        await expect
+            .poll(() => uploadPayload?.image_id ?? null, { timeout: 30_000, intervals: [500, 1_000, 1_500] })
+            .toMatch(/^[a-z0-9_-]{12,}$/i);
+        return uploadPayload;
+    } finally {
+        page.off("response", handleResponse);
+    }
 }
 
 async function waitForJob(page, jobId) {
@@ -384,11 +401,11 @@ test.afterAll(() => {
     persistManifest();
 });
 
-test("wave0 public preview lane stays separate from main workspace", async ({ page }) => {
+test("wave0 public launchpad keeps project entry primary and sample secondary", async ({ page }) => {
     const title = test.info().title;
-    const screenshot = "wave00-public-preview-launchpad.png";
+    const screenshot = "wave00-public-launchpad.png";
 
-    await page.goto(`${BASE}/mvp/preview?cert=${encodeURIComponent(runLabel)}&ts=${Date.now()}`, { waitUntil: "networkidle" });
+    await page.goto(`${BASE}/mvp?cert=${encodeURIComponent(runLabel)}&ts=${Date.now()}`, { waitUntil: "networkidle" });
     await expect(page.getByText(/Build one world\./i)).toBeVisible();
     await expectDeploymentFingerprintBadge(page);
     await expect(page.getByRole("link", { name: /Open project library/i })).toBeVisible();
@@ -398,8 +415,8 @@ test("wave0 public preview lane stays separate from main workspace", async ({ pa
     await expect(page.getByText(/Legacy sample world state/i)).toBeVisible();
     recordWaveEvidence(title, {
         wave_id: "wave00",
-        route: "/mvp/preview",
-        preview_lane_validated: true,
+        route: "/mvp",
+        launchpad_posture_validated: true,
     });
 });
 

@@ -19,8 +19,14 @@ async function fetchText(url) {
     return { response, body };
 }
 
-function includesGatedEntry(body, encodedNextPath) {
-    return body.includes(`/auth/login?next=${encodedNextPath}`) && (/NEXT_REDIRECT/.test(body) || /Loading workspace/i.test(body));
+async function fetchRedirect(url) {
+    const response = await fetch(url, { cache: "no-store", redirect: "manual" });
+    const body = await response.text();
+    return {
+        response,
+        body,
+        location: response.headers.get("location"),
+    };
 }
 
 function parseJson(body, label) {
@@ -45,16 +51,37 @@ const mvpShell = await fetchText(`${BASE}/mvp?cert=${encodeURIComponent(runLabel
 report.checks.mvp_shell = {
     status: mvpShell.response.status,
     ok: mvpShell.response.ok,
-    loading_shell_present: /Loading workspace/i.test(mvpShell.body),
-    gated_entry_present: includesGatedEntry(mvpShell.body, "%2Fmvp"),
+    title_present: /Build one world\.\s+Save it once\.\s+Then direct it\./i.test(mvpShell.body),
+    launchpad_present: /Open project library/i.test(mvpShell.body) && /Open sample world/i.test(mvpShell.body),
 };
 
-const previewShell = await fetchText(`${BASE}/mvp/preview?cert=${encodeURIComponent(runLabel)}&ts=${Date.now()}`);
-report.checks.preview_shell = {
-    status: previewShell.response.status,
-    ok: previewShell.response.ok,
-    loading_shell_present: /Loading workspace/i.test(previewShell.body),
-    gated_entry_present: includesGatedEntry(previewShell.body, "%2Fmvp"),
+const previewCompatibility = await fetchRedirect(
+    `${BASE}/mvp/preview?project=11111111-1111-4111-8111-111111111111&source_kind=upload&entry=workspace&cert=${encodeURIComponent(runLabel)}&ts=${Date.now()}`,
+);
+report.checks.preview_compatibility = {
+    status: previewCompatibility.response.status,
+    ok:
+        (previewCompatibility.response.status === 307 || previewCompatibility.response.status === 308) &&
+        Boolean(
+            previewCompatibility.location?.includes(
+                `/mvp?project=11111111-1111-4111-8111-111111111111&source_kind=upload&entry=workspace`,
+            ),
+        ),
+    redirect_to: previewCompatibility.location ?? null,
+};
+
+const uploadInit = await fetchText(`${BASE}/api/mvp/upload-init`);
+const uploadInitPayload = parseJson(uploadInit.body, "/api/mvp/upload-init");
+report.checks.upload_init = {
+    status: uploadInit.response.status,
+    ok:
+        uploadInit.response.ok &&
+        typeof uploadInitPayload?.available === "boolean" &&
+        typeof uploadInitPayload?.maximumSizeInBytes === "number" &&
+        typeof uploadInitPayload?.legacyProxyMaximumSizeInBytes === "number",
+    transport: uploadInitPayload?.transport ?? null,
+    maximum_size_bytes: uploadInitPayload?.maximumSizeInBytes ?? null,
+    legacy_proxy_maximum_size_bytes: uploadInitPayload?.legacyProxyMaximumSizeInBytes ?? null,
 };
 
 const health = await fetchText(`${BASE}/api/mvp/health`);
@@ -84,11 +111,10 @@ report.checks.setup_status = {
 
 const failures = [];
 if (!report.checks.mvp_shell.ok) failures.push("/mvp not reachable");
-if (!report.checks.mvp_shell.loading_shell_present) failures.push("/mvp shell did not render the gated workspace loading surface");
-if (!report.checks.mvp_shell.gated_entry_present) failures.push("/mvp did not preserve the gated login redirect");
-if (!report.checks.preview_shell.ok) failures.push("/mvp/preview not reachable");
-if (!report.checks.preview_shell.loading_shell_present) failures.push("/mvp/preview did not resolve back into the /mvp loading shell");
-if (!report.checks.preview_shell.gated_entry_present) failures.push("/mvp/preview did not preserve the canonical /mvp login redirect");
+if (!report.checks.mvp_shell.title_present) failures.push("/mvp did not render the production launchpad title");
+if (!report.checks.mvp_shell.launchpad_present) failures.push("/mvp did not render the project-first launchpad actions");
+if (!report.checks.preview_compatibility.ok) failures.push("/mvp/preview did not canonicalize to the matching /mvp route");
+if (!report.checks.upload_init.ok) failures.push("/api/mvp/upload-init did not return a valid capability payload");
 if (!report.checks.health.ok || healthPayload.status !== "ok") failures.push("/api/mvp/health failed");
 if (!report.checks.frontend_deployment.ok) {
     failures.push("/api/mvp/deployment failed");

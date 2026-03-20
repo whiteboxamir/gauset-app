@@ -1,4 +1,4 @@
-import { createHmac } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 import { del } from "@vercel/blob";
 import type { NextRequest } from "next/server";
 
@@ -10,7 +10,6 @@ import {
     type MvpDirectUploadTransport,
     isAllowedBlobStoreUrl,
 } from "@/lib/mvp-upload";
-import { authorizeProxyRequest } from "@/server/mvp/proxyAccess";
 import {
     buildProxyResponseHeaders,
     buildUpstreamRequestHeaders,
@@ -22,7 +21,7 @@ import { buildBackendProxyErrorResponse, buildUnavailableResponse, type ProxyAcc
 
 export const MVP_DIRECT_UPLOAD_PATH_PREFIX = "mvp/source-stills/";
 const BROWSER_UPLOAD_GRANT_TTL_MS = 5 * 60 * 1000;
-const BROWSER_UPLOAD_GRANT_VERSION = "gauset-browser-upload-v1";
+const BROWSER_UPLOAD_GRANT_VERSION = "gauset-browser-upload-v2";
 
 export interface CompleteDirectUploadPayload {
     blobUrl: string;
@@ -66,18 +65,37 @@ function resolveBrowserUploadGrantSecret(env: NodeJS.ProcessEnv = process.env) {
     ).trim();
 }
 
+function normalizeUploadAudience(value: string) {
+    try {
+        const parsed = new URL(value.trim());
+        if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+            return "";
+        }
+        parsed.hash = "";
+        parsed.search = "";
+        parsed.pathname = parsed.pathname.replace(/\/+$/, "") || "/";
+        return parsed.toString();
+    } catch {
+        return "";
+    }
+}
+
 function buildBrowserUploadGrantMessage({
     filename,
     contentType,
     size,
     expiresAt,
+    audience,
+    nonce,
 }: {
     filename: string;
     contentType: string;
     size: number;
     expiresAt: number;
+    audience: string;
+    nonce: string;
 }) {
-    return [BROWSER_UPLOAD_GRANT_VERSION, filename, contentType, String(size), String(expiresAt)].join("\n");
+    return [BROWSER_UPLOAD_GRANT_VERSION, filename, contentType, String(size), String(expiresAt), audience, nonce].join("\n");
 }
 
 export function isDirectUploadConfigured(env: NodeJS.ProcessEnv = process.env) {
@@ -125,12 +143,13 @@ function resolveBrowserDirectBackendUploadUrl(env: NodeJS.ProcessEnv = process.e
 export function resolveDirectUploadCapability(env: NodeJS.ProcessEnv = process.env): MvpDirectUploadCapability {
     const blobUploadAvailable = isDirectUploadConfigured(env);
     const backendDirectUploadUrl = blobUploadAvailable ? "" : resolveBrowserDirectBackendUploadUrl(env);
-    const transport: MvpDirectUploadTransport = blobUploadAvailable ? "blob" : backendDirectUploadUrl ? "backend" : null;
+    const backendDirectUploadAvailable = Boolean(backendDirectUploadUrl && resolveBrowserUploadGrantSecret(env));
+    const transport: MvpDirectUploadTransport = blobUploadAvailable ? "blob" : backendDirectUploadAvailable ? "backend" : null;
 
     return {
         available: Boolean(transport),
         transport,
-        directUploadUrl: backendDirectUploadUrl || undefined,
+        directUploadUrl: transport === "backend" ? backendDirectUploadUrl || undefined : undefined,
         allowedContentTypes: [...MVP_DIRECT_UPLOAD_ALLOWED_CONTENT_TYPES],
         maximumSizeInBytes: MVP_DIRECT_UPLOAD_MAX_BYTES,
         legacyProxyMaximumSizeInBytes: MVP_LEGACY_PROXY_UPLOAD_MAX_BYTES,
@@ -201,29 +220,40 @@ export function issueBrowserDirectUploadGrant({
 }) {
     const expiresAt = Date.now() + BROWSER_UPLOAD_GRANT_TTL_MS;
     const secret = resolveBrowserUploadGrantSecret(env);
-    const headers =
-        secret
-            ? {
-                  "x-gauset-upload-filename": filename,
-                  "x-gauset-upload-content-type": contentType,
-                  "x-gauset-upload-size": String(size),
-                  "x-gauset-upload-expires": String(expiresAt),
-                  "x-gauset-upload-signature": createHmac("sha256", secret)
-                      .update(
-                          buildBrowserUploadGrantMessage({
-                              filename,
-                              contentType,
-                              size,
-                              expiresAt,
-                          }),
-                          "utf8",
-                      )
-                      .digest("hex"),
-              }
-            : {};
+    if (!secret) {
+        throw new Error("Direct backend upload signing is unavailable on this deployment.");
+    }
+
+    const audience = normalizeUploadAudience(uploadUrl);
+    if (!audience) {
+        throw new Error("Direct backend upload URL is invalid.");
+    }
+
+    const nonce = randomUUID().replace(/-/g, "");
+    const headers = {
+        "x-gauset-upload-filename": filename,
+        "x-gauset-upload-content-type": contentType,
+        "x-gauset-upload-size": String(size),
+        "x-gauset-upload-expires": String(expiresAt),
+        "x-gauset-upload-audience": audience,
+        "x-gauset-upload-nonce": nonce,
+        "x-gauset-upload-signature": createHmac("sha256", secret)
+            .update(
+                buildBrowserUploadGrantMessage({
+                    filename,
+                    contentType,
+                    size,
+                    expiresAt,
+                    audience,
+                    nonce,
+                }),
+                "utf8",
+            )
+            .digest("hex"),
+    };
 
     return {
-        uploadUrl,
+        uploadUrl: audience,
         headers,
         expiresAt,
         maximumSizeInBytes: MVP_DIRECT_UPLOAD_MAX_BYTES,
@@ -297,13 +327,6 @@ export function parseCompleteDirectUploadPayload(raw: unknown) {
             size,
         } satisfies CompleteDirectUploadPayload,
     };
-}
-
-export async function authorizeMvpUploadRequest(request: NextRequest) {
-    return authorizeProxyRequest({
-        request,
-        pathname: "upload",
-    });
 }
 
 export async function importDirectUploadIntoBackend({

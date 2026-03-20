@@ -4,6 +4,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 
 import nextEnv from "@next/env";
+import { uploadStillFixtureToMvp } from "./mvp_upload_client.mjs";
 
 const { loadEnvConfig } = nextEnv;
 
@@ -256,17 +257,24 @@ function createAppClient(label) {
         "user-agent": `gauset-platform-billing-completion-${label}`,
     };
 
+    function buildHeaders(headers = {}) {
+        return {
+            ...(cookieJar.size > 0 ? { cookie: getCookieHeader(cookieJar) } : {}),
+            ...defaultHeaders,
+            ...headers,
+        };
+    }
+
     return {
+        buildHeaders,
         async request(pathname, { method = "GET", json = undefined, body = undefined, headers = {}, redirect = "manual" } = {}) {
             const response = await fetch(`${baseUrl}${pathname}`, {
                 method,
                 redirect,
-                headers: {
+                headers: buildHeaders({
                     ...(json !== undefined ? { "Content-Type": "application/json" } : {}),
-                    ...(cookieJar.size > 0 ? { cookie: getCookieHeader(cookieJar) } : {}),
-                    ...defaultHeaders,
                     ...headers,
-                },
+                }),
                 body: json !== undefined ? JSON.stringify(json) : body,
                 cache: "no-store",
             });
@@ -394,14 +402,10 @@ async function runAuthenticatedUsageFlow({ fixture }) {
     assert.equal(billingSummary.response.status, 200, "Billing summary should load for the fixture owner.");
 
     const uploadFixturePath = await resolveBillingCompletionImage();
-    const uploadFixture = await fs.readFile(uploadFixturePath);
-    const uploadBody = new FormData();
-    uploadBody.set("file", new Blob([uploadFixture], { type: getUploadContentType(uploadFixturePath) }), path.basename(uploadFixturePath));
-    const upload = await client.request("/api/mvp/upload", {
-        method: "POST",
-        body: uploadBody,
+    const upload = await uploadStillFixtureToMvp(baseUrl, uploadFixturePath, {
+        headers: client.buildHeaders(),
+        contentType: getUploadContentType(uploadFixturePath),
     });
-    assert.equal(upload.response.status, 200, "Authenticated MVP upload should return 200.");
     assert.ok(upload.payload?.image_id, "Upload should return an image id.");
 
     const generation = await client.request("/api/mvp/generate/asset", {
@@ -436,6 +440,7 @@ async function runAuthenticatedUsageFlow({ fixture }) {
     return {
         ownerEmail: fixture.ownerEmail,
         uploadFixturePath,
+        uploadTransport: upload.transport,
         imageId: upload.payload.image_id,
         job: completedJob.snapshot,
         usageEvent: usageEvent.row,
