@@ -1,5 +1,6 @@
 'use client';
 import { Suspense, useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import { Canvas, useThree } from '@react-three/fiber';
 import { ScrollControls, Scroll, Preload } from '@react-three/drei';
 import { EffectComposer, Vignette, Bloom } from '@react-three/postprocessing';
@@ -232,9 +233,23 @@ export function HeroPage() {
     return (
         <div className="fixed inset-0 w-full h-full bg-transparent overflow-hidden overscroll-none">
 
-            <nav className="fixed top-0 left-0 right-0 flex justify-between items-center px-6 md:px-10 py-5 pointer-events-none z-50">
-                <div className="text-white/90 font-bold tracking-[0.15em] text-xs uppercase pointer-events-auto">Gauset</div>
-            </nav>
+            <header className="marketing-header">
+                <div className="marketing-header__inner">
+                    <div className="marketing-header__row">
+                        <div className="marketing-header__group">
+                            <div className="pointer-events-auto text-xs font-bold uppercase tracking-[0.15em] text-white/90 sm:text-sm">Gauset</div>
+                        </div>
+                        <div className="marketing-header__actions">
+                            <Link
+                                href="/auth/login"
+                                className="pointer-events-auto inline-flex min-h-10 items-center rounded-full border border-white/10 bg-black/35 px-4 py-2 text-sm font-medium text-white/90 backdrop-blur-md transition-colors hover:border-white/20 hover:bg-black/50 hover:text-white sm:px-5"
+                            >
+                                Log in
+                            </Link>
+                        </div>
+                    </div>
+                </div>
+            </header>
             <SuccessOverlay show={showOverlay} onClose={handleOverlayClose} />
 
             <div className="absolute inset-0 w-full h-full -z-10">

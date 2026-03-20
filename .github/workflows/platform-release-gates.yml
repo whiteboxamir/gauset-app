@@ -1,0 +1,46 @@
+name: Platform Release Gates
+
+on:
+  push:
+    branches:
+      - main
+      - "codex/**"
+  pull_request:
+
+jobs:
+  deterministic-platform-gates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Platform contracts
+        run: npm run test:platform-contracts
+
+      - name: Review-share matrix
+        run: npm run test:review-share-matrix
+
+      - name: MVP workspace persistence
+        run: npm run test:mvp-workspace-persistence
+
+      - name: Platform scenarios
+        run: npm run test:platform-scenarios
+
+      - name: Platform routes
+        run: npm run test:platform-routes
+
+      - name: Platform readiness
+        run: npm run test:platform-readiness

@@ -1,20 +1,29 @@
 'use client';
 
+import Link from 'next/link';
+
 import { WaitlistForm } from '@/components/ui/WaitlistForm';
 
 export function HeroContent() {
     return (
         <div className="min-h-screen flex flex-col items-center justify-center px-6 text-center relative py-16">
-            {/* Navbar */}
-            <nav className="fixed top-0 left-0 right-0 z-50 flex justify-between items-center px-6 md:px-10 py-5">
-                <div className="text-white font-bold tracking-wider text-sm">GAUSET</div>
-                <a
-                    href="/login"
-                    className="text-white/70 text-sm border border-white/10 rounded-full px-5 py-2 hover:bg-white/5 transition-colors"
-                >
-                    Log In
-                </a>
-            </nav>
+            <header className="marketing-header">
+                <div className="marketing-header__inner">
+                    <div className="marketing-header__row">
+                        <div className="marketing-header__group">
+                            <div className="pointer-events-auto text-sm font-bold tracking-wider text-white">GAUSET</div>
+                        </div>
+                        <div className="marketing-header__actions">
+                            <Link
+                                href="/auth/login"
+                                className="pointer-events-auto inline-flex min-h-10 items-center rounded-full border border-white/10 px-4 py-2 text-sm text-white/70 transition-colors hover:bg-white/5 sm:px-5"
+                            >
+                                Log in
+                            </Link>
+                        </div>
+                    </div>
+                </div>
+            </header>
 
             {/* Hero text */}
             <h1 className="text-6xl sm:text-7xl md:text-9xl font-medium tracking-tighter mb-6 bg-clip-text text-transparent bg-gradient-to-b from-white to-white/60 pb-2 leading-[0.95]">

@@ -1,62 +1,93 @@
 "use client";
 
-import React, { Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { ContactShadows, Environment, Grid, Html, OrbitControls, PivotControls } from "@react-three/drei";
-import * as THREE from "three";
-import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
-import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
-import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
-import { TAARenderPass } from "three/examples/jsm/postprocessing/TAARenderPass.js";
-import { clone } from "three/examples/jsm/utils/SkeletonUtils.js";
-import { MapPin } from "lucide-react";
+import React, { Suspense, useEffect, useRef, useState } from "react";
+import { Environment, OrbitControls } from "@react-three/drei";
+import { Canvas, useFrame } from "@react-three/fiber";
+
 import EnvironmentSplat from "./EnvironmentSplat";
-import { toProxyUrl } from "@/lib/mvp-api";
-import { resolveEnvironmentRenderState } from "@/lib/mvp-product";
 import {
-    CameraPathFrame,
-    CameraPose,
-    SpatialPin,
-    SpatialPinType,
-    Vector3Tuple,
-    createId,
-    fovToLensMm,
-    formatPinTypeLabel,
-    normalizeWorkspaceSceneGraph,
-    nowIso,
-    parseVector3Tuple,
+    InteractiveSingleImageFallbackSurface,
+    SingleImagePreviewSurface,
+    ThreeOverlayFallback,
+} from "./ThreeOverlayFallbackSurfaces";
+import { CameraRig } from "./ThreeOverlayCameraRig";
+import { LoadingLabel } from "./ThreeOverlayLoadingLabel";
+import { PinLayer } from "./ThreeOverlayPinLayer";
+import { SceneAssetNode, SceneUtilityNode } from "./ThreeOverlaySceneAssets";
+import { ThreeOverlayTransformControls } from "./ThreeOverlayTransformControls";
+import {
+    SceneBackgroundLock,
+    TemporalAntialiasingComposer,
+    ViewerContactShadows,
+    ViewerGrid,
+} from "./ThreeOverlayViewportPrimitives";
+import { DEFAULT_EDITOR_VIEWER_BACKGROUND, EDITOR_CAMERA_FAR, EDITOR_CAMERA_NEAR, type AssetTransformPatch, type SceneAsset } from "./threeOverlayShared";
+import { useThreeOverlaySurfaceController } from "./useThreeOverlaySurfaceController";
+import type { ViewerRuntimeDiagnostics } from "./useThreeOverlayViewerRuntimeController";
+import type { ViewerQualityPolicy } from "./viewerQualityPolicy";
+import { useMvpWorkspaceThreeOverlayController } from "@/app/mvp/_hooks/useMvpWorkspaceThreeOverlayController";
+import type { SceneTransformSessionState, SceneTransformSnapSettings, SceneTransformSpace } from "@/lib/render/transformSessions.ts";
+import type { SceneDocumentV2, SceneNodeId, SceneToolMode } from "@/lib/scene-graph/types.ts";
+import {
+    type CameraPathFrame,
+    type CameraPose,
+    type SpatialPin,
+    type SpatialPinType,
+    type ViewerState,
+    type WorkspaceSceneGraph,
 } from "@/lib/mvp-workspace";
+import type { FocusRequest } from "@/state/mvpEditorSessionStore.ts";
+import type { MvpSceneSelectionMode } from "@/state/mvpSceneStore.ts";
 
-type TransformTuple = [number, number, number];
+export interface ThreeOverlayProps {
+    environment: WorkspaceSceneGraph["environment"];
+    assets: SceneAsset[];
+    sceneDocument?: SceneDocumentV2;
+    pins: SpatialPin[];
+    viewer: ViewerState;
+    focusRequest: FocusRequest;
+    captureRequestKey: number;
+    isPinPlacementEnabled: boolean;
+    pinType: SpatialPinType;
+    isRecordingPath: boolean;
+    onCapturePose: (pose: CameraPose) => void;
+    onPathRecorded: (path: CameraPathFrame[]) => void;
+    onViewerReadyChange: (ready: boolean) => void;
+    readOnly?: boolean;
+    backgroundColor?: string;
+    selectedNodeIds?: SceneNodeId[];
+    selectedPinId?: string | null;
+    selectedAssetInstanceIds?: string[];
+    transformSpace?: SceneTransformSpace;
+    transformSnap?: SceneTransformSnapSettings;
+    transformSession?: SceneTransformSessionState | null;
+    onSelectNode?: (nodeId: SceneNodeId, options?: { mode?: MvpSceneSelectionMode }) => void;
+    activeTool?: SceneToolMode;
+    onSelectPin?: (pinId: string | null) => void;
+    onClearSelection?: () => void;
+    onSelectAsset?: (instanceId: string, options?: { mode?: MvpSceneSelectionMode }) => void;
+    onBeginTransformSession?: (session: {
+        nodeIds: SceneNodeId[];
+        mode: Exclude<SceneToolMode, "select">;
+        space: SceneTransformSpace;
+        anchorWorldMatrix: number[];
+        nodes: SceneTransformSessionState["nodes"];
+    }) => void;
+    onUpdateTransformSessionDrafts?: (drafts: Record<SceneNodeId, AssetTransformPatch>) => void;
+    onCancelTransformSession?: () => void;
+    onCommitTransformSession?: () => void;
+    onUpdateNodeTransformDraft?: (nodeId: SceneNodeId, patch: AssetTransformPatch) => void;
+    onUpdateAssetTransformDraft?: (instanceId: string, patch: AssetTransformPatch) => void;
+    onCommitSceneTransforms?: () => void;
+    onAppendPin?: (pin: SpatialPin) => void;
+}
 
-type SceneAsset = {
-    instanceId: string;
-    name: string;
-    mesh?: string;
-    position?: TransformTuple;
-    rotation?: TransformTuple;
-    scale?: TransformTuple;
-};
-
-type ParsedMeshAsset = {
-    format: "glb" | "gltf" | "obj";
-    scene: THREE.Object3D;
-};
-
-const EDITOR_CAMERA_NEAR = 0.01;
-const EDITOR_CAMERA_FAR = 500;
-const DEFAULT_EDITOR_VIEWER_BACKGROUND = "#0a0a0a";
-const PREVIEW_CAMERA_ORIENTATION_QUATERNION = new THREE.Quaternion(1, 0, 0, 0);
-const sceneBackgroundScratchColor = new THREE.Color();
-let cachedWebglContextSupport: boolean | null = null;
-
-type FocusRequest = (CameraPose & { token: number }) | null;
-type TAARenderPassInternal = TAARenderPass & { accumulateIndex: number };
-
-type ThreeOverlayFallbackProps = {
-    message?: string;
-    referenceImage?: string | null;
-};
+interface ThreeOverlayConnectedProps {
+    readOnly?: boolean;
+    backgroundColor?: string;
+    onCapturePose: (pose: CameraPose) => void;
+    onPathRecorded: (path: CameraPathFrame[]) => void;
+}
 
 class CanvasErrorBoundary extends React.Component<
     {
@@ -86,853 +117,850 @@ class CanvasErrorBoundary extends React.Component<
     }
 }
 
-function canCreateWebGLContext() {
-    if (cachedWebglContextSupport !== null) {
-        return cachedWebglContextSupport;
-    }
-    if (typeof document === "undefined") return true;
-    const canvas = document.createElement("canvas");
-    canvas.width = 1;
-    canvas.height = 1;
-    const context =
-        canvas.getContext("webgl2", { powerPreference: "high-performance" }) ??
-        canvas.getContext("webgl", { powerPreference: "high-performance" }) ??
-        (canvas.getContext("experimental-webgl", { powerPreference: "high-performance" }) as
-            | WebGLRenderingContext
-            | WebGL2RenderingContext
-            | null);
+type AdaptiveViewerQualityTier = "full" | "balanced" | "safe";
+type PosterCurtainStage = "hidden" | "locked" | "releasing";
 
-    cachedWebglContextSupport = Boolean(context);
-    return cachedWebglContextSupport;
+type ViewerRuntimeTelemetrySnapshot = {
+    frameCount: number;
+    frameAvgMs: number | null;
+    frameP95Ms: number | null;
+    frameWorstMs: number | null;
+    frameOver33MsRatio: number | null;
+    frameOver50MsRatio: number | null;
+    adaptiveTransitionCount: number;
+    adaptiveFullMs: number;
+    adaptiveBalancedMs: number;
+    adaptiveSafeMs: number;
+    adaptiveSafeEntries: number;
+    firstFrameAtMs: number | null;
+    firstStableFrameAtMs: number | null;
+};
+
+const ADAPTIVE_QUALITY_SAMPLE_WINDOW = 45;
+const ADAPTIVE_QUALITY_WARMUP_FRAMES = 24;
+const ADAPTIVE_QUALITY_SLOW_FRAME_SECONDS = 1 / 28;
+const ADAPTIVE_QUALITY_VERY_SLOW_FRAME_SECONDS = 1 / 18;
+const ADAPTIVE_QUALITY_RECOVERY_FRAME_SECONDS = 1 / 48;
+const FRAME_BUCKET_UPPER_BOUNDS_MS = [8, 16, 24, 33, 50, 66, 100, Number.POSITIVE_INFINITY] as const;
+const VIEWER_RUNTIME_TELEMETRY_PUBLISH_WINDOW_MS = 1000;
+const VIEWER_RUNTIME_STABLE_FRAME_STREAK = 18;
+const VIEWER_POSTER_CURTAIN_RELEASE_MS = 780;
+
+const DEFAULT_VIEWER_RUNTIME_TELEMETRY: ViewerRuntimeTelemetrySnapshot = {
+    frameCount: 0,
+    frameAvgMs: null,
+    frameP95Ms: null,
+    frameWorstMs: null,
+    frameOver33MsRatio: null,
+    frameOver50MsRatio: null,
+    adaptiveTransitionCount: 0,
+    adaptiveFullMs: 0,
+    adaptiveBalancedMs: 0,
+    adaptiveSafeMs: 0,
+    adaptiveSafeEntries: 0,
+    firstFrameAtMs: null,
+    firstStableFrameAtMs: null,
+};
+
+function compareAdaptiveQualityTierSeverity(left: AdaptiveViewerQualityTier, right: AdaptiveViewerQualityTier) {
+    const severity = {
+        full: 0,
+        balanced: 1,
+        safe: 2,
+    } satisfies Record<AdaptiveViewerQualityTier, number>;
+
+    return severity[left] - severity[right];
 }
 
-function isSingleImagePreviewEnvironment(metadata: any) {
-    const lane = String(metadata?.lane ?? "").trim().toLowerCase();
-    const qualityTier = String(metadata?.quality_tier ?? "").trim().toLowerCase();
-    const truthLabel = String(metadata?.truth_label ?? "").trim().toLowerCase();
-    const sourceFormat = String(metadata?.rendering?.source_format ?? "").trim().toLowerCase();
-
-    return (
-        lane === "preview" &&
-        (qualityTier.includes("single_image_preview") ||
-            sourceFormat.includes("dense_preview") ||
-            truthLabel === "instant preview")
-    );
-}
-
-function shouldApplyPreviewOrientation(metadata: any) {
-    if (typeof metadata?.rendering?.apply_preview_orientation === "boolean") {
-        return metadata.rendering.apply_preview_orientation;
-    }
-
-    return isSingleImagePreviewEnvironment(metadata);
-}
-
-function rotatePreviewCameraVector(tuple: Vector3Tuple) {
-    const rotated = new THREE.Vector3(...tuple).applyQuaternion(PREVIEW_CAMERA_ORIENTATION_QUATERNION);
-    return [rotated.x, rotated.y, rotated.z] as Vector3Tuple;
-}
-
-function resolveSingleImagePreviewCamera(metadata: any): (CameraPose & { up?: Vector3Tuple }) | null {
-    const sourceCamera = metadata?.source_camera;
-    if (!sourceCamera || typeof sourceCamera !== "object") {
+function estimateFrameP95Ms(bucketCounts: number[], frameCount: number) {
+    if (frameCount <= 0) {
         return null;
     }
 
-    const applyOrientation = shouldApplyPreviewOrientation(metadata);
-    const position = parseVector3Tuple(sourceCamera.position, [0, 0, 0]);
-    const target = parseVector3Tuple(sourceCamera.target, [0, 0, 1]);
-    const up = parseVector3Tuple(sourceCamera.up, [0, 1, 0]);
-    const orientedPosition = applyOrientation ? rotatePreviewCameraVector(position) : position;
-    const orientedTarget = applyOrientation ? rotatePreviewCameraVector(target) : target;
-    const orientedUp = applyOrientation ? rotatePreviewCameraVector(up) : up;
-    const explicitFov = Number(sourceCamera.fov_degrees ?? NaN);
-    const focalLengthPx = Number(sourceCamera.focal_length_px ?? NaN);
-    const resolutionPx = Array.isArray(sourceCamera.resolution_px) ? sourceCamera.resolution_px.map((value: unknown) => Number(value)) : [];
-    const imageHeightPx = Number.isFinite(resolutionPx[1]) ? Math.max(1, resolutionPx[1]) : NaN;
-    const derivedFov =
-        Number.isFinite(explicitFov) && explicitFov > 1
-            ? explicitFov
-            : Number.isFinite(focalLengthPx) && focalLengthPx > 1 && Number.isFinite(imageHeightPx)
-              ? (2 * Math.atan(imageHeightPx / (2 * focalLengthPx)) * 180) / Math.PI
-              : NaN;
-    const fov = Number.isFinite(derivedFov) && derivedFov > 1 ? derivedFov : 45;
+    const target = Math.max(1, Math.ceil(frameCount * 0.95));
+    let runningCount = 0;
+    for (let bucketIndex = 0; bucketIndex < bucketCounts.length; bucketIndex += 1) {
+        runningCount += bucketCounts[bucketIndex] ?? 0;
+        if (runningCount >= target) {
+            const upperBound = FRAME_BUCKET_UPPER_BOUNDS_MS[bucketIndex] ?? null;
+            return Number.isFinite(upperBound) ? upperBound : 100;
+        }
+    }
 
-    return {
-        position: orientedPosition,
-        target: orientedTarget,
-        up: orientedUp,
-        fov,
-        lens_mm: Math.round(fovToLensMm(fov) * 10) / 10,
+    return FRAME_BUCKET_UPPER_BOUNDS_MS[FRAME_BUCKET_UPPER_BOUNDS_MS.length - 1] ?? null;
+}
+
+function createEmptyFrameHistogram() {
+    return Array.from({ length: FRAME_BUCKET_UPPER_BOUNDS_MS.length }, () => 0);
+}
+
+function formatNumericRuntimeDiagnostic(value: number | null) {
+    return Number.isFinite(value) ? String(Math.round((value ?? 0) * 1000) / 1000) : "";
+}
+
+const ViewerRuntimeTelemetryController = React.memo(function ViewerRuntimeTelemetryController({
+    enabled,
+    sessionKey,
+    adaptiveQualityTier,
+    onMetricsChange,
+}: {
+    enabled: boolean;
+    sessionKey: string;
+    adaptiveQualityTier: AdaptiveViewerQualityTier;
+    onMetricsChange: (nextValue: ViewerRuntimeTelemetrySnapshot) => void;
+}) {
+    const sessionStartRef = useRef(typeof performance !== "undefined" ? performance.now() : 0);
+    const publishAtRef = useRef(0);
+    const frameCountRef = useRef(0);
+    const frameTotalMsRef = useRef(0);
+    const frameWorstMsRef = useRef(0);
+    const slow33FrameCountRef = useRef(0);
+    const slow50FrameCountRef = useRef(0);
+    const frameHistogramRef = useRef<number[]>(createEmptyFrameHistogram());
+    const stableFrameStreakRef = useRef(0);
+    const firstFrameAtMsRef = useRef<number | null>(null);
+    const firstStableFrameAtMsRef = useRef<number | null>(null);
+    const tierClockRef = useRef({
+        tier: adaptiveQualityTier,
+        lastStampMs: typeof performance !== "undefined" ? performance.now() : 0,
+    });
+    const adaptiveDurationsRef = useRef<Record<AdaptiveViewerQualityTier, number>>({
+        full: 0,
+        balanced: 0,
+        safe: 0,
+    });
+    const adaptiveTransitionCountRef = useRef(0);
+    const adaptiveSafeEntriesRef = useRef(adaptiveQualityTier === "safe" ? 1 : 0);
+
+    const publishMetrics = (nowMs: number) => {
+        const nextDurations = {
+            ...adaptiveDurationsRef.current,
+            [tierClockRef.current.tier]:
+                adaptiveDurationsRef.current[tierClockRef.current.tier] + Math.max(0, nowMs - tierClockRef.current.lastStampMs),
+        };
+
+        onMetricsChange({
+            frameCount: frameCountRef.current,
+            frameAvgMs: frameCountRef.current > 0 ? frameTotalMsRef.current / frameCountRef.current : null,
+            frameP95Ms: estimateFrameP95Ms(frameHistogramRef.current, frameCountRef.current),
+            frameWorstMs: frameCountRef.current > 0 ? frameWorstMsRef.current : null,
+            frameOver33MsRatio: frameCountRef.current > 0 ? slow33FrameCountRef.current / frameCountRef.current : null,
+            frameOver50MsRatio: frameCountRef.current > 0 ? slow50FrameCountRef.current / frameCountRef.current : null,
+            adaptiveTransitionCount: adaptiveTransitionCountRef.current,
+            adaptiveFullMs: nextDurations.full,
+            adaptiveBalancedMs: nextDurations.balanced,
+            adaptiveSafeMs: nextDurations.safe,
+            adaptiveSafeEntries: adaptiveSafeEntriesRef.current,
+            firstFrameAtMs: firstFrameAtMsRef.current,
+            firstStableFrameAtMs: firstStableFrameAtMsRef.current,
+        });
     };
-}
 
-function applyEditorCameraClipping(camera: THREE.PerspectiveCamera) {
-    camera.near = EDITOR_CAMERA_NEAR;
-    camera.far = EDITOR_CAMERA_FAR;
-}
+    useEffect(() => {
+        const nowMs = typeof performance !== "undefined" ? performance.now() : 0;
+        sessionStartRef.current = nowMs;
+        publishAtRef.current = 0;
+        frameCountRef.current = 0;
+        frameTotalMsRef.current = 0;
+        frameWorstMsRef.current = 0;
+        slow33FrameCountRef.current = 0;
+        slow50FrameCountRef.current = 0;
+        frameHistogramRef.current = createEmptyFrameHistogram();
+        stableFrameStreakRef.current = 0;
+        firstFrameAtMsRef.current = null;
+        firstStableFrameAtMsRef.current = null;
+        tierClockRef.current = {
+            tier: adaptiveQualityTier,
+            lastStampMs: nowMs,
+        };
+        adaptiveDurationsRef.current = {
+            full: 0,
+            balanced: 0,
+            safe: 0,
+        };
+        adaptiveTransitionCountRef.current = 0;
+        adaptiveSafeEntriesRef.current = adaptiveQualityTier === "safe" ? 1 : 0;
+        onMetricsChange(DEFAULT_VIEWER_RUNTIME_TELEMETRY);
+    }, [onMetricsChange, sessionKey]);
 
-function LoadingLabel({ text }: { text: string }) {
+    useEffect(() => {
+        const nowMs = typeof performance !== "undefined" ? performance.now() : 0;
+        const tierClock = tierClockRef.current;
+        adaptiveDurationsRef.current[tierClock.tier] += Math.max(0, nowMs - tierClock.lastStampMs);
+        if (adaptiveQualityTier !== tierClock.tier) {
+            adaptiveTransitionCountRef.current += 1;
+            if (adaptiveQualityTier === "safe") {
+                adaptiveSafeEntriesRef.current += 1;
+            }
+        }
+        tierClockRef.current = {
+            tier: adaptiveQualityTier,
+            lastStampMs: nowMs,
+        };
+        publishMetrics(nowMs);
+    }, [adaptiveQualityTier]);
+
+    useFrame((_, delta) => {
+        if (!enabled) {
+            return;
+        }
+
+        const nowMs = typeof performance !== "undefined" ? performance.now() : 0;
+        const frameMs = Math.min(Math.max(delta * 1000, 0), 250);
+        const elapsedMs = Math.max(0, nowMs - sessionStartRef.current);
+
+        frameCountRef.current += 1;
+        frameTotalMsRef.current += frameMs;
+        frameWorstMsRef.current = Math.max(frameWorstMsRef.current, frameMs);
+        if (frameMs > 33) {
+            slow33FrameCountRef.current += 1;
+        }
+        if (frameMs > 50) {
+            slow50FrameCountRef.current += 1;
+        }
+        const bucketIndex = FRAME_BUCKET_UPPER_BOUNDS_MS.findIndex((upperBound) => frameMs <= upperBound);
+        frameHistogramRef.current[bucketIndex === -1 ? frameHistogramRef.current.length - 1 : bucketIndex] += 1;
+
+        if (firstFrameAtMsRef.current === null) {
+            firstFrameAtMsRef.current = elapsedMs;
+        }
+
+        stableFrameStreakRef.current = frameMs <= 33 ? stableFrameStreakRef.current + 1 : 0;
+        if (firstStableFrameAtMsRef.current === null && stableFrameStreakRef.current >= VIEWER_RUNTIME_STABLE_FRAME_STREAK) {
+            firstStableFrameAtMsRef.current = elapsedMs;
+        }
+
+        if (publishAtRef.current === 0 || nowMs - publishAtRef.current >= VIEWER_RUNTIME_TELEMETRY_PUBLISH_WINDOW_MS) {
+            publishAtRef.current = nowMs;
+            publishMetrics(nowMs);
+        }
+    });
+
+    return null;
+});
+
+const ViewerAdaptiveQualityController = React.memo(function ViewerAdaptiveQualityController({
+    enabled,
+    initialTier,
+    onTierChange,
+}: {
+    enabled: boolean;
+    initialTier: AdaptiveViewerQualityTier;
+    onTierChange: (tier: AdaptiveViewerQualityTier) => void;
+}) {
+    const tierRef = useRef<AdaptiveViewerQualityTier>(initialTier);
+    const sampleRef = useRef({
+        warmupFramesRemaining: ADAPTIVE_QUALITY_WARMUP_FRAMES,
+        count: 0,
+        totalDelta: 0,
+        slowFrameCount: 0,
+        verySlowFrameCount: 0,
+        stableWindowCount: 0,
+    });
+
+    useEffect(() => {
+        tierRef.current = initialTier;
+        sampleRef.current = {
+            warmupFramesRemaining: ADAPTIVE_QUALITY_WARMUP_FRAMES,
+            count: 0,
+            totalDelta: 0,
+            slowFrameCount: 0,
+            verySlowFrameCount: 0,
+            stableWindowCount: 0,
+        };
+        onTierChange(initialTier);
+    }, [initialTier, onTierChange]);
+
+    useFrame((_, delta) => {
+        if (!enabled) {
+            return;
+        }
+
+        const sample = sampleRef.current;
+        if (sample.warmupFramesRemaining > 0) {
+            sample.warmupFramesRemaining -= 1;
+            return;
+        }
+
+        const clampedDelta = Math.min(Math.max(delta, 0), 0.25);
+        sample.count += 1;
+        sample.totalDelta += clampedDelta;
+        if (clampedDelta >= ADAPTIVE_QUALITY_SLOW_FRAME_SECONDS) {
+            sample.slowFrameCount += 1;
+        }
+        if (clampedDelta >= ADAPTIVE_QUALITY_VERY_SLOW_FRAME_SECONDS) {
+            sample.verySlowFrameCount += 1;
+        }
+
+        if (sample.count < ADAPTIVE_QUALITY_SAMPLE_WINDOW) {
+            return;
+        }
+
+        const averageDelta = sample.totalDelta / sample.count;
+        let nextTier = tierRef.current;
+
+        if (averageDelta >= ADAPTIVE_QUALITY_VERY_SLOW_FRAME_SECONDS || sample.verySlowFrameCount >= 4) {
+            nextTier = "safe";
+        } else if (tierRef.current === "full" && (averageDelta >= 1 / 24 || sample.slowFrameCount >= 18)) {
+            nextTier = "balanced";
+        } else if (tierRef.current === "balanced" && (averageDelta >= 1 / 22 || sample.slowFrameCount >= 24)) {
+            nextTier = "safe";
+        } else {
+            const stableWindow =
+                averageDelta <= ADAPTIVE_QUALITY_RECOVERY_FRAME_SECONDS &&
+                sample.slowFrameCount === 0 &&
+                sample.verySlowFrameCount === 0;
+            sample.stableWindowCount = stableWindow ? sample.stableWindowCount + 1 : 0;
+
+            if (tierRef.current === "safe" && sample.stableWindowCount >= 4) {
+                nextTier = "balanced";
+            } else if (tierRef.current === "balanced" && initialTier === "full" && sample.stableWindowCount >= 5) {
+                nextTier = "full";
+            }
+        }
+
+        sample.count = 0;
+        sample.totalDelta = 0;
+        sample.slowFrameCount = 0;
+        sample.verySlowFrameCount = 0;
+
+        if (nextTier !== tierRef.current) {
+            tierRef.current = nextTier;
+            sample.stableWindowCount = 0;
+            onTierChange(nextTier);
+        }
+    });
+
+    return null;
+});
+
+const ViewerRuntimeBadge = React.memo(function ViewerRuntimeBadge({
+    diagnostics,
+    qualityPolicy,
+    adaptiveQualityTier,
+    runtimeTelemetry,
+    deliveryStatus,
+}: {
+    diagnostics: ViewerRuntimeDiagnostics;
+    qualityPolicy: ViewerQualityPolicy;
+    adaptiveQualityTier: AdaptiveViewerQualityTier;
+    runtimeTelemetry: ViewerRuntimeTelemetrySnapshot;
+    deliveryStatus: {
+        stagedObserved: boolean;
+        streamingObserved: boolean;
+        upgradePending: boolean;
+        activeVariantLabel: string | null;
+        upgradeVariantLabel: string | null;
+        residentLayerCount: number;
+        residentPointCount: number;
+        residentByteCount: number;
+        inflightPageCount: number;
+        refinePagesLoaded: number;
+        refinePagesPending: number;
+        progressFraction: number;
+        evictions: number;
+        pauseReason: string | null;
+    };
+}) {
+    const qualityToneClass =
+        adaptiveQualityTier === "safe"
+            ? "border-cyan-400/28 bg-cyan-500/12 text-cyan-50"
+            : adaptiveQualityTier === "balanced"
+              ? "border-emerald-400/28 bg-emerald-500/12 text-emerald-50"
+              : qualityPolicy.tier === "premium"
+            ? "border-amber-300/24 bg-amber-500/12 text-amber-50"
+            : qualityPolicy.tier === "standard"
+              ? "border-emerald-400/28 bg-emerald-500/12 text-emerald-50"
+              : qualityPolicy.tier === "guarded"
+                ? "border-cyan-400/28 bg-cyan-500/12 text-cyan-50"
+                : qualityPolicy.tier === "reference"
+                  ? "border-sky-400/28 bg-sky-500/12 text-sky-50"
+                  : "border-rose-400/30 bg-rose-500/12 text-rose-50";
+    const qualityLabel =
+        diagnostics.operationalMode === "webgl_live" && adaptiveQualityTier === "safe"
+            ? "Adaptive safe live"
+            : diagnostics.operationalMode === "webgl_live" && adaptiveQualityTier === "balanced" && qualityPolicy.tier === "premium"
+              ? "Adaptive balanced live"
+              : qualityPolicy.label;
+    const qualityDetail =
+        diagnostics.operationalMode === "webgl_live" && adaptiveQualityTier === "safe"
+            ? "We lowered detail to keep motion smooth."
+            : diagnostics.operationalMode === "webgl_live" && adaptiveQualityTier === "balanced" && qualityPolicy.tier === "premium"
+              ? "We are balancing clarity and motion to keep the scene graceful."
+              : qualityPolicy.mode === "fallback"
+                ? "Stable fallback path"
+                : qualityPolicy.summary;
+    const qualityBadge =
+        {
+            label: qualityLabel,
+            detail: qualityDetail,
+            toneClass: qualityToneClass,
+        };
+    const motionBadge =
+        diagnostics.operationalMode === "webgl_live" && runtimeTelemetry.frameP95Ms !== null
+            ? runtimeTelemetry.frameP95Ms > 66 || (runtimeTelemetry.frameOver50MsRatio ?? 0) > 0.05
+                ? "Motion settling"
+                : runtimeTelemetry.frameP95Ms <= 33 && adaptiveQualityTier !== "safe"
+                  ? "Motion clean"
+                  : "Motion guarded"
+            : null;
+    const deliveryBadge = deliveryStatus.upgradePending
+        ? deliveryStatus.streamingObserved
+            ? deliveryStatus.pauseReason
+                ? `Detail arriving · ${Math.round(deliveryStatus.progressFraction * 100)}% · ${deliveryStatus.pauseReason}`
+                : `Detail arriving · ${Math.round(deliveryStatus.progressFraction * 100)}%`
+            : `Refining from ${deliveryStatus.activeVariantLabel ?? "starter"} to ${deliveryStatus.upgradeVariantLabel ?? "full"}`
+        : deliveryStatus.stagedObserved
+          ? deliveryStatus.streamingObserved
+              ? deliveryStatus.evictions > 0
+                  ? `Live and refining · ${deliveryStatus.residentLayerCount} layers · focus-aware`
+                  : `Live and refining · ${deliveryStatus.residentLayerCount} layers · ${Math.round(deliveryStatus.residentByteCount / (1024 * 1024))} MB resident`
+              : `${deliveryStatus.activeVariantLabel ?? "Live scene"} ready`
+          : null;
+    const toneClass =
+        diagnostics.operationalMode === "webgl_live"
+            ? "border-emerald-400/30 bg-emerald-500/12 text-emerald-100"
+            : diagnostics.operationalMode === "interactive_projection" || diagnostics.operationalMode === "interactive_fallback"
+              ? "border-sky-400/30 bg-sky-500/12 text-sky-100"
+              : diagnostics.operationalMode === "projection_only"
+                ? "border-cyan-400/30 bg-cyan-500/12 text-cyan-100"
+                : diagnostics.operationalMode === "booting"
+                  ? "border-amber-400/30 bg-amber-500/12 text-amber-100"
+                  : "border-rose-400/30 bg-rose-500/12 text-rose-100";
+
     return (
-        <Html center>
-            <div className="text-xs px-3 py-1 rounded bg-neutral-950/80 border border-neutral-700 text-neutral-300">{text}</div>
-        </Html>
-    );
-}
-
-function ThreeOverlayFallback({ message, referenceImage }: ThreeOverlayFallbackProps) {
-    return (
-        <div className="absolute inset-0 z-20 overflow-hidden rounded-[32px] bg-[radial-gradient(circle_at_top,rgba(56,189,248,0.08),transparent_22%),linear-gradient(180deg,#06080b_0%,#040507_100%)]">
-            {referenceImage ? (
-                <div
-                    className="absolute inset-0 bg-cover bg-center opacity-30"
-                    style={{ backgroundImage: `url(${referenceImage})` }}
-                />
+        <div className="pointer-events-none absolute right-4 top-4 z-30 flex max-w-[22rem] flex-col items-end gap-2">
+            <div
+                className={`rounded-full border px-3 py-1.5 text-[10px] uppercase tracking-[0.22em] shadow-[0_14px_30px_rgba(0,0,0,0.28)] backdrop-blur-xl ${toneClass}`}
+                data-testid="mvp-viewer-runtime-badge"
+            >
+                {diagnostics.label}
+            </div>
+            <div
+                className={`rounded-full border px-3 py-1 text-[10px] uppercase tracking-[0.2em] shadow-[0_14px_30px_rgba(0,0,0,0.24)] backdrop-blur-xl ${qualityBadge.toneClass}`}
+            >
+                Quality · {qualityBadge.label}
+            </div>
+            <div className="rounded-full border border-black/30 bg-black/42 px-3 py-1 text-[10px] uppercase tracking-[0.18em] text-neutral-200 shadow-[0_14px_30px_rgba(0,0,0,0.24)] backdrop-blur-xl">
+                {qualityBadge.detail}
+            </div>
+            {motionBadge ? (
+                <div className="rounded-full border border-black/30 bg-black/38 px-3 py-1 text-[10px] uppercase tracking-[0.18em] text-neutral-200 shadow-[0_14px_30px_rgba(0,0,0,0.22)] backdrop-blur-xl">
+                    {motionBadge}
+                </div>
             ) : null}
-            <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(4,6,9,0.72),rgba(4,5,7,0.94))]" />
-            <div className="relative flex h-full items-center justify-center p-6">
-                <div className="w-full max-w-lg rounded-[28px] border border-white/12 bg-[linear-gradient(180deg,rgba(10,14,21,0.94),rgba(7,10,14,0.94))] p-5 text-center shadow-[0_24px_70px_rgba(0,0,0,0.4)] backdrop-blur-xl">
-                    <p className="text-[10px] uppercase tracking-[0.28em] text-cyan-100/80">Viewer fallback</p>
-                    <p className="mt-3 text-lg font-medium text-white">3D viewer unavailable</p>
-                    <p className="mt-2 text-sm leading-6 text-neutral-200">
-                        {message || "This browser or environment could not initialize the WebGL viewer. Import, review, export, and other non-3D controls remain available."}
-                    </p>
-                    <p className="mt-3 text-[11px] leading-5 text-neutral-300">
-                        Camera capture, scene-note placement, and path recording stay disabled until the viewer can create a render context.
-                    </p>
+            {deliveryBadge ? (
+                <div className="rounded-full border border-black/30 bg-black/38 px-3 py-1 text-[10px] uppercase tracking-[0.16em] text-neutral-200 shadow-[0_14px_30px_rgba(0,0,0,0.22)] backdrop-blur-xl">
+                    {deliveryBadge}
+                </div>
+            ) : null}
+            {diagnostics.detail && diagnostics.operationalMode !== "webgl_live" ? (
+                <div className="rounded-2xl border border-black/30 bg-black/45 px-3 py-2 text-right text-[11px] leading-5 text-neutral-100 shadow-[0_20px_40px_rgba(0,0,0,0.28)] backdrop-blur-xl">
+                    {diagnostics.detail}
+                </div>
+            ) : null}
+        </div>
+    );
+});
+
+const ViewerRevealBanner = React.memo(function ViewerRevealBanner({
+    diagnostics,
+    qualityPolicy,
+    isSingleImagePreview,
+    adaptiveQualityTier,
+}: {
+    diagnostics: ViewerRuntimeDiagnostics;
+    qualityPolicy: ViewerQualityPolicy;
+    isSingleImagePreview: boolean;
+    adaptiveQualityTier: AdaptiveViewerQualityTier;
+}) {
+    if (diagnostics.renderMode === "fallback" || diagnostics.operationalMode === "hard_fallback" || diagnostics.operationalMode === "webgl_live") {
+        return null;
+    }
+
+    const banner =
+        diagnostics.operationalMode === "projection_only"
+            ? {
+                  eyebrow: "Poster first",
+                  title: "Reference frame locked",
+                  detail: "We keep the still image visible until a live renderer is safe to reveal.",
+                  chipPrimary: "Reference quality",
+                  chipSecondary: diagnostics.previewProjectionAvailable ? "Preview ready" : "Preview unavailable",
+                  toneClass: "border-sky-300/22 bg-sky-500/10 text-sky-50",
+                  dotClass: "bg-sky-300",
+              }
+            : diagnostics.operationalMode === "interactive_projection" || diagnostics.operationalMode === "interactive_fallback"
+              ? {
+                    eyebrow: "Guided preview",
+                    title: "Keeping the scene usable",
+                    detail: qualityPolicy.summary,
+                    chipPrimary: "Interactive preview",
+                    chipSecondary: adaptiveQualityTier === "safe" ? "Adaptive safeguard" : qualityPolicy.label,
+                    toneClass: "border-emerald-300/22 bg-emerald-500/10 text-emerald-50",
+                    dotClass: "bg-emerald-300",
+                }
+              : isSingleImagePreview
+                ? {
+                      eyebrow: "Poster first",
+                      title: "Live view will fade in",
+                      detail: qualityPolicy.summary,
+                      chipPrimary: "Poster locked",
+                      chipSecondary: adaptiveQualityTier === "safe" ? "Adaptive safeguard" : qualityPolicy.label,
+                      toneClass: "border-amber-300/22 bg-amber-500/10 text-amber-50",
+                      dotClass: "bg-amber-300",
+                  }
+                : {
+                      eyebrow: "Live scene",
+                      title: "Renderer warming up",
+                      detail: qualityPolicy.summary,
+                      chipPrimary: adaptiveQualityTier === "safe" ? "Adaptive safeguard" : qualityPolicy.label,
+                      chipSecondary: diagnostics.previewProjectionAvailable ? "Poster ready" : "No poster",
+                      toneClass: "border-cyan-300/22 bg-cyan-500/10 text-cyan-50",
+                      dotClass: "bg-cyan-300",
+                  };
+
+    return (
+        <div className="pointer-events-none absolute left-4 top-4 z-30 max-w-[26rem]">
+            <div className={`rounded-[1.6rem] border px-4 py-3 shadow-[0_24px_60px_rgba(0,0,0,0.34)] backdrop-blur-xl ${banner.toneClass}`}>
+                <div className="flex items-center gap-2 text-[10px] font-medium uppercase tracking-[0.24em] text-white/78">
+                    <span className={`h-2 w-2 rounded-full ${banner.dotClass}`} />
+                    {banner.eyebrow}
+                </div>
+                <div className="mt-2 text-[1rem] font-medium leading-6 text-white">{banner.title}</div>
+                <div className="mt-1 max-w-[23rem] text-[12px] leading-5 text-white/72">{banner.detail}</div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                    <div className="rounded-full border border-white/12 bg-black/24 px-3 py-1 text-[10px] uppercase tracking-[0.2em] text-white/82">
+                        {banner.chipPrimary}
+                    </div>
+                    <div className="rounded-full border border-white/12 bg-black/24 px-3 py-1 text-[10px] uppercase tracking-[0.2em] text-white/82">
+                        {banner.chipSecondary}
+                    </div>
                 </div>
             </div>
         </div>
     );
-}
+});
 
-function SingleImagePreviewSurface({ imageUrl }: { imageUrl: string }) {
+const ViewerPosterCurtain = React.memo(function ViewerPosterCurtain({
+    imageUrl,
+    stage,
+    qualityPolicy,
+    runtimeLabel,
+}: {
+    imageUrl: string;
+    stage: PosterCurtainStage;
+    qualityPolicy: ViewerQualityPolicy;
+    runtimeLabel: string;
+}) {
+    if (stage === "hidden") {
+        return null;
+    }
+
+    const eyebrow = stage === "releasing" ? "Live reveal" : "Poster first";
+    const title = stage === "releasing" ? "Crossfading into the live scene" : "Holding the reference frame while live rendering settles";
+    const detail =
+        stage === "releasing"
+            ? "The live renderer is now stable enough to reveal without a harsh pop."
+            : qualityPolicy.summary;
+
     return (
-        <div className="absolute inset-0 z-20 overflow-hidden rounded-[32px] bg-[linear-gradient(180deg,#040507_0%,#020304_100%)]">
-            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(56,189,248,0.08),transparent_24%)]" />
-            <img
-                src={imageUrl}
-                alt=""
-                className="h-full w-full object-contain"
-                draggable={false}
-            />
+        <div
+            className={`pointer-events-none absolute inset-0 z-20 overflow-hidden rounded-[32px] transition-opacity duration-700 ${
+                stage === "releasing" ? "opacity-0" : "opacity-100"
+            }`}
+            data-testid="mvp-viewer-poster-curtain"
+        >
+            <div className="absolute inset-0 scale-[1.02] bg-cover bg-center" style={{ backgroundImage: `url(${imageUrl})` }} />
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(245,158,11,0.12),transparent_22%),linear-gradient(180deg,rgba(5,7,10,0.16),rgba(4,6,9,0.78))]" />
+            <div className="absolute inset-x-5 bottom-5">
+                <div className="max-w-[28rem] rounded-[1.8rem] border border-white/12 bg-black/46 px-4 py-3 shadow-[0_24px_60px_rgba(0,0,0,0.34)] backdrop-blur-xl">
+                    <div className="flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-[0.24em] text-white/78">
+                        <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/6 px-3 py-1">
+                            <span className={`h-2 w-2 rounded-full ${stage === "releasing" ? "bg-emerald-300" : "bg-amber-300"}`} />
+                            {eyebrow}
+                        </span>
+                        <span className="inline-flex items-center rounded-full border border-white/10 bg-white/6 px-3 py-1">{runtimeLabel}</span>
+                    </div>
+                    <div className="mt-2 text-[1rem] font-medium leading-6 text-white">{title}</div>
+                    <div className="mt-1 text-[12px] leading-5 text-white/72">{detail}</div>
+                </div>
+            </div>
         </div>
     );
-}
+});
 
-function AssetFallbackMesh({
-    asset,
-    updateAssetTransform,
-    readOnly,
+const ViewerLiveWarmupMatte = React.memo(function ViewerLiveWarmupMatte({
+    qualityPolicy,
+    deliveryStatus,
 }: {
-    asset: SceneAsset;
-    updateAssetTransform: (instanceId: string, patch: Partial<SceneAsset>) => void;
-    readOnly: boolean;
-}) {
-    const [active, setActive] = useState(false);
-
-    return (
-        <PivotControls
-            visible={!readOnly && active}
-            scale={80}
-            depthTest={false}
-            lineWidth={3}
-            anchor={[0, 0, 0]}
-            onDrag={(local) => {
-                if (readOnly) return;
-                const position = new THREE.Vector3();
-                const quaternion = new THREE.Quaternion();
-                const scale = new THREE.Vector3();
-                local.decompose(position, quaternion, scale);
-                const euler = new THREE.Euler().setFromQuaternion(quaternion);
-                updateAssetTransform(asset.instanceId, {
-                    position: [position.x, position.y, position.z],
-                    rotation: [euler.x, euler.y, euler.z],
-                    scale: [scale.x, scale.y, scale.z],
-                });
-            }}
-        >
-            <group
-                position={parseVector3Tuple(asset.position, [0, 0, 0])}
-                rotation={parseVector3Tuple(asset.rotation, [0, 0, 0])}
-                scale={parseVector3Tuple(asset.scale, [1, 1, 1])}
-                onClick={(event) => {
-                    if (readOnly) return;
-                    event.stopPropagation();
-                    setActive((prev) => !prev);
-                }}
-            >
-                <mesh castShadow receiveShadow>
-                    <boxGeometry args={[1, 1, 1]} />
-                    <meshStandardMaterial color={active ? "#60a5fa" : "#4ade80"} roughness={0.3} metalness={0.4} />
-                </mesh>
-            </group>
-        </PivotControls>
-    );
-}
-
-function detectMeshFormat(buffer: ArrayBuffer) {
-    const headerBytes = new Uint8Array(buffer, 0, Math.min(buffer.byteLength, 64));
-    if (headerBytes.length >= 4) {
-        const magic = String.fromCharCode(headerBytes[0] ?? 0, headerBytes[1] ?? 0, headerBytes[2] ?? 0, headerBytes[3] ?? 0);
-        if (magic === "glTF") {
-            return "glb" as const;
-        }
-    }
-
-    const headerText = new TextDecoder("utf-8").decode(headerBytes).replace(/^\uFEFF/, "").trimStart();
-    if (headerText.startsWith("{")) {
-        return "gltf" as const;
-    }
-
-    if (/^(?:#.*\n\s*)*(?:mtllib|o|g|v|vt|vn|usemtl|s|f)\b/m.test(headerText)) {
-        return "obj" as const;
-    }
-
-    throw new Error("Unsupported mesh payload format.");
-}
-
-function parseGltfAsset(loader: GLTFLoader, payload: ArrayBuffer | string, resourcePath: string) {
-    return new Promise<ParsedMeshAsset>((resolve, reject) => {
-        loader.parse(
-            payload,
-            resourcePath,
-            (gltf) => {
-                resolve({
-                    format: payload instanceof ArrayBuffer ? "glb" : "gltf",
-                    scene: gltf.scene || new THREE.Group(),
-                });
-            },
-            (error) => {
-                reject(error instanceof Error ? error : new Error("GLTF parse failed."));
-            },
-        );
-    });
-}
-
-async function loadMeshAsset(meshUrl: string, signal: AbortSignal) {
-    const resolvedUrl = toProxyUrl(meshUrl);
-    const response = await fetch(resolvedUrl, {
-        cache: "force-cache",
-        signal,
-    });
-    if (!response.ok) {
-        throw new Error(`Could not load ${resolvedUrl}: ${response.status} ${response.statusText}`.trim());
-    }
-
-    const payload = await response.arrayBuffer();
-    const format = detectMeshFormat(payload);
-    const resourcePath = new URL("./", new URL(resolvedUrl, window.location.href)).toString();
-
-    if (format === "obj") {
-        const text = new TextDecoder("utf-8").decode(payload);
-        return {
-            format,
-            scene: new OBJLoader().parse(text),
-        } satisfies ParsedMeshAsset;
-    }
-
-    const gltfLoader = new GLTFLoader();
-    if (format === "glb") {
-        return parseGltfAsset(gltfLoader, payload, resourcePath);
-    }
-
-    const text = new TextDecoder("utf-8").decode(payload);
-    return parseGltfAsset(gltfLoader, text, resourcePath);
-}
-
-function MeshAsset({
-    asset,
-    updateAssetTransform,
-    readOnly,
-}: {
-    asset: SceneAsset;
-    updateAssetTransform: (instanceId: string, patch: Partial<SceneAsset>) => void;
-    readOnly: boolean;
-}) {
-    const [active, setActive] = useState(false);
-    const [parsedAsset, setParsedAsset] = useState<ParsedMeshAsset | null>(null);
-    const [loadError, setLoadError] = useState<Error | null>(null);
-
-    useEffect(() => {
-        if (!asset.mesh) {
-            setParsedAsset(null);
-            setLoadError(null);
-            return;
-        }
-
-        const abortController = new AbortController();
-        let ignore = false;
-        setParsedAsset(null);
-        setLoadError(null);
-
-        void loadMeshAsset(asset.mesh, abortController.signal)
-            .then((nextAsset) => {
-                if (ignore || abortController.signal.aborted) {
-                    return;
-                }
-                setParsedAsset(nextAsset);
-            })
-            .catch((error) => {
-                if (ignore || abortController.signal.aborted) {
-                    return;
-                }
-                const resolvedError = error instanceof Error ? error : new Error("Mesh load failed.");
-                console.error(`[ThreeOverlay] Mesh asset load failed for ${asset.mesh}`, resolvedError);
-                setLoadError(resolvedError);
-            });
-
-        return () => {
-            ignore = true;
-            abortController.abort();
-        };
-    }, [asset.mesh]);
-
-    const scene = useMemo(() => (parsedAsset ? clone(parsedAsset.scene) : null), [parsedAsset]);
-
-    if (loadError) {
-        return <AssetFallbackMesh asset={asset} updateAssetTransform={updateAssetTransform} readOnly={readOnly} />;
-    }
-
-    if (!scene) {
-        return <LoadingLabel text="Loading mesh..." />;
-    }
-
-    return (
-        <PivotControls
-            visible={!readOnly && active}
-            scale={80}
-            depthTest={false}
-            lineWidth={3}
-            anchor={[0, 0, 0]}
-            onDrag={(local) => {
-                if (readOnly) return;
-                const position = new THREE.Vector3();
-                const quaternion = new THREE.Quaternion();
-                const scale = new THREE.Vector3();
-                local.decompose(position, quaternion, scale);
-                const euler = new THREE.Euler().setFromQuaternion(quaternion);
-                updateAssetTransform(asset.instanceId, {
-                    position: [position.x, position.y, position.z],
-                    rotation: [euler.x, euler.y, euler.z],
-                    scale: [scale.x, scale.y, scale.z],
-                });
-            }}
-        >
-            <group
-                position={parseVector3Tuple(asset.position, [0, 0, 0])}
-                rotation={parseVector3Tuple(asset.rotation, [0, 0, 0])}
-                scale={parseVector3Tuple(asset.scale, [1, 1, 1])}
-                onClick={(event) => {
-                    if (readOnly) return;
-                    event.stopPropagation();
-                    setActive((prev) => !prev);
-                }}
-            >
-                <primitive object={scene} />
-            </group>
-        </PivotControls>
-    );
-}
-
-function SceneAssetNode({
-    asset,
-    updateAssetTransform,
-    readOnly,
-}: {
-    asset: SceneAsset;
-    updateAssetTransform: (instanceId: string, patch: Partial<SceneAsset>) => void;
-    readOnly: boolean;
-}) {
-    if (asset.mesh) {
-        return <MeshAsset asset={asset} updateAssetTransform={updateAssetTransform} readOnly={readOnly} />;
-    }
-
-    return null;
-}
-
-function pinColors(type: SpatialPinType, isSelected: boolean) {
-    if (type === "egress") {
-        return isSelected ? "bg-emerald-400 border-emerald-200 text-black" : "bg-emerald-500/15 border-emerald-500 text-emerald-300";
-    }
-    if (type === "lighting") {
-        return isSelected ? "bg-amber-300 border-amber-100 text-black" : "bg-amber-500/15 border-amber-500 text-amber-300";
-    }
-    if (type === "hazard") {
-        return isSelected ? "bg-rose-400 border-rose-200 text-black" : "bg-rose-500/15 border-rose-500 text-rose-300";
-    }
-    return isSelected ? "bg-sky-400 border-sky-200 text-black" : "bg-sky-500/15 border-sky-500 text-sky-300";
-}
-
-function PinLayer({
-    pins,
-    selectedPinId,
-    isPlacingPin,
-    pinType,
-    readOnly,
-    onAddPin,
-    onSelectPin,
-}: {
-    pins: SpatialPin[];
-    selectedPinId?: string | null;
-    isPlacingPin: boolean;
-    pinType: SpatialPinType;
-    readOnly: boolean;
-    onAddPin: (pin: SpatialPin) => void;
-    onSelectPin?: (pinId: string | null) => void;
-}) {
-    const { camera, pointer, raycaster, scene } = useThree();
-    const [hoverPosition, setHoverPosition] = useState<THREE.Vector3 | null>(null);
-
-    useFrame(() => {
-        if (!isPlacingPin || readOnly) {
-            setHoverPosition((prev) => (prev ? null : prev));
-            return;
-        }
-        raycaster.setFromCamera(pointer, camera);
-        const intersections = raycaster.intersectObjects(scene.children, true);
-        if (intersections.length > 0) {
-            setHoverPosition(intersections[0].point.clone());
-        } else {
-            setHoverPosition(null);
-        }
-    });
-
-    const handlePointerDown = (event: { stopPropagation: () => void }) => {
-        if (!isPlacingPin || readOnly || !hoverPosition) return;
-        event.stopPropagation();
-        onAddPin({
-            id: createId("pin"),
-            label: `${formatPinTypeLabel(pinType)} Pin`,
-            type: pinType,
-            position: [hoverPosition.x, hoverPosition.y, hoverPosition.z],
-            created_at: nowIso(),
-        });
+    qualityPolicy: ViewerQualityPolicy;
+    deliveryStatus: {
+        upgradePending: boolean;
+        activeVariantLabel: string | null;
+        upgradeVariantLabel: string | null;
+        streamingObserved?: boolean;
+        refinePagesLoaded?: number;
+        refinePagesPending?: number;
+        pauseReason?: string | null;
     };
+}) {
+    const detail = deliveryStatus.upgradePending
+        ? deliveryStatus.streamingObserved
+            ? deliveryStatus.pauseReason
+                ? `Starting with ${deliveryStatus.activeVariantLabel ?? "first light"} while ${deliveryStatus.refinePagesPending ?? 0} detail pages settle into the live scene. ${deliveryStatus.pauseReason}.`
+                : `Starting with ${deliveryStatus.activeVariantLabel ?? "first light"} while ${deliveryStatus.refinePagesPending ?? 0} detail pages settle into the live scene.`
+            : `Starting with ${deliveryStatus.activeVariantLabel ?? "a safe first-light variant"} while ${deliveryStatus.upgradeVariantLabel ?? "the fuller live scene"} prepares.`
+        : qualityPolicy.summary;
 
     return (
-        <group onPointerDown={handlePointerDown}>
-            {isPlacingPin && hoverPosition ? (
-                <group position={hoverPosition}>
-                    <Html center zIndexRange={[100, 0]}>
-                        <div className="flex flex-col items-center opacity-75 pointer-events-none">
-                            <div className="mb-1 rounded-full border border-white/20 bg-black/70 px-2 py-1 text-[10px] uppercase tracking-[0.18em] text-white/80">
-                                Drop {formatPinTypeLabel(pinType)}
-                            </div>
-                            <MapPin className="h-5 w-5 text-sky-300" />
-                        </div>
-                    </Html>
-                </group>
-            ) : null}
-            {pins.map((pin) => {
-                const isSelected = pin.id === selectedPinId;
-                return (
-                    <group key={pin.id} position={pin.position}>
-                        <Html center distanceFactor={10} zIndexRange={[100, 0]}>
-                            <button
-                                type="button"
-                                onClick={(event) => {
-                                    event.stopPropagation();
-                                    onSelectPin?.(pin.id);
-                                }}
-                                className={`group relative flex h-8 w-8 items-center justify-center rounded-full border text-xs shadow-lg transition-transform hover:scale-110 ${pinColors(pin.type, isSelected)}`}
-                                title={pin.label}
-                            >
-                                <MapPin className="h-4 w-4" />
-                                <span className="pointer-events-none absolute bottom-full mb-2 whitespace-nowrap rounded-full border border-white/10 bg-black/80 px-2 py-1 text-[10px] text-white opacity-0 transition-opacity group-hover:opacity-100">
-                                    {pin.label}
-                                </span>
-                            </button>
-                        </Html>
-                    </group>
-                );
-            })}
-        </group>
+        <div
+            className="pointer-events-none absolute inset-0 z-10 overflow-hidden rounded-[32px] bg-[radial-gradient(circle_at_top,rgba(245,158,11,0.07),transparent_18%),radial-gradient(circle_at_50%_45%,rgba(56,189,248,0.05),transparent_26%),linear-gradient(180deg,rgba(3,4,6,0.2),rgba(3,4,6,0.7))]"
+            data-testid="mvp-viewer-live-warmup-matte"
+        >
+            <div className="absolute inset-x-5 bottom-5">
+                <div className="max-w-[26rem] rounded-[1.7rem] border border-white/12 bg-black/44 px-4 py-3 shadow-[0_24px_60px_rgba(0,0,0,0.34)] backdrop-blur-xl">
+                    <div className="flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-[0.24em] text-white/78">
+                        <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/6 px-3 py-1">
+                            <span className="h-2 w-2 rounded-full bg-cyan-300" />
+                            Live warmup
+                        </span>
+                        {deliveryStatus.activeVariantLabel ? (
+                            <span className="inline-flex items-center rounded-full border border-white/10 bg-white/6 px-3 py-1">
+                                {deliveryStatus.activeVariantLabel}
+                            </span>
+                        ) : null}
+                    </div>
+                    <div className="mt-2 text-[1rem] font-medium leading-6 text-white">Preparing a stable first light</div>
+                    <div className="mt-1 text-[12px] leading-5 text-white/72">{detail}</div>
+                </div>
+            </div>
+        </div>
     );
-}
+});
 
-function CameraRig({
-    viewerFov,
-    controlsRef,
+const ThreeOverlay = React.memo(function ThreeOverlay({
+    environment,
+    assets,
+    sceneDocument,
+    pins,
+    viewer,
     focusRequest,
     captureRequestKey,
-    onCapturePose,
+    isPinPlacementEnabled,
+    pinType,
     isRecordingPath,
-    onPathRecorded,
-}: {
-    viewerFov: number;
-    controlsRef: React.MutableRefObject<any>;
-    focusRequest: FocusRequest;
-    captureRequestKey: number;
-    onCapturePose?: (pose: CameraPose) => void;
-    isRecordingPath: boolean;
-    onPathRecorded?: (path: CameraPathFrame[]) => void;
-}) {
-    const { camera } = useThree();
-    const perspectiveCamera = camera as THREE.PerspectiveCamera;
-    const pathRef = useRef<CameraPathFrame[]>([]);
-    const lastCaptureRequestRef = useRef<number>(0);
-    const lastFocusTokenRef = useRef<number>(0);
-    const lastSampleRef = useRef<number>(-1);
-    const startTimeRef = useRef<number>(0);
-
-    useEffect(() => {
-        applyEditorCameraClipping(perspectiveCamera);
-        perspectiveCamera.fov = viewerFov;
-        perspectiveCamera.updateProjectionMatrix();
-    }, [perspectiveCamera, viewerFov]);
-
-    useEffect(() => {
-        if (!focusRequest || focusRequest.token === lastFocusTokenRef.current) return;
-        lastFocusTokenRef.current = focusRequest.token;
-        perspectiveCamera.position.set(...focusRequest.position);
-        if (focusRequest.up) {
-            perspectiveCamera.up.set(...focusRequest.up);
-        } else {
-            perspectiveCamera.up.set(0, 1, 0);
-        }
-        applyEditorCameraClipping(perspectiveCamera);
-        perspectiveCamera.fov = focusRequest.fov;
-        perspectiveCamera.updateProjectionMatrix();
-        if (controlsRef.current?.target) {
-            controlsRef.current.target.set(...focusRequest.target);
-            controlsRef.current.update();
-        }
-    }, [controlsRef, focusRequest, perspectiveCamera]);
-
-    useEffect(() => {
-        if (!onCapturePose || captureRequestKey === 0 || captureRequestKey === lastCaptureRequestRef.current) return;
-        lastCaptureRequestRef.current = captureRequestKey;
-        const target = controlsRef.current?.target
-            ? ([controlsRef.current.target.x, controlsRef.current.target.y, controlsRef.current.target.z] as Vector3Tuple)
-            : ([0, 0, 0] as Vector3Tuple);
-        onCapturePose({
-            position: [perspectiveCamera.position.x, perspectiveCamera.position.y, perspectiveCamera.position.z],
-            target,
-            fov: perspectiveCamera.fov,
-            lens_mm: Math.round(fovToLensMm(perspectiveCamera.fov) * 10) / 10,
-        });
-    }, [captureRequestKey, controlsRef, onCapturePose, perspectiveCamera]);
-
-    useEffect(() => {
-        if (isRecordingPath) {
-            pathRef.current = [];
-            lastSampleRef.current = -1;
-            startTimeRef.current = 0;
-            return;
-        }
-        if (pathRef.current.length > 0 && onPathRecorded) {
-            onPathRecorded([...pathRef.current]);
-            pathRef.current = [];
-        }
-    }, [isRecordingPath, onPathRecorded]);
-
-    useFrame((state) => {
-        if (!isRecordingPath) return;
-        if (startTimeRef.current === 0) {
-            startTimeRef.current = state.clock.elapsedTime;
-        }
-        const elapsed = state.clock.elapsedTime - startTimeRef.current;
-        if (lastSampleRef.current >= 0 && elapsed - lastSampleRef.current < 0.08) {
-            return;
-        }
-        lastSampleRef.current = elapsed;
-        const target = controlsRef.current?.target
-            ? ([controlsRef.current.target.x, controlsRef.current.target.y, controlsRef.current.target.z] as Vector3Tuple)
-            : ([0, 0, 0] as Vector3Tuple);
-        pathRef.current.push({
-            time: Number(elapsed.toFixed(3)),
-            position: [perspectiveCamera.position.x, perspectiveCamera.position.y, perspectiveCamera.position.z],
-            target,
-            rotation: [
-                perspectiveCamera.quaternion.x,
-                perspectiveCamera.quaternion.y,
-                perspectiveCamera.quaternion.z,
-                perspectiveCamera.quaternion.w,
-            ],
-            fov: perspectiveCamera.fov,
-        });
-    });
-
-    return null;
-}
-
-function TemporalAntialiasingComposer() {
-    const { camera, gl, scene, size } = useThree();
-    const composerRef = useRef<EffectComposer | null>(null);
-    const taaPassRef = useRef<TAARenderPassInternal | null>(null);
-    const lastCameraPositionRef = useRef(new THREE.Vector3(Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY));
-    const lastCameraQuaternionRef = useRef(new THREE.Quaternion());
-    const lastProjectionMatrixRef = useRef(new THREE.Matrix4());
-
-    useEffect(() => {
-        const composer = new EffectComposer(gl);
-        composer.setPixelRatio(gl.getPixelRatio());
-        composer.setSize(size.width, size.height);
-
-        const taaPass = new TAARenderPass(scene, camera, 0x000000, 0) as TAARenderPassInternal;
-        taaPass.unbiased = true;
-        taaPass.sampleLevel = 2;
-        taaPass.accumulate = true;
-        taaPass.accumulateIndex = -1;
-        composer.addPass(taaPass);
-
-        composerRef.current = composer;
-        taaPassRef.current = taaPass;
-        lastCameraPositionRef.current.copy(camera.position);
-        lastCameraQuaternionRef.current.copy(camera.quaternion);
-        lastProjectionMatrixRef.current.copy(camera.projectionMatrix);
-
-        return () => {
-            taaPass.dispose();
-            composer.dispose();
-            composerRef.current = null;
-            taaPassRef.current = null;
-        };
-    }, [camera, gl, scene, size.height, size.width]);
-
-    useEffect(() => {
-        const composer = composerRef.current;
-        const taaPass = taaPassRef.current;
-        if (!composer || !taaPass) {
-            return;
-        }
-
-        composer.setPixelRatio(gl.getPixelRatio());
-        composer.setSize(size.width, size.height);
-        taaPass.accumulateIndex = -1;
-    }, [gl, size.height, size.width]);
-
-    useFrame((_, delta) => {
-        const composer = composerRef.current;
-        const taaPass = taaPassRef.current;
-        if (!composer || !taaPass) {
-            return;
-        }
-
-        const positionDeltaSq = lastCameraPositionRef.current.distanceToSquared(camera.position);
-        const rotationDelta = 1 - Math.abs(lastCameraQuaternionRef.current.dot(camera.quaternion));
-        const projectionChanged = !lastProjectionMatrixRef.current.equals(camera.projectionMatrix);
-
-        if (positionDeltaSq > 1e-8 || rotationDelta > 1e-8 || projectionChanged) {
-            taaPass.accumulateIndex = -1;
-            lastCameraPositionRef.current.copy(camera.position);
-            lastCameraQuaternionRef.current.copy(camera.quaternion);
-            lastProjectionMatrixRef.current.copy(camera.projectionMatrix);
-        }
-
-        composer.render(delta);
-    }, 1);
-
-    return null;
-}
-
-function SceneBackgroundLock({ backgroundColor }: { backgroundColor: string }) {
-    const { gl, scene } = useThree();
-    const background = useMemo(() => new THREE.Color(backgroundColor), [backgroundColor]);
-    const previousBackgroundRef = useRef<THREE.Color | THREE.Texture | THREE.CubeTexture | null>(null);
-    const previousClearColorRef = useRef(new THREE.Color());
-    const previousClearAlphaRef = useRef(1);
-
-    useEffect(() => {
-        previousBackgroundRef.current = scene.background;
-        gl.getClearColor(previousClearColorRef.current);
-        previousClearAlphaRef.current = gl.getClearAlpha();
-
-        scene.background = background;
-        gl.setClearColor(background, 1);
-        gl.domElement.style.backgroundColor = backgroundColor;
-
-        return () => {
-            scene.background = previousBackgroundRef.current;
-            gl.setClearColor(previousClearColorRef.current, previousClearAlphaRef.current);
-        };
-    }, [background, backgroundColor, gl, scene]);
-
-    useFrame(() => {
-        if (!(scene.background instanceof THREE.Color) || !scene.background.equals(background)) {
-            scene.background = background;
-        }
-
-        if (!gl.getClearColor(sceneBackgroundScratchColor).equals(background) || gl.getClearAlpha() !== 1) {
-            gl.setClearColor(background, 1);
-        }
-
-        if (gl.domElement.style.backgroundColor !== backgroundColor) {
-            gl.domElement.style.backgroundColor = backgroundColor;
-        }
-    }, -1);
-
-    return null;
-}
-
-export default function ThreeOverlay({
-    sceneGraph,
-    setSceneGraph,
-    readOnly = false,
-    isPreviewRoute = false,
-    backgroundColor = DEFAULT_EDITOR_VIEWER_BACKGROUND,
-    selectedPinId,
-    onSelectPin,
-    focusRequest,
-    captureRequestKey = 0,
     onCapturePose,
-    isPinPlacementEnabled = false,
-    pinType = "general",
-    isRecordingPath = false,
     onPathRecorded,
     onViewerReadyChange,
-}: {
-    sceneGraph: any;
-    setSceneGraph: React.Dispatch<React.SetStateAction<any>>;
-    readOnly?: boolean;
-    isPreviewRoute?: boolean;
-    backgroundColor?: string;
-    selectedPinId?: string | null;
-    onSelectPin?: (pinId: string | null) => void;
-    focusRequest?: FocusRequest;
-    captureRequestKey?: number;
-    onCapturePose?: (pose: CameraPose) => void;
-    isPinPlacementEnabled?: boolean;
-    pinType?: SpatialPinType;
-    isRecordingPath?: boolean;
-    onPathRecorded?: (path: CameraPathFrame[]) => void;
-    onViewerReadyChange?: (ready: boolean) => void;
-}) {
-    const normalizedSceneGraph = useMemo(() => normalizeWorkspaceSceneGraph(sceneGraph), [sceneGraph]);
-    const controlsRef = useRef<any>(null);
-    const canvasEventCleanupRef = useRef<(() => void) | null>(null);
-    const previewAutofocusKeyRef = useRef("");
-    const [renderMode, setRenderMode] = useState<"webgl" | "fallback">("webgl");
-    const [renderError, setRenderError] = useState("");
-    const [isViewerReady, setIsViewerReady] = useState(false);
-    const [previewAutofocusRequest, setPreviewAutofocusRequest] = useState<FocusRequest>(null);
-    const environmentRenderState = useMemo(
-        () => resolveEnvironmentRenderState(normalizedSceneGraph.environment),
-        [normalizedSceneGraph.environment],
-    );
-    const environmentViewerUrl = toProxyUrl(environmentRenderState.viewerUrl);
-    const environmentSplatUrl = toProxyUrl(environmentRenderState.splatUrl);
-    const previewProjectionImage = toProxyUrl(environmentRenderState.previewProjectionImage);
-    const environmentMetadata =
-        typeof normalizedSceneGraph.environment === "object" ? normalizedSceneGraph.environment?.metadata ?? null : null;
-    const referenceImage = environmentRenderState.referenceImage;
-    const isSingleImagePreview = isSingleImagePreviewEnvironment(environmentMetadata);
-    const hasRenderableEnvironment = Boolean(environmentSplatUrl || environmentViewerUrl);
-    const shouldUsePreviewProjectionFallback = !hasRenderableEnvironment && Boolean(previewProjectionImage);
-    const singleImagePreviewCamera = useMemo(() => resolveSingleImagePreviewCamera(environmentMetadata), [environmentMetadata]);
-    const effectiveFocusRequest =
-        previewAutofocusRequest && (!focusRequest || previewAutofocusRequest.token >= focusRequest.token)
-            ? previewAutofocusRequest
-            : focusRequest ?? null;
-
+    readOnly = false,
+    backgroundColor = DEFAULT_EDITOR_VIEWER_BACKGROUND,
+    selectedNodeIds = [],
+    selectedPinId = null,
+    selectedAssetInstanceIds = [],
+    transformSpace = "world",
+    transformSnap,
+    transformSession = null,
+    onSelectNode,
+    activeTool = "select",
+    onSelectPin,
+    onClearSelection,
+    onSelectAsset,
+    onBeginTransformSession,
+    onUpdateTransformSessionDrafts,
+    onCancelTransformSession,
+    onCommitTransformSession,
+    onUpdateNodeTransformDraft,
+    onUpdateAssetTransformDraft,
+    onCommitSceneTransforms,
+    onAppendPin,
+}: ThreeOverlayProps) {
+    const overlaySurface = useThreeOverlaySurfaceController({
+        environment,
+        viewer,
+        sceneDocument,
+        focusRequest,
+        captureRequestKey,
+        isPinPlacementEnabled,
+        pinType,
+        readOnly,
+        backgroundColor,
+        selectedNodeIds,
+        selectedAssetInstanceIds,
+        onViewerReadyChange,
+        onSelectPin,
+        onClearSelection,
+        onSelectNode,
+        onSelectAsset,
+        onUpdateNodeTransformDraft,
+        onUpdateAssetTransformDraft,
+        onCommitSceneTransforms,
+        onAppendPin,
+    });
+    const usesRuntimeRegistry = Boolean(sceneDocument);
+    const initialAdaptiveQualityTier: AdaptiveViewerQualityTier =
+        overlaySurface.isSingleImagePreview || overlaySurface.qualityPolicy.tier === "reference"
+            ? "full"
+            : overlaySurface.prefersPerformanceMode || overlaySurface.qualityPolicy.tier === "guarded"
+              ? "balanced"
+              : "full";
+    const [adaptiveQualityTier, setAdaptiveQualityTier] = useState<AdaptiveViewerQualityTier>(initialAdaptiveQualityTier);
+    const [lowestAdaptiveQualityTier, setLowestAdaptiveQualityTier] = useState<AdaptiveViewerQualityTier>(initialAdaptiveQualityTier);
+    const [runtimeTelemetry, setRuntimeTelemetry] = useState<ViewerRuntimeTelemetrySnapshot>(DEFAULT_VIEWER_RUNTIME_TELEMETRY);
+    const [viewerTransitionActive, setViewerTransitionActive] = useState(false);
+    const [posterCurtainStage, setPosterCurtainStage] = useState<PosterCurtainStage>("hidden");
+    const posterCurtainTimerRef = useRef<number | null>(null);
+    const posterCurtainLockedRef = useRef(false);
     useEffect(() => {
-        if (canCreateWebGLContext()) return;
-        setIsViewerReady(false);
-        setRenderMode("fallback");
-        setRenderError("WebGL could not be initialized in this environment.");
-    }, []);
-
+        setAdaptiveQualityTier(initialAdaptiveQualityTier);
+        setLowestAdaptiveQualityTier(initialAdaptiveQualityTier);
+        setRuntimeTelemetry(DEFAULT_VIEWER_RUNTIME_TELEMETRY);
+        setViewerTransitionActive(false);
+    }, [initialAdaptiveQualityTier, overlaySurface.environmentSplatUrl, overlaySurface.environmentViewerUrl, overlaySurface.renderMode]);
     useEffect(() => {
+        setLowestAdaptiveQualityTier((current) =>
+            compareAdaptiveQualityTierSeverity(adaptiveQualityTier, current) > 0 ? adaptiveQualityTier : current,
+        );
+    }, [adaptiveQualityTier]);
+    const posterRevealImageUrl =
+        overlaySurface.previewProjectionImage ?? overlaySurface.referenceImage ?? overlaySurface.interactiveFallbackImage ?? null;
+    const viewerTelemetrySessionKey = `${overlaySurface.environmentSplatUrl ?? overlaySurface.environmentViewerUrl ?? "viewer"}:${overlaySurface.canvasRecoveryNonce}`;
+    const posterCurtainReadyToRelease = runtimeTelemetry.firstStableFrameAtMs !== null || runtimeTelemetry.frameCount >= 24;
+    useEffect(() => {
+        if (posterCurtainTimerRef.current !== null) {
+            window.clearTimeout(posterCurtainTimerRef.current);
+            posterCurtainTimerRef.current = null;
+        }
+
+        const posterCurtainEligible = Boolean(
+            posterRevealImageUrl &&
+                overlaySurface.runtimeDiagnostics.renderMode === "webgl" &&
+                !overlaySurface.shouldUsePreviewProjectionFallback &&
+                !overlaySurface.usesInteractiveFallback &&
+                !overlaySurface.isSingleImagePreview &&
+                overlaySurface.runtimeDiagnostics.hasRenderableEnvironment,
+        );
+
+        if (!posterCurtainEligible) {
+            posterCurtainLockedRef.current = false;
+            setPosterCurtainStage("hidden");
+            return;
+        }
+
+        if (overlaySurface.runtimeDiagnostics.operationalMode !== "webgl_live") {
+            posterCurtainLockedRef.current = true;
+            setPosterCurtainStage("locked");
+            return;
+        }
+
+        if (!posterCurtainLockedRef.current) {
+            setPosterCurtainStage("hidden");
+            return;
+        }
+
+        if (!posterCurtainReadyToRelease) {
+            setPosterCurtainStage("locked");
+            return;
+        }
+
+        setPosterCurtainStage("releasing");
+        posterCurtainTimerRef.current = window.setTimeout(() => {
+            posterCurtainTimerRef.current = null;
+            posterCurtainLockedRef.current = false;
+            setPosterCurtainStage("hidden");
+        }, VIEWER_POSTER_CURTAIN_RELEASE_MS);
+
         return () => {
-            canvasEventCleanupRef.current?.();
-            canvasEventCleanupRef.current = null;
-        };
-    }, []);
-
-    useEffect(() => {
-        onViewerReadyChange?.(isViewerReady && renderMode === "webgl");
-    }, [isViewerReady, onViewerReadyChange, renderMode]);
-
-    useEffect(() => {
-        previewAutofocusKeyRef.current = "";
-        setPreviewAutofocusRequest(null);
-    }, [environmentSplatUrl, environmentViewerUrl, isSingleImagePreview]);
-
-    const updateAssetTransform = (instanceId: string, patch: Partial<SceneAsset>) => {
-        setSceneGraph((prev: any) => {
-            const normalized = normalizeWorkspaceSceneGraph(prev);
-            return {
-                ...normalized,
-                assets: normalized.assets.map((asset: SceneAsset) => (asset.instanceId === instanceId ? { ...asset, ...patch } : asset)),
-            };
-        });
-    };
-
-    const addPin = (pin: SpatialPin) => {
-        setSceneGraph((prev: any) => {
-            const normalized = normalizeWorkspaceSceneGraph(prev);
-            return {
-                ...normalized,
-                pins: [...normalized.pins, pin],
-            };
-        });
-        onSelectPin?.(pin.id);
-    };
-
-    const handleCanvasError = (error: Error) => {
-        setIsViewerReady(false);
-        setRenderMode("fallback");
-        setRenderError(error.message || "WebGL viewer failed to initialize.");
-    };
-
-    const handlePreviewBounds = (bounds: { center: [number, number, number]; radius: number; forward?: [number, number, number] }) => {
-        if (!isSingleImagePreview) {
-            return;
-        }
-
-        if (singleImagePreviewCamera) {
-            const key = `${environmentSplatUrl}|source-camera|${singleImagePreviewCamera.position.join(",")}|${singleImagePreviewCamera.target.join(",")}|${singleImagePreviewCamera.fov.toFixed(3)}`;
-            if (previewAutofocusKeyRef.current === key) {
-                return;
+            if (posterCurtainTimerRef.current !== null) {
+                window.clearTimeout(posterCurtainTimerRef.current);
+                posterCurtainTimerRef.current = null;
             }
-            previewAutofocusKeyRef.current = key;
-            setPreviewAutofocusRequest({
-                ...singleImagePreviewCamera,
-                token: Date.now(),
-            });
-            return;
-        }
+        };
+    }, [
+        overlaySurface.isSingleImagePreview,
+        overlaySurface.runtimeDiagnostics.hasRenderableEnvironment,
+        overlaySurface.runtimeDiagnostics.operationalMode,
+        overlaySurface.runtimeDiagnostics.renderMode,
+        overlaySurface.shouldUsePreviewProjectionFallback,
+        overlaySurface.usesInteractiveFallback,
+        posterCurtainReadyToRelease,
+        posterRevealImageUrl,
+    ]);
+    const canvasDpr: [number, number] = overlaySurface.isSingleImagePreview
+        ? [1, 2]
+        : adaptiveQualityTier === "safe"
+          ? [1, 1.25]
+          : overlaySurface.qualityPolicy.presentationProfile === "cinematic_safe"
+            ? [1, 1.85]
+            : overlaySurface.prefersPerformanceMode || adaptiveQualityTier === "balanced"
+              ? [1, 1.5]
+              : [1, 3];
+    const enablePremiumCompositor =
+        !overlaySurface.isSingleImagePreview &&
+        adaptiveQualityTier !== "safe" &&
+        overlaySurface.qualityPolicy.premiumEffectsEnabled;
+    const enableSecondaryLighting =
+        !overlaySurface.isSingleImagePreview &&
+        (adaptiveQualityTier !== "safe" || overlaySurface.qualityPolicy.presentationProfile === "cinematic_safe");
+    const enableSceneShadows =
+        !overlaySurface.isSingleImagePreview &&
+        overlaySurface.qualityPolicy.presentationProfile === "cinematic" &&
+        adaptiveQualityTier === "full";
+    const showViewerGrid =
+        !overlaySurface.isSingleImagePreview &&
+        !(
+            overlaySurface.runtimeDiagnostics.operationalMode === "webgl_live" &&
+            overlaySurface.qualityPolicy.hideEditorGridWhenLive
+        );
+    const showPremiumRevealBanner =
+        overlaySurface.runtimeDiagnostics.renderMode !== "fallback" &&
+        overlaySurface.runtimeDiagnostics.operationalMode !== "hard_fallback" &&
+        overlaySurface.runtimeDiagnostics.operationalMode !== "webgl_live";
+    const posterCurtainVisible = posterCurtainStage !== "hidden" && Boolean(posterRevealImageUrl);
+    const showWarmupMatte =
+        !posterCurtainVisible &&
+        !posterRevealImageUrl &&
+        overlaySurface.runtimeDiagnostics.renderMode === "webgl" &&
+        overlaySurface.runtimeDiagnostics.operationalMode !== "webgl_live" &&
+        overlaySurface.runtimeDiagnostics.operationalMode !== "hard_fallback" &&
+        !overlaySurface.isSingleImagePreview;
+    const renderMegapixels =
+        runtimeTelemetry.frameCount > 0 && overlaySurface.canvasElementRef.current
+            ? (overlaySurface.canvasElementRef.current.width * overlaySurface.canvasElementRef.current.height) / 1_000_000
+            : null;
 
-        const key = `${environmentSplatUrl}|${bounds.center.join(",")}|${bounds.radius.toFixed(4)}|${(bounds.forward ?? [0, 0, 1]).join(",")}|${normalizedSceneGraph.viewer.fov.toFixed(2)}`;
-        if (previewAutofocusKeyRef.current === key) {
-            return;
-        }
-        previewAutofocusKeyRef.current = key;
+    let surfaceContent: React.ReactNode;
 
-        const radius = Math.max(0.1, bounds.radius);
-        const verticalFovRadians = THREE.MathUtils.degToRad(normalizedSceneGraph.viewer.fov);
-        const distance = Math.max(radius * 1.75, (radius / Math.tan(verticalFovRadians * 0.5)) * 0.96);
-        const forward = new THREE.Vector3(...(bounds.forward ?? [0, 0, 1]));
-        if (forward.lengthSq() <= 1e-6) {
-            forward.set(0, 0, 1);
-        }
-        forward.normalize();
-        const position = new THREE.Vector3(...bounds.center).addScaledVector(forward, distance);
-
-        setPreviewAutofocusRequest({
-            position: [position.x, position.y, position.z],
-            target: bounds.center,
-            fov: normalizedSceneGraph.viewer.fov,
-            lens_mm: Math.round(fovToLensMm(normalizedSceneGraph.viewer.fov) * 10) / 10,
-            token: Date.now(),
-        });
-    };
-
-    if (shouldUsePreviewProjectionFallback && previewProjectionImage) {
-        return <SingleImagePreviewSurface imageUrl={previewProjectionImage} />;
-    }
-
-    if (renderMode === "fallback") {
-        return <ThreeOverlayFallback message={renderError} referenceImage={referenceImage} />;
-    }
-
-    return (
-        <div className="absolute inset-0 pointer-events-auto z-20">
-            <CanvasErrorBoundary onError={handleCanvasError}>
+    if (overlaySurface.shouldUsePreviewProjectionFallback && overlaySurface.previewProjectionImage) {
+        surfaceContent = <SingleImagePreviewSurface imageUrl={overlaySurface.previewProjectionImage} />;
+    } else if (overlaySurface.usesInteractiveFallback && overlaySurface.interactiveFallbackImage) {
+        surfaceContent = (
+            <InteractiveSingleImageFallbackSurface
+                imageUrl={overlaySurface.interactiveFallbackImage}
+                viewer={viewer}
+                pins={pins}
+                selectedPinId={selectedPinId}
+                isPinPlacementEnabled={isPinPlacementEnabled}
+                pinType={pinType}
+                isRecordingPath={isRecordingPath}
+                focusRequest={overlaySurface.effectiveFocusRequest}
+                captureRequestKey={captureRequestKey}
+                readOnly={readOnly}
+                onAddPin={overlaySurface.addPin}
+                onSelectPin={overlaySurface.selectPin}
+                onCapturePose={onCapturePose}
+                onPathRecorded={onPathRecorded}
+                onClearSelection={overlaySurface.clearSceneSelection}
+            />
+        );
+    } else if (overlaySurface.renderMode === "fallback") {
+        surfaceContent = <ThreeOverlayFallback message={overlaySurface.renderError} referenceImage={overlaySurface.referenceImage} />;
+    } else {
+        surfaceContent = (
+            <CanvasErrorBoundary onError={overlaySurface.handleCanvasError}>
                 <Canvas
-                    camera={{ position: [5, 4, 6], fov: normalizedSceneGraph.viewer.fov, near: EDITOR_CAMERA_NEAR, far: EDITOR_CAMERA_FAR }}
-                    dpr={isSingleImagePreview ? [1, 2] : [1, 3]}
+                    key={`${overlaySurface.environmentSplatUrl ?? overlaySurface.environmentViewerUrl ?? "viewer"}:${overlaySurface.canvasRecoveryNonce}`}
+                    camera={{ position: [5, 4, 6], fov: viewer.fov, near: EDITOR_CAMERA_NEAR, far: EDITOR_CAMERA_FAR }}
+                    dpr={canvasDpr}
                     style={{ background: backgroundColor, touchAction: "none" }}
                     gl={{
                         powerPreference: "high-performance",
@@ -941,101 +969,362 @@ export default function ThreeOverlay({
                         depth: true,
                         stencil: false,
                     }}
-                    shadows={!isSingleImagePreview}
+                    shadows={enableSceneShadows}
                     onCreated={({ gl }) => {
-                        canvasEventCleanupRef.current?.();
-                        const handleContextLost = (event: Event) => {
-                            event.preventDefault();
-                            setIsViewerReady(false);
-                            setRenderMode("fallback");
-                            setRenderError("WebGL context was lost while rendering the viewer.");
-                        };
-                        const handleContextRestored = () => {
-                            setRenderError("");
-                        };
-                        gl.domElement.addEventListener("webglcontextlost", handleContextLost, false);
-                        gl.domElement.addEventListener("webglcontextrestored", handleContextRestored, false);
-                        canvasEventCleanupRef.current = () => {
-                            gl.domElement.removeEventListener("webglcontextlost", handleContextLost, false);
-                            gl.domElement.removeEventListener("webglcontextrestored", handleContextRestored, false);
-                        };
-
-                        gl.setClearColor(backgroundColor, 1);
-                        gl.domElement.style.backgroundColor = backgroundColor;
-                        gl.outputColorSpace = THREE.SRGBColorSpace;
-                        gl.toneMapping = THREE.ACESFilmicToneMapping;
-                        gl.toneMappingExposure = 1;
-                        setRenderError("");
-                        setIsViewerReady(true);
+                        overlaySurface.handleCanvasCreated(gl);
                     }}
-                    onPointerMissed={() => onSelectPin?.(null)}
+                    onPointerMissed={overlaySurface.clearSceneSelection}
                 >
+                    <ViewerAdaptiveQualityController
+                        enabled={overlaySurface.runtimeDiagnostics.operationalMode === "webgl_live" && !overlaySurface.isSingleImagePreview}
+                        initialTier={initialAdaptiveQualityTier}
+                        onTierChange={setAdaptiveQualityTier}
+                    />
+                    <ViewerRuntimeTelemetryController
+                        enabled={overlaySurface.runtimeDiagnostics.renderMode === "webgl"}
+                        sessionKey={viewerTelemetrySessionKey}
+                        adaptiveQualityTier={adaptiveQualityTier}
+                        onMetricsChange={setRuntimeTelemetry}
+                    />
                     <SceneBackgroundLock backgroundColor={backgroundColor} />
-                    {!isSingleImagePreview ? <TemporalAntialiasingComposer /> : null}
-                    <ambientLight intensity={isSingleImagePreview ? 0.35 : 0.65} />
-                    {!isSingleImagePreview ? <directionalLight position={[8, 12, 6]} intensity={1.2} castShadow /> : null}
+                    {enablePremiumCompositor ? <TemporalAntialiasingComposer transitionActive={viewerTransitionActive} /> : null}
+                    <ambientLight
+                        intensity={
+                            overlaySurface.isSingleImagePreview
+                                ? 0.35
+                                : adaptiveQualityTier === "safe"
+                                  ? 0.42
+                                  : overlaySurface.prefersPerformanceMode
+                                    ? 0.5
+                                    : 0.65
+                        }
+                    />
+                    {!overlaySurface.isSingleImagePreview ? (
+                        <directionalLight
+                            position={[8, 12, 6]}
+                            intensity={adaptiveQualityTier === "safe" ? 0.72 : overlaySurface.prefersPerformanceMode ? 0.9 : 1.2}
+                            castShadow={enableSceneShadows}
+                        />
+                    ) : null}
 
-                    <OrbitControls ref={controlsRef} makeDefault enableDamping dampingFactor={0.08} />
-                    {!isSingleImagePreview ? <Environment preset="city" background={false} /> : null}
+                    <OrbitControls ref={overlaySurface.controlsRef} makeDefault enableDamping dampingFactor={0.08} />
+                    {enableSecondaryLighting ? <Environment preset="city" background={false} /> : null}
                     <CameraRig
-                        viewerFov={normalizedSceneGraph.viewer.fov}
-                        controlsRef={controlsRef}
-                        focusRequest={effectiveFocusRequest}
+                        viewerFov={viewer.fov}
+                        controlsRef={overlaySurface.controlsRef}
+                        focusRequest={overlaySurface.effectiveFocusRequest}
                         captureRequestKey={captureRequestKey}
                         onCapturePose={onCapturePose}
                         isRecordingPath={isRecordingPath}
                         onPathRecorded={onPathRecorded}
                     />
 
-                    {!isSingleImagePreview ? (
+                    {!overlaySurface.isSingleImagePreview ? (
                         <>
-                            <Grid
-                                args={[30, 30]}
-                                cellSize={1}
-                                cellThickness={0.8}
-                                cellColor="#3f3f46"
-                                sectionSize={5}
-                                sectionThickness={1.2}
-                                sectionColor="#71717a"
-                                fadeDistance={45}
-                                fadeStrength={1}
-                            />
-
-                            <ContactShadows position={[0, -0.5, 0]} opacity={0.35} scale={30} blur={2.2} far={8} />
+                            {showViewerGrid ? <ViewerGrid /> : null}
+                            {enableSceneShadows ? <ViewerContactShadows /> : null}
                         </>
                     ) : null}
 
-                    {environmentSplatUrl || environmentViewerUrl ? (
-                        <Suspense fallback={<LoadingLabel text="Loading environment splat..." />}>
+                    {overlaySurface.environmentSplatUrl || overlaySurface.environmentViewerUrl ? (
+                        <Suspense
+                            fallback={
+                                <LoadingLabel
+                                    text="Loading live renderer..."
+                                    accent={overlaySurface.isSingleImagePreview ? "Poster first" : "Preparing live view"}
+                                    tone={overlaySurface.isSingleImagePreview ? "reference" : overlaySurface.prefersPerformanceMode ? "balanced" : "premium"}
+                                    subtext={
+                                        overlaySurface.isSingleImagePreview
+                                            ? "The reference frame stays visible until the browser is ready to reveal the live scene."
+                                            : overlaySurface.prefersPerformanceMode
+                                              ? "Keeping motion responsive while the larger scene settles."
+                                              : "Building the cinematic live path behind the poster."
+                                    }
+                                />
+                            }
+                        >
                             <EnvironmentSplat
-                                plyUrl={environmentSplatUrl}
-                                viewerUrl={environmentViewerUrl}
-                                metadata={environmentMetadata}
-                                onPreviewBounds={handlePreviewBounds}
+                                plyUrl={overlaySurface.environmentSplatUrl}
+                                viewerUrl={overlaySurface.environmentViewerUrl}
+                                metadata={overlaySurface.environmentMetadata}
+                                focusTarget={overlaySurface.effectiveFocusRequest?.target ?? null}
+                                onPreviewBounds={overlaySurface.handlePreviewBounds}
+                                onFatalError={overlaySurface.handleEnvironmentFatalError}
+                                onSharpLiveStateChange={overlaySurface.handleSharpLiveStateChange}
+                                onSharpTransitionActiveChange={setViewerTransitionActive}
                             />
                         </Suspense>
                     ) : null}
 
-                    {(normalizedSceneGraph.assets ?? []).map((asset: SceneAsset, index: number) => (
-                        <SceneAssetNode
-                            key={asset.instanceId || `${asset.name}-${index}`}
-                            asset={asset}
-                            updateAssetTransform={updateAssetTransform}
+                    {usesRuntimeRegistry
+                        ? overlaySurface.runtimeMeshNodes.map((node) => (
+                              <SceneAssetNode
+                                  key={`${node.nodeId}:${node.lifecycleKey}`}
+                                  asset={{
+                                      ...(node.metadata ?? {}),
+                                      instanceId: node.instanceId,
+                                      nodeId: node.nodeId,
+                                      name: node.name,
+                                      mesh: node.meshUrl ?? undefined,
+                                      position: node.worldTransform.position,
+                                      rotation: [
+                                          node.worldTransform.rotation[0],
+                                          node.worldTransform.rotation[1],
+                                          node.worldTransform.rotation[2],
+                                      ],
+                                      scale: node.worldTransform.scale,
+                                      visible: node.effectiveVisible,
+                                      locked: node.effectiveLocked,
+                                      parentWorldMatrix: node.parentWorldMatrix,
+                                  }}
+                                  lifecycleKey={node.lifecycleKey}
+                                  sceneRuntime={overlaySurface.sceneRuntime}
+                                  updateAssetTransform={overlaySurface.updateAssetTransform}
+                                  updateNodeTransform={overlaySurface.updateNodeTransform}
+                                  onCommitTransform={overlaySurface.commitSceneTransforms}
+                                  readOnly={readOnly}
+                                  selected={overlaySurface.selectedNodeIdSet.has(node.nodeId)}
+                                  activeTool={activeTool}
+                                  showControls={!usesRuntimeRegistry}
+                                  onSelect={(event) => overlaySurface.selectSceneNode(node.nodeId, event)}
+                              />
+                          ))
+                        : assets.map((asset, index) => (
+                              <SceneAssetNode
+                                  key={asset.instanceId || `${asset.name}-${index}`}
+                                  asset={asset}
+                                  updateAssetTransform={overlaySurface.updateAssetTransform}
+                                  onCommitTransform={overlaySurface.commitSceneTransforms}
+                                  readOnly={readOnly}
+                                  selected={overlaySurface.selectedAssetInstanceIdSet.has(asset.instanceId)}
+                                  activeTool={activeTool}
+                                  onSelect={(event) => overlaySurface.selectSceneAsset(asset.instanceId, event)}
+                              />
+                          ))}
+
+                    {usesRuntimeRegistry
+                        ? overlaySurface.runtimeCameraNodes.map((node) => (
+                              <SceneUtilityNode
+                                  key={`${node.nodeId}:${node.lifecycleKey}`}
+                                  node={node}
+                                  sceneRuntime={overlaySurface.sceneRuntime}
+                                  updateNodeTransform={overlaySurface.updateNodeTransform}
+                                  onCommitTransform={overlaySurface.commitSceneTransforms}
+                                  readOnly={readOnly}
+                                  selected={overlaySurface.selectedNodeIdSet.has(node.nodeId)}
+                                  activeTool={activeTool}
+                                  showControls={!usesRuntimeRegistry}
+                                  onSelect={(event) => overlaySurface.selectSceneNode(node.nodeId, event)}
+                              />
+                          ))
+                        : null}
+
+                    {usesRuntimeRegistry
+                        ? overlaySurface.runtimeLightNodes.map((node) => (
+                              <SceneUtilityNode
+                                  key={`${node.nodeId}:${node.lifecycleKey}`}
+                                  node={node}
+                                  sceneRuntime={overlaySurface.sceneRuntime}
+                                  updateNodeTransform={overlaySurface.updateNodeTransform}
+                                  onCommitTransform={overlaySurface.commitSceneTransforms}
+                                  readOnly={readOnly}
+                                  selected={overlaySurface.selectedNodeIdSet.has(node.nodeId)}
+                                  activeTool={activeTool}
+                                  showControls={!usesRuntimeRegistry}
+                                  onSelect={(event) => overlaySurface.selectSceneNode(node.nodeId, event)}
+                              />
+                          ))
+                        : null}
+
+                    {usesRuntimeRegistry ? (
+                        <ThreeOverlayTransformControls
+                            sceneNodeRegistry={overlaySurface.sceneNodeRegistry}
+                            selectedNodeIds={selectedNodeIds}
+                            activeTool={activeTool}
                             readOnly={readOnly}
+                            transformSpace={transformSpace}
+                            transformSnap={
+                                transformSnap ?? {
+                                    enabled: false,
+                                    translate: 0.5,
+                                    rotate: Math.PI / 12,
+                                    scale: 0.1,
+                                }
+                            }
+                            transformSession={transformSession}
+                            onBeginTransformSession={onBeginTransformSession}
+                            onUpdateTransformSessionDrafts={onUpdateTransformSessionDrafts}
+                            onCancelTransformSession={onCancelTransformSession}
+                            onCommitTransformSession={onCommitTransformSession}
                         />
-                    ))}
+                    ) : null}
 
                     <PinLayer
-                        pins={normalizedSceneGraph.pins}
+                        pins={pins}
                         selectedPinId={selectedPinId}
                         isPlacingPin={isPinPlacementEnabled}
                         pinType={pinType}
                         readOnly={readOnly}
-                        onAddPin={addPin}
-                        onSelectPin={onSelectPin}
+                        onAddPin={overlaySurface.addPin}
+                        onSelectPin={overlaySurface.selectPin}
                     />
                 </Canvas>
             </CanvasErrorBoundary>
+        );
+    }
+
+    return (
+        <div className="absolute inset-0 pointer-events-auto z-20">
+            <div
+                data-testid="mvp-viewer-runtime-diagnostics"
+                data-host-capability-lane={overlaySurface.runtimeDiagnostics.hostCapabilityLane}
+                data-operational-mode={overlaySurface.runtimeDiagnostics.operationalMode}
+                data-operational-lane={overlaySurface.runtimeDiagnostics.operationalLane}
+                data-coverage={overlaySurface.runtimeDiagnostics.coverage}
+                data-render-source-mode={overlaySurface.runtimeDiagnostics.renderSourceMode}
+                data-render-mode={overlaySurface.runtimeDiagnostics.renderMode}
+                data-fallback-reason={overlaySurface.runtimeDiagnostics.fallbackReason ?? "none"}
+                data-fallback-message={overlaySurface.runtimeDiagnostics.fallbackMessage || ""}
+                data-has-renderable-environment={overlaySurface.runtimeDiagnostics.hasRenderableEnvironment ? "true" : "false"}
+                data-is-single-image-preview={overlaySurface.runtimeDiagnostics.isSingleImagePreview ? "true" : "false"}
+                data-preview-projection-available={overlaySurface.runtimeDiagnostics.previewProjectionAvailable ? "true" : "false"}
+                data-reference-image-available={overlaySurface.runtimeDiagnostics.referenceImageAvailable ? "true" : "false"}
+                data-viewer-ready={overlaySurface.runtimeDiagnostics.isViewerReady ? "true" : "false"}
+                data-max-texture-size={
+                    overlaySurface.runtimeDiagnostics.maxTextureSize === null
+                        ? "unknown"
+                        : String(overlaySurface.runtimeDiagnostics.maxTextureSize)
+                }
+                data-label={overlaySurface.runtimeDiagnostics.label}
+                data-detail={overlaySurface.runtimeDiagnostics.detail}
+                data-quality-mode={overlaySurface.qualityPolicy.mode}
+                data-quality-tier={overlaySurface.qualityPolicy.tier}
+                data-quality-label={overlaySurface.qualityPolicy.label}
+                data-quality-summary={overlaySurface.qualityPolicy.summary}
+                data-quality-premium-effects-enabled={overlaySurface.qualityPolicy.premiumEffectsEnabled ? "true" : "false"}
+                data-quality-cautious-mode={overlaySurface.qualityPolicy.cautiousMode ? "true" : "false"}
+                data-effective-point-budget={
+                    overlaySurface.effectiveSharpPointBudget === null ? "unknown" : String(overlaySurface.effectiveSharpPointBudget)
+                }
+                data-prefers-performance-mode={overlaySurface.prefersPerformanceMode ? "true" : "false"}
+                data-adaptive-quality-tier={adaptiveQualityTier}
+                data-lowest-adaptive-quality-tier={lowestAdaptiveQualityTier}
+                data-context-loss-count={String(overlaySurface.contextLossCount)}
+                data-delivery-manifest-url={overlaySurface.deliveryManifestUrl ?? ""}
+                data-delivery-manifest-first={overlaySurface.deliveryManifestFirst ? "true" : "false"}
+                data-delivery-has-progressive-variants={overlaySurface.deliveryHasProgressiveVariants ? "true" : "false"}
+                data-delivery-has-compressed-variants={overlaySurface.deliveryHasCompressedVariants ? "true" : "false"}
+                data-delivery-has-page-streaming={overlaySurface.deliveryHasPageStreaming ? "true" : "false"}
+                data-delivery-staged-observed={overlaySurface.deliveryStagedObserved ? "true" : "false"}
+                data-delivery-streaming-observed={overlaySurface.deliveryStreamingObserved ? "true" : "false"}
+                data-delivery-upgrade-pending={overlaySurface.deliveryUpgradePending ? "true" : "false"}
+                data-delivery-active-variant-label={overlaySurface.deliveryActiveVariantLabel ?? ""}
+                data-delivery-upgrade-variant-label={overlaySurface.deliveryUpgradeVariantLabel ?? ""}
+                data-delivery-resident-layer-count={String(overlaySurface.deliveryResidentLayerCount)}
+                data-delivery-resident-point-count={String(overlaySurface.deliveryResidentPointCount)}
+                data-delivery-resident-byte-count={String(overlaySurface.deliveryResidentByteCount)}
+                data-delivery-inflight-page-count={String(overlaySurface.deliveryInflightPageCount)}
+                data-delivery-refine-pages-loaded={String(overlaySurface.deliveryRefinePagesLoaded)}
+                data-delivery-refine-pages-pending={String(overlaySurface.deliveryRefinePagesPending)}
+                data-delivery-progress-fraction={formatNumericRuntimeDiagnostic(overlaySurface.deliveryProgressFraction)}
+                data-delivery-evictions={String(overlaySurface.deliveryEvictions)}
+                data-delivery-pause-reason={overlaySurface.deliveryPauseReason ?? ""}
+                data-canvas-created-at-ms={formatNumericRuntimeDiagnostic(overlaySurface.runtimeDiagnostics.canvasCreatedAtMs)}
+                data-viewer-ready-at-ms={formatNumericRuntimeDiagnostic(overlaySurface.runtimeDiagnostics.viewerReadyAtMs)}
+                data-first-context-loss-at-ms={formatNumericRuntimeDiagnostic(overlaySurface.runtimeDiagnostics.firstContextLossAtMs)}
+                data-frame-count={String(runtimeTelemetry.frameCount)}
+                data-frame-avg-ms={formatNumericRuntimeDiagnostic(runtimeTelemetry.frameAvgMs)}
+                data-frame-p95-ms={formatNumericRuntimeDiagnostic(runtimeTelemetry.frameP95Ms)}
+                data-frame-worst-ms={formatNumericRuntimeDiagnostic(runtimeTelemetry.frameWorstMs)}
+                data-frame-over-33ms-ratio={formatNumericRuntimeDiagnostic(runtimeTelemetry.frameOver33MsRatio)}
+                data-frame-over-50ms-ratio={formatNumericRuntimeDiagnostic(runtimeTelemetry.frameOver50MsRatio)}
+                data-adaptive-transition-count={String(runtimeTelemetry.adaptiveTransitionCount)}
+                data-adaptive-full-ms={formatNumericRuntimeDiagnostic(runtimeTelemetry.adaptiveFullMs)}
+                data-adaptive-balanced-ms={formatNumericRuntimeDiagnostic(runtimeTelemetry.adaptiveBalancedMs)}
+                data-adaptive-safe-ms={formatNumericRuntimeDiagnostic(runtimeTelemetry.adaptiveSafeMs)}
+                data-adaptive-safe-entries={String(runtimeTelemetry.adaptiveSafeEntries)}
+                data-first-frame-at-ms={formatNumericRuntimeDiagnostic(runtimeTelemetry.firstFrameAtMs)}
+                data-first-stable-frame-at-ms={formatNumericRuntimeDiagnostic(runtimeTelemetry.firstStableFrameAtMs)}
+                data-poster-curtain-stage={posterCurtainStage}
+                data-poster-curtain-visible={posterCurtainVisible ? "true" : "false"}
+                data-render-megapixels={formatNumericRuntimeDiagnostic(renderMegapixels)}
+                data-viewer-transition-active={viewerTransitionActive ? "true" : "false"}
+                hidden
+            />
+            {posterCurtainVisible && posterRevealImageUrl ? (
+                <ViewerPosterCurtain
+                    imageUrl={posterRevealImageUrl}
+                    stage={posterCurtainStage}
+                    qualityPolicy={overlaySurface.qualityPolicy}
+                    runtimeLabel={overlaySurface.runtimeDiagnostics.label}
+                />
+            ) : null}
+            {showWarmupMatte ? (
+                <ViewerLiveWarmupMatte
+                    qualityPolicy={overlaySurface.qualityPolicy}
+                    deliveryStatus={{
+                        upgradePending: overlaySurface.deliveryUpgradePending,
+                        activeVariantLabel: overlaySurface.deliveryActiveVariantLabel,
+                        upgradeVariantLabel: overlaySurface.deliveryUpgradeVariantLabel,
+                        streamingObserved: overlaySurface.deliveryStreamingObserved,
+                        refinePagesLoaded: overlaySurface.deliveryRefinePagesLoaded,
+                        refinePagesPending: overlaySurface.deliveryRefinePagesPending,
+                        pauseReason: overlaySurface.deliveryPauseReason,
+                    }}
+                />
+            ) : null}
+            {showPremiumRevealBanner ? (
+                <ViewerRevealBanner
+                    diagnostics={overlaySurface.runtimeDiagnostics}
+                    qualityPolicy={overlaySurface.qualityPolicy}
+                    isSingleImagePreview={overlaySurface.isSingleImagePreview}
+                    adaptiveQualityTier={adaptiveQualityTier}
+                />
+            ) : null}
+            <ViewerRuntimeBadge
+                diagnostics={overlaySurface.runtimeDiagnostics}
+                qualityPolicy={overlaySurface.qualityPolicy}
+                adaptiveQualityTier={adaptiveQualityTier}
+                runtimeTelemetry={runtimeTelemetry}
+                deliveryStatus={{
+                    stagedObserved: overlaySurface.deliveryStagedObserved,
+                    streamingObserved: overlaySurface.deliveryStreamingObserved,
+                    upgradePending: overlaySurface.deliveryUpgradePending,
+                    activeVariantLabel: overlaySurface.deliveryActiveVariantLabel,
+                    upgradeVariantLabel: overlaySurface.deliveryUpgradeVariantLabel,
+                    residentLayerCount: overlaySurface.deliveryResidentLayerCount,
+                    residentPointCount: overlaySurface.deliveryResidentPointCount,
+                    residentByteCount: overlaySurface.deliveryResidentByteCount,
+                    inflightPageCount: overlaySurface.deliveryInflightPageCount,
+                    refinePagesLoaded: overlaySurface.deliveryRefinePagesLoaded,
+                    refinePagesPending: overlaySurface.deliveryRefinePagesPending,
+                    progressFraction: overlaySurface.deliveryProgressFraction,
+                    evictions: overlaySurface.deliveryEvictions,
+                    pauseReason: overlaySurface.deliveryPauseReason,
+                }}
+            />
+            {surfaceContent}
         </div>
     );
-}
+});
+
+export const ThreeOverlayConnected = React.memo(function ThreeOverlayConnected({
+    readOnly = false,
+    backgroundColor,
+    onCapturePose,
+    onPathRecorded,
+}: ThreeOverlayConnectedProps) {
+    const workspaceThreeOverlay = useMvpWorkspaceThreeOverlayController();
+
+    return (
+        <ThreeOverlay
+            {...workspaceThreeOverlay}
+            onCapturePose={onCapturePose}
+            onPathRecorded={onPathRecorded}
+            readOnly={readOnly}
+            backgroundColor={backgroundColor}
+        />
+    );
+});
+
+export default ThreeOverlay;

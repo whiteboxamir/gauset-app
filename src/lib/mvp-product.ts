@@ -1,3 +1,5 @@
+import { normalizeSplatDeliveryState } from "./mvp-splat-delivery";
+
 export type BackendMode = "checking" | "ready" | "degraded" | "offline";
 
 export type GenerationLane = "preview" | "reconstruction" | "asset";
@@ -31,6 +33,7 @@ export interface BackendLaneCapability {
 export interface SetupStatusResponse {
     status: string;
     python_version?: string;
+    storage_mode?: string;
     backend?: {
         label?: string;
         kind?: string;
@@ -84,6 +87,15 @@ export interface SetupStatusResponse {
         uploads?: boolean;
         assets?: boolean;
         scenes?: boolean;
+    };
+    storage?: {
+        mode?: string;
+        durable?: boolean;
+        public_write_safe?: boolean;
+        summary?: string;
+        availability_reason?: string | null;
+        required_env?: string[];
+        checklist?: string[];
     };
     torch?: {
         installed?: boolean;
@@ -227,6 +239,25 @@ export interface EnvironmentRenderingMetadata {
     source_format?: string;
     viewer_source?: string;
     apply_preview_orientation?: boolean;
+    preview_density_multiplier?: number;
+    manifest_url?: string;
+    manifest_id?: string;
+    manifest_first?: boolean;
+    runtime_variant?: string;
+    runtime_variants?: EnvironmentRuntimeVariant[] | Record<string, EnvironmentRuntimeVariant>;
+    runtime_codecs?: string[];
+}
+
+export interface EnvironmentRuntimeVariant {
+    id?: string;
+    label?: string;
+    role?: string;
+    url?: string;
+    codec?: string;
+    progressive?: boolean;
+    preferred?: boolean;
+    fallback?: boolean;
+    bytes?: number;
 }
 
 export interface EnvironmentDeliveryAxis {
@@ -243,6 +274,12 @@ export interface EnvironmentDeliveryProfile {
     recommended_viewer_mode?: string;
     blocking_issues?: string[];
     next_actions?: string[];
+    manifest_url?: string;
+    manifest_id?: string;
+    manifest_first?: boolean;
+    runtime_variant?: string;
+    runtime_variants?: EnvironmentRuntimeVariant[] | Record<string, EnvironmentRuntimeVariant>;
+    runtime_codecs?: string[];
     axes?: {
         geometry?: EnvironmentDeliveryAxis;
         color?: EnvironmentDeliveryAxis;
@@ -415,6 +452,16 @@ export interface GeneratedEnvironmentMetadata {
     release_gates?: EnvironmentReleaseGates;
     quality?: EnvironmentQualityMetrics;
     delivery?: EnvironmentDeliveryProfile;
+    manifest_url?: string;
+    manifest_id?: string;
+    manifest_first?: boolean;
+    runtime_variant?: string;
+    runtime_variants?: EnvironmentRuntimeVariant[] | Record<string, EnvironmentRuntimeVariant>;
+    runtime_codecs?: string[];
+    ingest_record?: Record<string, unknown>;
+    downstream_handoff?: Record<string, unknown>;
+    manifest?: Record<string, unknown>;
+    splat_manifest?: Record<string, unknown>;
     preview_enhancement?: EnvironmentPreviewEnhancement;
     source_camera?: {
         position?: [number, number, number];
@@ -463,10 +510,15 @@ export function resolveEnvironmentRenderState(environment: any) {
     const rendering = metadata?.rendering && typeof metadata.rendering === "object" ? metadata.rendering : null;
     const quality = metadata?.quality && typeof metadata.quality === "object" ? metadata.quality : null;
     const delivery = metadata?.delivery && typeof metadata.delivery === "object" ? metadata.delivery : null;
+    const splatDelivery = normalizeSplatDeliveryState(environment);
     const warnings = Array.isArray(quality?.warnings) ? quality.warnings : [];
 
-    const viewerUrl = normalizeEnvironmentString(urls?.viewer) || normalizeEnvironmentString(rendering?.viewer_source);
-    const splatUrl = normalizeEnvironmentString(urls?.splats);
+    const directViewerUrl = normalizeEnvironmentString(urls?.viewer) || normalizeEnvironmentString(rendering?.viewer_source);
+    const directSplatUrl = normalizeEnvironmentString(urls?.splats);
+    const manifestRuntimeUrl = splatDelivery.manifestUrl ? normalizeEnvironmentString(splatDelivery.manifestUrl) : "";
+    const useManifestPrimary = Boolean(splatDelivery.manifestFirst && manifestRuntimeUrl && !directViewerUrl);
+    const viewerUrl = directViewerUrl;
+    const splatUrl = useManifestPrimary ? manifestRuntimeUrl : directSplatUrl || manifestRuntimeUrl;
     const truthLabel = normalizeEnvironmentString(metadata?.truth_label).toLowerCase();
     const qualityTier = normalizeEnvironmentString(metadata?.quality_tier).toLowerCase();
     const sourceFormat = normalizeEnvironmentString(rendering?.source_format).toLowerCase();
@@ -505,6 +557,17 @@ export function resolveEnvironmentRenderState(environment: any) {
     return {
         viewerUrl,
         splatUrl,
+        deliveryManifestUrl: splatDelivery.manifestUrl,
+        deliveryManifestId: splatDelivery.manifestId,
+        deliveryManifestFirst: splatDelivery.manifestFirst,
+        deliveryRuntimeVariant: splatDelivery.runtimeVariant,
+        deliveryRuntimeCodecs: splatDelivery.runtimeCodecs,
+        deliveryRuntimeVariants: splatDelivery.runtimeVariants,
+        deliveryPreferredRuntimeVariant: splatDelivery.preferredRuntimeVariant,
+        deliveryHasProgressiveVariants: splatDelivery.hasProgressiveVariants,
+        deliveryHasCompressedVariants: splatDelivery.hasCompressedVariants,
+        deliveryHasPageStreaming: splatDelivery.hasPageStreaming,
+        deliveryPageVariants: splatDelivery.pageVariants,
         previewProjectionImage: previewProjectionImage || null,
         referenceImage: referenceImage || null,
         hasRenderableOutput,
@@ -539,12 +602,21 @@ function inferLaneAvailability(payload: LegacySetupStatusResponse, lane: "previe
 
 export function normalizeSetupStatus(raw: unknown): SetupStatusResponse {
     const payload = (raw && typeof raw === "object" ? raw : {}) as LegacySetupStatusResponse;
-    const previewAvailable = inferLaneAvailability(payload, "preview");
-    const reconstructionAvailable = inferLaneAvailability(payload, "reconstruction");
-    const assetAvailable = inferLaneAvailability(payload, "asset");
+    const deployment = payload.backend?.deployment ?? payload.storage_mode ?? "";
+    const storageMode = typeof payload.storage?.mode === "string" ? payload.storage.mode : payload.storage_mode ?? "";
+    const publicWriteSafe =
+        typeof payload.storage?.public_write_safe === "boolean"
+            ? payload.storage.public_write_safe
+            : !(deployment === "vercel" && storageMode === "filesystem");
+    const previewAvailable = inferLaneAvailability(payload, "preview") && publicWriteSafe;
+    const reconstructionAvailable = inferLaneAvailability(payload, "reconstruction") && publicWriteSafe;
+    const assetAvailable = inferLaneAvailability(payload, "asset") && publicWriteSafe;
 
     const backendTruth =
-        payload.backend?.truth ??
+        !publicWriteSafe
+            ? payload.storage?.availability_reason ??
+              "Public MVP writes are disabled because this deployment is using filesystem storage. Configure durable blob storage before enabling uploads, preview generation, asset extraction, scene saves, reviews, or comments."
+            : payload.backend?.truth ??
         (previewAvailable && assetAvailable && reconstructionAvailable
             ? "Preview, reconstruction, and asset generation lanes are available."
             : previewAvailable && assetAvailable
@@ -572,11 +644,16 @@ export function normalizeSetupStatus(raw: unknown): SetupStatusResponse {
         reconstruction_backend: payload.reconstruction_backend,
         benchmark_status: payload.benchmark_status,
         release_gates: payload.release_gates,
+        storage_mode: storageMode || payload.storage_mode,
         capabilities: {
             preview: {
                 available: previewAvailable,
                 label: payload.capabilities?.preview?.label ?? "Instant Preview",
-                summary: payload.capabilities?.preview?.summary ?? "Generate a single-photo Gaussian preview for nearby camera moves.",
+                summary:
+                    payload.capabilities?.preview?.summary ??
+                    (publicWriteSafe
+                        ? "Generate a single-photo Gaussian preview for nearby camera moves."
+                        : "Preview writes are disabled until durable blob storage is configured for this public deployment."),
                 truth: payload.capabilities?.preview?.truth ?? "This is a synthesized preview, not a faithful multi-view reconstruction.",
                 lane_truth: payload.capabilities?.preview?.lane_truth,
                 input_strategy: payload.capabilities?.preview?.input_strategy ?? "1 photo",
@@ -601,8 +678,16 @@ export function normalizeSetupStatus(raw: unknown): SetupStatusResponse {
             asset: {
                 available: assetAvailable,
                 label: payload.capabilities?.asset?.label ?? "Single-Image Asset",
-                summary: payload.capabilities?.asset?.summary ?? "Generate a hero prop mesh from one reference image.",
-                truth: payload.capabilities?.asset?.truth ?? "This lane is object-focused generation, not environment reconstruction.",
+                summary:
+                    payload.capabilities?.asset?.summary ??
+                    (publicWriteSafe
+                        ? "Generate a hero prop mesh from one reference image."
+                        : "Asset extraction is disabled until durable blob storage is configured for this public deployment."),
+                truth:
+                    payload.capabilities?.asset?.truth ??
+                    (publicWriteSafe
+                        ? "This lane is object-focused generation, not environment reconstruction."
+                        : "This lane is safety-disabled because generated files cannot persist durably in the current public storage mode."),
                 lane_truth: payload.capabilities?.asset?.lane_truth,
                 input_strategy: payload.capabilities?.asset?.input_strategy ?? "1 photo",
                 min_images: payload.capabilities?.asset?.min_images ?? 1,
@@ -613,6 +698,23 @@ export function normalizeSetupStatus(raw: unknown): SetupStatusResponse {
             uploads: payload.directories?.uploads ?? true,
             assets: payload.directories?.assets ?? true,
             scenes: payload.directories?.scenes ?? true,
+        },
+        storage: {
+            mode: storageMode || payload.storage_mode,
+            durable: typeof payload.storage?.durable === "boolean" ? payload.storage.durable : publicWriteSafe,
+            public_write_safe: publicWriteSafe,
+            summary:
+                payload.storage?.summary ??
+                (publicWriteSafe
+                    ? "Durable storage is configured for MVP writes."
+                    : "Filesystem storage is not durable on the public MVP deployment, so write lanes are safety-disabled until blob storage is configured."),
+            availability_reason:
+                payload.storage?.availability_reason ??
+                (publicWriteSafe
+                    ? null
+                    : "Public MVP writes are disabled because this deployment is using filesystem storage."),
+            required_env: payload.storage?.required_env ?? [],
+            checklist: payload.storage?.checklist ?? [],
         },
     };
 }
@@ -691,6 +793,9 @@ export function describeEnvironment(environment: any) {
     }
     if (deliveryLabel) {
         detailParts.push(deliveryLabel);
+    }
+    if (renderState.deliveryManifestUrl) {
+        detailParts.push("manifest-first delivery");
     }
     if (qualityBand) {
         detailParts.push(qualityBand);

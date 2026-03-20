@@ -52,40 +52,40 @@ const physicsConfig = {
 
 const STAGES = [
     {
-        id: 'screenplay',
-        label: 'SCREENPLAY',
-        tagline: 'A screenplay enters the system.',
-        meta: 'SC 01 · PARSE · INGEST',
-        detail: 'Structure, characters, locations, and props are extracted and indexed.',
+        id: 'project-record',
+        label: 'PROJECT RECORD',
+        tagline: 'The project and world context enter the system.',
+        meta: 'PROJECT · REFERENCES · CONTEXT',
+        detail: 'Brief, locations, references, and continuity notes attach to one durable project record.',
         accent: '#d4a04a', // gold
-        statusLabel: 'INGESTING',
+        statusLabel: 'ATTACHING',
     },
     {
-        id: 'world-gen',
-        label: 'WORLD GENERATION',
-        tagline: 'Scenes become explorable worlds.',
-        meta: 'ENV · BUILD · POPULATE',
-        detail: 'Persistent environments generated from scene descriptions.',
+        id: 'world-build',
+        label: 'WORLD BUILD',
+        tagline: 'Build one persistent world.',
+        meta: 'WORLD · SAVE · REOPEN',
+        detail: 'Real capture, external worlds, and supportive generation resolve into one world that can be saved and reopened.',
         accent: '#4a9fd4', // blue
-        statusLabel: 'GENERATING',
+        statusLabel: 'BUILDING',
     },
     {
-        id: 'staging',
-        label: 'STAGING',
-        tagline: 'Direct, block, and iterate in real-time.',
-        meta: 'CAM · ACTOR · LIGHT',
-        detail: 'Place cameras. Direct performances. Adjust in the world.',
+        id: 'direction',
+        label: 'DIRECTION',
+        tagline: 'Direct shots from the saved world.',
+        meta: 'SHOTS · BLOCKING · LOOK',
+        detail: 'Camera moves, blocking, shot lists, and look development stay tied to the same world state.',
         accent: '#ef4444', // red
-        statusLabel: 'RECORDING',
+        statusLabel: 'DIRECTING',
     },
     {
-        id: 'orchestration',
-        label: 'ORCHESTRATION',
-        tagline: 'An agent maintains continuity across the film.',
-        meta: 'CONTINUITY · RENDER · EXPORT',
-        detail: 'Every shot and every scene is connected and consistent.',
+        id: 'review-handoff',
+        label: 'REVIEW + HANDOFF',
+        tagline: 'Review, reopen, and hand off without losing continuity.',
+        meta: 'VERSIONS · REVIEW · DELIVERY',
+        detail: 'Saved versions, review shares, project-linked reopen, and downstream handoff stay anchored to the world record.',
         accent: '#d4a04a', // gold
-        statusLabel: 'ORCHESTRATING',
+        statusLabel: 'ANCHORING',
     },
 ] as const;
 
@@ -216,10 +216,10 @@ function PipelineStage({ stage, index, total }: { stage: (typeof STAGES)[number]
 
                     {/* Ambient / Thematic Visual Layer */}
                     <div className="absolute inset-0 pointer-events-none overflow-hidden rounded-sm" style={{ zIndex: 0 }}>
-                        {stage.id === 'screenplay' && <DataWaterfallEffect accent={stage.accent} progress={scrollYProgress} />}
-                        {stage.id === 'world-gen' && <ParticleCloudEffect accent={stage.accent} progress={scrollYProgress} />}
-                        {stage.id === 'staging' && <CameraRailEffect accent={stage.accent} progress={scrollYProgress} />}
-                        {stage.id === 'orchestration' && <OrbitalRingsEffect accent={stage.accent} progress={scrollYProgress} />}
+                        {stage.id === 'project-record' && <DataWaterfallEffect accent={stage.accent} progress={scrollYProgress} />}
+                        {stage.id === 'world-build' && <ParticleCloudEffect accent={stage.accent} progress={scrollYProgress} />}
+                        {stage.id === 'direction' && <CameraRailEffect accent={stage.accent} progress={scrollYProgress} />}
+                        {stage.id === 'review-handoff' && <OrbitalRingsEffect accent={stage.accent} progress={scrollYProgress} />}
                     </div>
 
                 </div>

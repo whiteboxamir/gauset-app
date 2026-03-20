@@ -1,0 +1,615 @@
+{
+  "contract": "world-ingest/v1",
+  "ingest_id": "ingest_backlot_reconstruction_01",
+  "status": "accepted",
+  "source": {
+    "kind": "third_party_world_model_output",
+    "label": "Backlot reconstruction drop",
+    "vendor": "nerfstudio",
+    "format": "splatfacto/gaussian-splat/v1",
+    "captured_at": "2026-03-15T02:12:00.000Z",
+    "source_uri": "s3://partner-drop/backlot-reconstruction/output/",
+    "origin": "partner_drop",
+    "ingest_channel": "external_import"
+  },
+  "package": {
+    "media_type": "application/x-gauset-scene-document+json",
+    "checksum_sha256": "sha256_backlot_reconstruction_01",
+    "entrypoints": {
+      "workspace": "/mvp?scene=scene_backlot_reconstruction_01",
+      "review": "/mvp/review?scene=scene_backlot_reconstruction_01&version=20260316T173000000Z",
+      "metadata": "/api/mvp/storage/scenes/scene_backlot_reconstruction_01/environment/metadata.json"
+    },
+    "files": {
+      "viewer": "/api/mvp/storage/scenes/scene_backlot_reconstruction_01/environment/metadata.json",
+      "splats": "/api/mvp/storage/scenes/scene_backlot_reconstruction_01/environment/splats.ply",
+      "cameras": "/api/mvp/storage/scenes/scene_backlot_reconstruction_01/environment/cameras.json",
+      "metadata": "/api/mvp/storage/scenes/scene_backlot_reconstruction_01/environment/metadata.json",
+      "preview_projection": "/api/mvp/storage/scenes/scene_backlot_reconstruction_01/environment/preview-projection.png"
+    }
+  },
+  "scene_document": {
+    "version": 2,
+    "rootIds": [
+      "group_backlot",
+      "cam_hero"
+    ],
+    "nodes": {
+      "group_backlot": {
+        "id": "group_backlot",
+        "kind": "group",
+        "parentId": null,
+        "childIds": [
+          "splat_backlot_env",
+          "mesh_camera_tower"
+        ],
+        "name": "Backlot set",
+        "visible": true,
+        "locked": false,
+        "transform": {
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        }
+      },
+      "splat_backlot_env": {
+        "id": "splat_backlot_env",
+        "kind": "splat",
+        "parentId": "group_backlot",
+        "childIds": [],
+        "name": "Backlot environment",
+        "visible": true,
+        "locked": false,
+        "transform": {
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        }
+      },
+      "mesh_camera_tower": {
+        "id": "mesh_camera_tower",
+        "kind": "mesh",
+        "parentId": "group_backlot",
+        "childIds": [],
+        "name": "Camera tower",
+        "visible": true,
+        "locked": false,
+        "transform": {
+          "position": [
+            2.4,
+            0,
+            -1.2
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        }
+      },
+      "cam_hero": {
+        "id": "cam_hero",
+        "kind": "camera",
+        "parentId": null,
+        "childIds": [],
+        "name": "Hero scout camera",
+        "visible": true,
+        "locked": false,
+        "transform": {
+          "position": [
+            8.2,
+            3.4,
+            4.8
+          ],
+          "rotation": [
+            0,
+            0.06,
+            0,
+            0.998
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        }
+      }
+    },
+    "groups": {
+      "group_backlot": {
+        "id": "group_backlot"
+      }
+    },
+    "cameras": {
+      "cam_hero": {
+        "id": "cam_hero",
+        "fov": 32,
+        "lens_mm": 40,
+        "near": 0.1,
+        "far": 1000,
+        "role": "shot"
+      }
+    },
+    "lights": {},
+    "meshes": {
+      "mesh_camera_tower": {
+        "id": "mesh_camera_tower",
+        "assetId": "asset_camera_tower",
+        "meshUrl": "/api/mvp/storage/assets/asset_camera_tower/mesh.glb",
+        "textureUrl": "/api/mvp/storage/assets/asset_camera_tower/texture.png",
+        "previewUrl": "/api/mvp/storage/assets/asset_camera_tower/preview.png",
+        "metadata": {
+          "source_asset_kind": "third_party_mesh",
+          "lod": "high"
+        }
+      }
+    },
+    "splats": {
+      "splat_backlot_env": {
+        "id": "splat_backlot_env",
+        "sceneId": "scene_backlot_reconstruction_01",
+        "viewerUrl": "/api/mvp/storage/scenes/scene_backlot_reconstruction_01/environment/metadata.json",
+        "splatUrl": "/api/mvp/storage/scenes/scene_backlot_reconstruction_01/environment/splats.ply",
+        "camerasUrl": "/api/mvp/storage/scenes/scene_backlot_reconstruction_01/environment/cameras.json",
+        "metadataUrl": "/api/mvp/storage/scenes/scene_backlot_reconstruction_01/environment/metadata.json",
+        "metadata": {
+          "lane": "reconstruction",
+          "truth_label": "Imported Reconstruction Package",
+          "quality_tier": "third_party_reconstruction",
+          "lane_truth": "Imported from a third-party reconstruction output; Gauset did not rerun capture or certify final delivery."
+        }
+      }
+    },
+    "direction": {
+      "cameraViews": [
+        {
+          "id": "view_hero",
+          "label": "Hero scout",
+          "position": [
+            8.2,
+            3.4,
+            4.8
+          ],
+          "target": [
+            0,
+            0.8,
+            0
+          ],
+          "fov": 32,
+          "lens_mm": 40,
+          "note": "Hold the crane swing and practical light spill."
+        }
+      ],
+      "pins": [
+        {
+          "id": "pin_power_drop",
+          "label": "Power drop",
+          "type": "lighting",
+          "position": [
+            1.8,
+            0.2,
+            -2.1
+          ],
+          "created_at": "2026-03-16T15:10:00.000Z"
+        }
+      ],
+      "directorPath": [
+        {
+          "time": 0,
+          "position": [
+            8.2,
+            3.4,
+            4.8
+          ],
+          "target": [
+            0,
+            0.8,
+            0
+          ],
+          "rotation": [
+            0,
+            0.06,
+            0,
+            0.998
+          ],
+          "fov": 32
+        }
+      ],
+      "directorBrief": "Imported backlot reconstruction anchored for lighting and tower clearance review."
+    },
+    "review": null,
+    "viewer": {
+      "fov": 32,
+      "lens_mm": 40,
+      "activeCameraNodeId": "cam_hero"
+    }
+  },
+  "compatibility_scene_graph": {
+    "environment": {
+      "id": "scene_backlot_reconstruction_01",
+      "lane": "reconstruction",
+      "urls": {
+        "splats": "/api/mvp/storage/scenes/scene_backlot_reconstruction_01/environment/splats.ply",
+        "cameras": "/api/mvp/storage/scenes/scene_backlot_reconstruction_01/environment/cameras.json",
+        "metadata": "/api/mvp/storage/scenes/scene_backlot_reconstruction_01/environment/metadata.json",
+        "preview_projection": "/api/mvp/storage/scenes/scene_backlot_reconstruction_01/environment/preview-projection.png"
+      },
+      "metadata": {
+        "lane": "reconstruction",
+        "truth_label": "Imported Reconstruction Package",
+        "quality_tier": "third_party_reconstruction",
+        "lane_truth": "Imported from a third-party reconstruction output; Gauset did not rerun capture or certify final delivery."
+      }
+    },
+    "assets": [
+      {
+        "id": "asset_camera_tower",
+        "name": "Camera tower",
+        "mesh": "/api/mvp/storage/assets/asset_camera_tower/mesh.glb",
+        "texture": "/api/mvp/storage/assets/asset_camera_tower/texture.png",
+        "preview": "/api/mvp/storage/assets/asset_camera_tower/preview.png",
+        "instanceId": "inst_camera_tower_01",
+        "position": [
+          2.4,
+          0,
+          -1.2
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      }
+    ],
+    "camera_views": [
+      {
+        "id": "view_hero",
+        "label": "Hero scout",
+        "position": [
+          8.2,
+          3.4,
+          4.8
+        ],
+        "target": [
+          0,
+          0.8,
+          0
+        ],
+        "fov": 32,
+        "lens_mm": 40,
+        "note": "Hold the crane swing and practical light spill."
+      }
+    ],
+    "pins": [
+      {
+        "id": "pin_power_drop",
+        "label": "Power drop",
+        "type": "lighting",
+        "position": [
+          1.8,
+          0.2,
+          -2.1
+        ],
+        "created_at": "2026-03-16T15:10:00.000Z"
+      }
+    ],
+    "director_path": [
+      {
+        "time": 0,
+        "position": [
+          8.2,
+          3.4,
+          4.8
+        ],
+        "target": [
+          0,
+          0.8,
+          0
+        ],
+        "rotation": [
+          0,
+          0.06,
+          0,
+          0.998
+        ],
+        "fov": 32
+      }
+    ],
+    "director_brief": "Imported backlot reconstruction anchored for lighting and tower clearance review.",
+    "viewer": {
+      "fov": 32,
+      "lens_mm": 40
+    },
+    "__scene_document_v2": {
+      "version": 2,
+      "rootIds": [
+        "group_backlot",
+        "cam_hero"
+      ],
+      "nodes": {
+        "group_backlot": {
+          "id": "group_backlot",
+          "kind": "group",
+          "parentId": null,
+          "childIds": [
+            "splat_backlot_env",
+            "mesh_camera_tower"
+          ],
+          "name": "Backlot set",
+          "visible": true,
+          "locked": false,
+          "transform": {
+            "position": [
+              0,
+              0,
+              0
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        },
+        "splat_backlot_env": {
+          "id": "splat_backlot_env",
+          "kind": "splat",
+          "parentId": "group_backlot",
+          "childIds": [],
+          "name": "Backlot environment",
+          "visible": true,
+          "locked": false,
+          "transform": {
+            "position": [
+              0,
+              0,
+              0
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        },
+        "mesh_camera_tower": {
+          "id": "mesh_camera_tower",
+          "kind": "mesh",
+          "parentId": "group_backlot",
+          "childIds": [],
+          "name": "Camera tower",
+          "visible": true,
+          "locked": false,
+          "transform": {
+            "position": [
+              2.4,
+              0,
+              -1.2
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        },
+        "cam_hero": {
+          "id": "cam_hero",
+          "kind": "camera",
+          "parentId": null,
+          "childIds": [],
+          "name": "Hero scout camera",
+          "visible": true,
+          "locked": false,
+          "transform": {
+            "position": [
+              8.2,
+              3.4,
+              4.8
+            ],
+            "rotation": [
+              0,
+              0.06,
+              0,
+              0.998
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        }
+      },
+      "groups": {
+        "group_backlot": {
+          "id": "group_backlot"
+        }
+      },
+      "cameras": {
+        "cam_hero": {
+          "id": "cam_hero",
+          "fov": 32,
+          "lens_mm": 40,
+          "near": 0.1,
+          "far": 1000,
+          "role": "shot"
+        }
+      },
+      "lights": {},
+      "meshes": {
+        "mesh_camera_tower": {
+          "id": "mesh_camera_tower",
+          "assetId": "asset_camera_tower",
+          "meshUrl": "/api/mvp/storage/assets/asset_camera_tower/mesh.glb",
+          "textureUrl": "/api/mvp/storage/assets/asset_camera_tower/texture.png",
+          "previewUrl": "/api/mvp/storage/assets/asset_camera_tower/preview.png",
+          "metadata": {
+            "source_asset_kind": "third_party_mesh",
+            "lod": "high"
+          }
+        }
+      },
+      "splats": {
+        "splat_backlot_env": {
+          "id": "splat_backlot_env",
+          "sceneId": "scene_backlot_reconstruction_01",
+          "viewerUrl": "/api/mvp/storage/scenes/scene_backlot_reconstruction_01/environment/metadata.json",
+          "splatUrl": "/api/mvp/storage/scenes/scene_backlot_reconstruction_01/environment/splats.ply",
+          "camerasUrl": "/api/mvp/storage/scenes/scene_backlot_reconstruction_01/environment/cameras.json",
+          "metadataUrl": "/api/mvp/storage/scenes/scene_backlot_reconstruction_01/environment/metadata.json",
+          "metadata": {
+            "lane": "reconstruction",
+            "truth_label": "Imported Reconstruction Package",
+            "quality_tier": "third_party_reconstruction",
+            "lane_truth": "Imported from a third-party reconstruction output; Gauset did not rerun capture or certify final delivery."
+          }
+        }
+      },
+      "direction": {
+        "cameraViews": [
+          {
+            "id": "view_hero",
+            "label": "Hero scout",
+            "position": [
+              8.2,
+              3.4,
+              4.8
+            ],
+            "target": [
+              0,
+              0.8,
+              0
+            ],
+            "fov": 32,
+            "lens_mm": 40,
+            "note": "Hold the crane swing and practical light spill."
+          }
+        ],
+        "pins": [
+          {
+            "id": "pin_power_drop",
+            "label": "Power drop",
+            "type": "lighting",
+            "position": [
+              1.8,
+              0.2,
+              -2.1
+            ],
+            "created_at": "2026-03-16T15:10:00.000Z"
+          }
+        ],
+        "directorPath": [
+          {
+            "time": 0,
+            "position": [
+              8.2,
+              3.4,
+              4.8
+            ],
+            "target": [
+              0,
+              0.8,
+              0
+            ],
+            "rotation": [
+              0,
+              0.06,
+              0,
+              0.998
+            ],
+            "fov": 32
+          }
+        ],
+        "directorBrief": "Imported backlot reconstruction anchored for lighting and tower clearance review."
+      },
+      "review": null,
+      "viewer": {
+        "fov": 32,
+        "lens_mm": 40,
+        "activeCameraNodeId": "cam_hero"
+      }
+    }
+  },
+  "workspace_binding": {
+    "project_id": "11111111-1111-4111-8111-111111111111",
+    "scene_id": "scene_backlot_reconstruction_01"
+  },
+  "versioning": {
+    "latest_version_id": "20260316T173000000Z",
+    "version_required": true,
+    "share_mode": "secure_link_or_inline"
+  },
+  "workflow": {
+    "workspace_path": "/mvp?scene=scene_backlot_reconstruction_01",
+    "review_path": "/mvp/review?scene=scene_backlot_reconstruction_01&version=20260316T173000000Z",
+    "save_ready": true,
+    "review_ready": true,
+    "share_ready": true
+  },
+  "truth": {
+    "lane": "reconstruction",
+    "truth_label": "Imported Reconstruction Package",
+    "lane_truth": "Imported from a third-party reconstruction output; Gauset did not rerun capture or certify final delivery.",
+    "production_readiness": "review_required",
+    "blockers": [
+      "review_not_approved",
+      "downstream_target_not_selected"
+    ]
+  }
+}

@@ -1,26 +1,4 @@
 {
-  "installCommand": "npm install --legacy-peer-deps",
-  "builds": [
-    {
-      "src": "package.json",
-      "use": "@vercel/next"
-    },
-    {
-      "src": "api/_mvp_backend/*.py",
-      "use": "@vercel/python",
-      "config": {
-        "maxLambdaSize": "50mb"
-      }
-    }
-  ],
-  "routes": [
-    {
-      "src": "/api/_mvp_backend",
-      "dest": "/api/_mvp_backend/index.py"
-    },
-    {
-      "src": "/api/_mvp_backend/(.*)",
-      "dest": "/api/_mvp_backend/[...path].py"
-    }
-  ]
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "installCommand": "npm install --legacy-peer-deps"
 }

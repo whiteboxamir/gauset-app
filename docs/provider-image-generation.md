@@ -7,11 +7,24 @@ This repo now supports server-side prompt-to-image generation for:
 - BytePlus Seedream
 - `mock` for local review without live credentials
 
-The editor intake flow is already wired:
+The internal `gauset-app` editor intake flow is wired to the local MVP backend routes:
+
+- `GET /providers`
+- `POST /generate/image`
+- `POST /generate/environment`
+- `POST /reconstruct/session/:id` for truthful reconstruction kickoff status
+
+The editor intake flow exposes:
 
 - `Import` for file uploads
 - `Generate` for provider-backed still generation
 - `Generate World` to chain a provider still directly into the Gaussian-splat preview lane
+
+Release truth:
+
+- `gauset-app` is the internal/staging surface for this lane.
+- `gauset.com` remains the canonical public release surface until provider generation is separately certified there.
+- The reconstruction kickoff route is present in `gauset-app`, but it still truthfully returns `501` until a dedicated multi-view worker is connected.
 
 ## Local config flow
 
@@ -31,7 +44,7 @@ python -m uvicorn server:app --app-dir backend --host 127.0.0.1 --port 8000
 npm run dev
 ```
 
-6. Open [http://127.0.0.1:3015/mvp](http://127.0.0.1:3015/mvp).
+6. Open [http://127.0.0.1:3015/mvp](http://127.0.0.1:3015/mvp). `npm run dev` now starts the full local stack and reuses the backend from step 4 if it is already healthy.
 
 The backend automatically loads these files, in order, if they exist:
 
@@ -109,14 +122,18 @@ Optional:
 
 1. `curl -sS http://127.0.0.1:8000/providers`
    Confirm the providers you configured show `"available": true`.
-2. In the editor, switch the left panel from `Import` to `Generate`.
-3. Test `Generate Still`.
-4. Test `Generate World`.
-5. Confirm the generated still lands in the same tray as uploaded stills.
-6. Confirm the generated still can also drive `Generate Preview`, `Generate Asset`, and capture-set actions.
+2. `curl -sS -X POST http://127.0.0.1:8000/generate/image -H 'Content-Type: application/json' -d '{"provider":"mock","model":"mock-cinematic-v1","prompt":"production scout frame","aspect_ratio":"16:9","count":1}'`
+   Confirm the backend returns a `job_id` and `/jobs/:id` resolves to `status=completed`.
+3. In the editor, switch the left panel from `Import` to `Generate`.
+4. Test `Generate Still`.
+5. Test `Generate World`.
+6. Confirm the generated still lands in the same tray as uploaded stills.
+7. Confirm the generated still can also drive `Generate Preview`, `Generate Asset`, and capture-set actions.
+8. Confirm reconstruction remains truthfully unavailable after a ready capture set until the worker exists.
 
 ## Current constraints
 
 - Provider keys remain server-side only.
 - Generated stills are normalized into the existing upload store and assigned a normal `image_id`.
 - `Kling` and `Seedance` stay registry-visible as video-only placeholders. They are intentionally not exposed through the still-image intake lane yet.
+- Local route presence does not mean the lane is staging-activated. Real provider operation still depends on valid env and credentials.

@@ -1,0 +1,791 @@
+{
+  "sceneId": "scene_backlot_reconstruction_01",
+  "versionId": "20260316T173000000Z",
+  "sceneDocument": {
+    "version": 2,
+    "rootIds": [
+      "group_backlot",
+      "cam_hero"
+    ],
+    "nodes": {
+      "group_backlot": {
+        "id": "group_backlot",
+        "kind": "group",
+        "parentId": null,
+        "childIds": [
+          "splat_backlot_env",
+          "mesh_camera_tower"
+        ],
+        "name": "Backlot set",
+        "visible": true,
+        "locked": false,
+        "transform": {
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        }
+      },
+      "splat_backlot_env": {
+        "id": "splat_backlot_env",
+        "kind": "splat",
+        "parentId": "group_backlot",
+        "childIds": [],
+        "name": "Backlot environment",
+        "visible": true,
+        "locked": false,
+        "transform": {
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        }
+      },
+      "mesh_camera_tower": {
+        "id": "mesh_camera_tower",
+        "kind": "mesh",
+        "parentId": "group_backlot",
+        "childIds": [],
+        "name": "Camera tower",
+        "visible": true,
+        "locked": false,
+        "transform": {
+          "position": [
+            2.4,
+            0,
+            -1.2
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        }
+      },
+      "cam_hero": {
+        "id": "cam_hero",
+        "kind": "camera",
+        "parentId": null,
+        "childIds": [],
+        "name": "Hero scout camera",
+        "visible": true,
+        "locked": false,
+        "transform": {
+          "position": [
+            8.2,
+            3.4,
+            4.8
+          ],
+          "rotation": [
+            0,
+            0.06,
+            0,
+            0.998
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        }
+      }
+    },
+    "groups": {
+      "group_backlot": {
+        "id": "group_backlot"
+      }
+    },
+    "cameras": {
+      "cam_hero": {
+        "id": "cam_hero",
+        "fov": 32,
+        "lens_mm": 40,
+        "near": 0.1,
+        "far": 1000,
+        "role": "shot"
+      }
+    },
+    "lights": {},
+    "meshes": {
+      "mesh_camera_tower": {
+        "id": "mesh_camera_tower",
+        "assetId": "asset_camera_tower",
+        "meshUrl": "/api/mvp/storage/assets/asset_camera_tower/mesh.glb",
+        "textureUrl": "/api/mvp/storage/assets/asset_camera_tower/texture.png",
+        "previewUrl": "/api/mvp/storage/assets/asset_camera_tower/preview.png",
+        "metadata": {
+          "source_asset_kind": "third_party_mesh",
+          "lod": "high"
+        }
+      }
+    },
+    "splats": {
+      "splat_backlot_env": {
+        "id": "splat_backlot_env",
+        "sceneId": "scene_backlot_reconstruction_01",
+        "viewerUrl": "/api/mvp/storage/scenes/scene_backlot_reconstruction_01/environment/metadata.json",
+        "splatUrl": "/api/mvp/storage/scenes/scene_backlot_reconstruction_01/environment/splats.ply",
+        "camerasUrl": "/api/mvp/storage/scenes/scene_backlot_reconstruction_01/environment/cameras.json",
+        "metadataUrl": "/api/mvp/storage/scenes/scene_backlot_reconstruction_01/environment/metadata.json",
+        "metadata": {
+          "lane": "reconstruction",
+          "truth_label": "Imported Reconstruction Package",
+          "quality_tier": "third_party_reconstruction",
+          "lane_truth": "Imported from a third-party reconstruction output; Gauset did not rerun capture or certify final delivery."
+        }
+      }
+    },
+    "direction": {
+      "cameraViews": [
+        {
+          "id": "view_hero",
+          "label": "Hero scout",
+          "position": [
+            8.2,
+            3.4,
+            4.8
+          ],
+          "target": [
+            0,
+            0.8,
+            0
+          ],
+          "fov": 32,
+          "lens_mm": 40,
+          "note": "Hold the crane swing and practical light spill."
+        }
+      ],
+      "pins": [
+        {
+          "id": "pin_power_drop",
+          "label": "Power drop",
+          "type": "lighting",
+          "position": [
+            1.8,
+            0.2,
+            -2.1
+          ],
+          "created_at": "2026-03-16T15:10:00.000Z"
+        }
+      ],
+      "directorPath": [
+        {
+          "time": 0,
+          "position": [
+            8.2,
+            3.4,
+            4.8
+          ],
+          "target": [
+            0,
+            0.8,
+            0
+          ],
+          "rotation": [
+            0,
+            0.06,
+            0,
+            0.998
+          ],
+          "fov": 32
+        }
+      ],
+      "directorBrief": "Imported backlot reconstruction anchored for lighting and tower clearance review."
+    },
+    "review": {
+      "scene_id": "scene_backlot_reconstruction_01",
+      "metadata": {
+        "project_name": "Backlot scout",
+        "scene_title": "Backlot reconstruction review",
+        "location_name": "South lot stage lane",
+        "owner": "Partner Ops",
+        "notes": "Imported reconstruction package needs lighting clearance confirmation before Unreal handoff.",
+        "address": "4100 Backlot Ave",
+        "shoot_day": "2026-03-18",
+        "permit_status": "pending_final_signoff",
+        "access_notes": "Load-in through south gate after 6am.",
+        "parking_notes": "Crew vans hold on lot C.",
+        "power_notes": "Temporary distro on the tower base.",
+        "safety_notes": "Crane swing radius remains active."
+      },
+      "approval": {
+        "state": "approved",
+        "updated_at": "2026-03-16T17:40:00.000Z",
+        "updated_by": "Partner Ops",
+        "note": "Approved for Unreal blockout handoff.",
+        "history": [
+          {
+            "state": "in_review",
+            "updated_at": "2026-03-16T17:10:00.000Z",
+            "updated_by": "Partner Ops",
+            "note": "Lighting clearance pending."
+          },
+          {
+            "state": "approved",
+            "updated_at": "2026-03-16T17:40:00.000Z",
+            "updated_by": "Partner Ops",
+            "note": "Approved for Unreal blockout handoff."
+          }
+        ]
+      },
+      "issues": [
+        {
+          "id": "issue_crane_clearance",
+          "title": "Crane clearance",
+          "body": "Confirm the imported tower mesh leaves room for the swing path.",
+          "type": "hazard",
+          "severity": "high",
+          "status": "resolved",
+          "assignee": "Partner Ops",
+          "author": "Partner Ops",
+          "anchor_position": [
+            2.4,
+            0.8,
+            -1.4
+          ],
+          "anchor_view_id": "view_hero",
+          "version_id": "20260316T173000000Z",
+          "created_at": "2026-03-16T17:11:00.000Z",
+          "updated_at": "2026-03-16T17:39:00.000Z"
+        }
+      ]
+    },
+    "viewer": {
+      "fov": 32,
+      "lens_mm": 40,
+      "activeCameraNodeId": "cam_hero"
+    }
+  },
+  "sceneGraph": {
+    "environment": {
+      "id": "scene_backlot_reconstruction_01",
+      "lane": "reconstruction",
+      "urls": {
+        "splats": "/api/mvp/storage/scenes/scene_backlot_reconstruction_01/environment/splats.ply",
+        "cameras": "/api/mvp/storage/scenes/scene_backlot_reconstruction_01/environment/cameras.json",
+        "metadata": "/api/mvp/storage/scenes/scene_backlot_reconstruction_01/environment/metadata.json",
+        "preview_projection": "/api/mvp/storage/scenes/scene_backlot_reconstruction_01/environment/preview-projection.png"
+      },
+      "metadata": {
+        "lane": "reconstruction",
+        "truth_label": "Imported Reconstruction Package",
+        "quality_tier": "third_party_reconstruction",
+        "lane_truth": "Imported from a third-party reconstruction output; Gauset did not rerun capture or certify final delivery.",
+        "source_provenance": {
+          "version": "gauset.source_provenance.v1",
+          "source_id": "ingest_backlot_reconstruction_01",
+          "source_kind": "third_party_world_model_output",
+          "label": "Backlot reconstruction drop"
+        },
+        "world_source": {
+          "version": "gauset.world_source.v1",
+          "kind": "third_party_world_model_output",
+          "label": "Backlot reconstruction drop",
+          "ingest_record_id": "ingest_backlot_reconstruction_01"
+        },
+        "lane_metadata": {
+          "lane": "reconstruction",
+          "blockers": []
+        },
+        "handoff_manifest": {
+          "status": "ready_for_downstream",
+          "target_label": "Unreal 5.4 backlot blockout",
+          "summary": "Approved reconstruction package is ready for Unreal blockout handoff.",
+          "blockers": []
+        },
+        "delivery": {
+          "status": "ready_for_downstream",
+          "summary": "Approved reconstruction package is ready for Unreal blockout handoff.",
+          "blockers": []
+        }
+      }
+    },
+    "assets": [
+      {
+        "id": "asset_camera_tower",
+        "name": "Camera tower",
+        "mesh": "/api/mvp/storage/assets/asset_camera_tower/mesh.glb",
+        "texture": "/api/mvp/storage/assets/asset_camera_tower/texture.png",
+        "preview": "/api/mvp/storage/assets/asset_camera_tower/preview.png",
+        "instanceId": "inst_camera_tower_01",
+        "position": [
+          2.4,
+          0,
+          -1.2
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      }
+    ],
+    "camera_views": [
+      {
+        "id": "view_hero",
+        "label": "Hero scout",
+        "position": [
+          8.2,
+          3.4,
+          4.8
+        ],
+        "target": [
+          0,
+          0.8,
+          0
+        ],
+        "fov": 32,
+        "lens_mm": 40,
+        "note": "Hold the crane swing and practical light spill."
+      }
+    ],
+    "pins": [
+      {
+        "id": "pin_power_drop",
+        "label": "Power drop",
+        "type": "lighting",
+        "position": [
+          1.8,
+          0.2,
+          -2.1
+        ],
+        "created_at": "2026-03-16T15:10:00.000Z"
+      }
+    ],
+    "director_path": [
+      {
+        "time": 0,
+        "position": [
+          8.2,
+          3.4,
+          4.8
+        ],
+        "target": [
+          0,
+          0.8,
+          0
+        ],
+        "rotation": [
+          0,
+          0.06,
+          0,
+          0.998
+        ],
+        "fov": 32
+      }
+    ],
+    "director_brief": "Imported backlot reconstruction anchored for lighting and tower clearance review.",
+    "viewer": {
+      "fov": 32,
+      "lens_mm": 40
+    },
+    "__scene_document_v2": {
+      "version": 2,
+      "rootIds": [
+        "group_backlot",
+        "cam_hero"
+      ],
+      "nodes": {
+        "group_backlot": {
+          "id": "group_backlot",
+          "kind": "group",
+          "parentId": null,
+          "childIds": [
+            "splat_backlot_env",
+            "mesh_camera_tower"
+          ],
+          "name": "Backlot set",
+          "visible": true,
+          "locked": false,
+          "transform": {
+            "position": [
+              0,
+              0,
+              0
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        },
+        "splat_backlot_env": {
+          "id": "splat_backlot_env",
+          "kind": "splat",
+          "parentId": "group_backlot",
+          "childIds": [],
+          "name": "Backlot environment",
+          "visible": true,
+          "locked": false,
+          "transform": {
+            "position": [
+              0,
+              0,
+              0
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        },
+        "mesh_camera_tower": {
+          "id": "mesh_camera_tower",
+          "kind": "mesh",
+          "parentId": "group_backlot",
+          "childIds": [],
+          "name": "Camera tower",
+          "visible": true,
+          "locked": false,
+          "transform": {
+            "position": [
+              2.4,
+              0,
+              -1.2
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        },
+        "cam_hero": {
+          "id": "cam_hero",
+          "kind": "camera",
+          "parentId": null,
+          "childIds": [],
+          "name": "Hero scout camera",
+          "visible": true,
+          "locked": false,
+          "transform": {
+            "position": [
+              8.2,
+              3.4,
+              4.8
+            ],
+            "rotation": [
+              0,
+              0.06,
+              0,
+              0.998
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        }
+      },
+      "groups": {
+        "group_backlot": {
+          "id": "group_backlot"
+        }
+      },
+      "cameras": {
+        "cam_hero": {
+          "id": "cam_hero",
+          "fov": 32,
+          "lens_mm": 40,
+          "near": 0.1,
+          "far": 1000,
+          "role": "shot"
+        }
+      },
+      "lights": {},
+      "meshes": {
+        "mesh_camera_tower": {
+          "id": "mesh_camera_tower",
+          "assetId": "asset_camera_tower",
+          "meshUrl": "/api/mvp/storage/assets/asset_camera_tower/mesh.glb",
+          "textureUrl": "/api/mvp/storage/assets/asset_camera_tower/texture.png",
+          "previewUrl": "/api/mvp/storage/assets/asset_camera_tower/preview.png",
+          "metadata": {
+            "source_asset_kind": "third_party_mesh",
+            "lod": "high"
+          }
+        }
+      },
+      "splats": {
+        "splat_backlot_env": {
+          "id": "splat_backlot_env",
+          "sceneId": "scene_backlot_reconstruction_01",
+          "viewerUrl": "/api/mvp/storage/scenes/scene_backlot_reconstruction_01/environment/metadata.json",
+          "splatUrl": "/api/mvp/storage/scenes/scene_backlot_reconstruction_01/environment/splats.ply",
+          "camerasUrl": "/api/mvp/storage/scenes/scene_backlot_reconstruction_01/environment/cameras.json",
+          "metadataUrl": "/api/mvp/storage/scenes/scene_backlot_reconstruction_01/environment/metadata.json",
+          "metadata": {
+            "lane": "reconstruction",
+            "truth_label": "Imported Reconstruction Package",
+            "quality_tier": "third_party_reconstruction",
+            "lane_truth": "Imported from a third-party reconstruction output; Gauset did not rerun capture or certify final delivery."
+          }
+        }
+      },
+      "direction": {
+        "cameraViews": [
+          {
+            "id": "view_hero",
+            "label": "Hero scout",
+            "position": [
+              8.2,
+              3.4,
+              4.8
+            ],
+            "target": [
+              0,
+              0.8,
+              0
+            ],
+            "fov": 32,
+            "lens_mm": 40,
+            "note": "Hold the crane swing and practical light spill."
+          }
+        ],
+        "pins": [
+          {
+            "id": "pin_power_drop",
+            "label": "Power drop",
+            "type": "lighting",
+            "position": [
+              1.8,
+              0.2,
+              -2.1
+            ],
+            "created_at": "2026-03-16T15:10:00.000Z"
+          }
+        ],
+        "directorPath": [
+          {
+            "time": 0,
+            "position": [
+              8.2,
+              3.4,
+              4.8
+            ],
+            "target": [
+              0,
+              0.8,
+              0
+            ],
+            "rotation": [
+              0,
+              0.06,
+              0,
+              0.998
+            ],
+            "fov": 32
+          }
+        ],
+        "directorBrief": "Imported backlot reconstruction anchored for lighting and tower clearance review."
+      },
+      "review": {
+        "scene_id": "scene_backlot_reconstruction_01",
+        "metadata": {
+          "project_name": "Backlot scout",
+          "scene_title": "Backlot reconstruction review",
+          "location_name": "South lot stage lane",
+          "owner": "Partner Ops",
+          "notes": "Imported reconstruction package needs lighting clearance confirmation before Unreal handoff.",
+          "address": "4100 Backlot Ave",
+          "shoot_day": "2026-03-18",
+          "permit_status": "pending_final_signoff",
+          "access_notes": "Load-in through south gate after 6am.",
+          "parking_notes": "Crew vans hold on lot C.",
+          "power_notes": "Temporary distro on the tower base.",
+          "safety_notes": "Crane swing radius remains active."
+        },
+        "approval": {
+          "state": "approved",
+          "updated_at": "2026-03-16T17:40:00.000Z",
+          "updated_by": "Partner Ops",
+          "note": "Approved for Unreal blockout handoff.",
+          "history": [
+            {
+              "state": "in_review",
+              "updated_at": "2026-03-16T17:10:00.000Z",
+              "updated_by": "Partner Ops",
+              "note": "Lighting clearance pending."
+            },
+            {
+              "state": "approved",
+              "updated_at": "2026-03-16T17:40:00.000Z",
+              "updated_by": "Partner Ops",
+              "note": "Approved for Unreal blockout handoff."
+            }
+          ]
+        },
+        "issues": [
+          {
+            "id": "issue_crane_clearance",
+            "title": "Crane clearance",
+            "body": "Confirm the imported tower mesh leaves room for the swing path.",
+            "type": "hazard",
+            "severity": "high",
+            "status": "resolved",
+            "assignee": "Partner Ops",
+            "author": "Partner Ops",
+            "anchor_position": [
+              2.4,
+              0.8,
+              -1.4
+            ],
+            "anchor_view_id": "view_hero",
+            "version_id": "20260316T173000000Z",
+            "created_at": "2026-03-16T17:11:00.000Z",
+            "updated_at": "2026-03-16T17:39:00.000Z"
+          }
+        ]
+      },
+      "viewer": {
+        "fov": 32,
+        "lens_mm": 40,
+        "activeCameraNodeId": "cam_hero"
+      }
+    }
+  },
+  "assetsList": [
+    {
+      "id": "asset_camera_tower",
+      "name": "Camera tower",
+      "mesh": "/api/mvp/storage/assets/asset_camera_tower/mesh.glb",
+      "texture": "/api/mvp/storage/assets/asset_camera_tower/texture.png",
+      "preview": "/api/mvp/storage/assets/asset_camera_tower/preview.png",
+      "instanceId": "inst_camera_tower_01",
+      "position": [
+        2.4,
+        0,
+        -1.2
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ]
+    }
+  ],
+  "review": {
+    "scene_id": "scene_backlot_reconstruction_01",
+    "metadata": {
+      "project_name": "Backlot scout",
+      "scene_title": "Backlot reconstruction review",
+      "location_name": "South lot stage lane",
+      "owner": "Partner Ops",
+      "notes": "Imported reconstruction package needs lighting clearance confirmation before Unreal handoff.",
+      "address": "4100 Backlot Ave",
+      "shoot_day": "2026-03-18",
+      "permit_status": "pending_final_signoff",
+      "access_notes": "Load-in through south gate after 6am.",
+      "parking_notes": "Crew vans hold on lot C.",
+      "power_notes": "Temporary distro on the tower base.",
+      "safety_notes": "Crane swing radius remains active."
+    },
+    "approval": {
+      "state": "approved",
+      "updated_at": "2026-03-16T17:40:00.000Z",
+      "updated_by": "Partner Ops",
+      "note": "Approved for Unreal blockout handoff.",
+      "history": [
+        {
+          "state": "in_review",
+          "updated_at": "2026-03-16T17:10:00.000Z",
+          "updated_by": "Partner Ops",
+          "note": "Lighting clearance pending."
+        },
+        {
+          "state": "approved",
+          "updated_at": "2026-03-16T17:40:00.000Z",
+          "updated_by": "Partner Ops",
+          "note": "Approved for Unreal blockout handoff."
+        }
+      ]
+    },
+    "issues": [
+      {
+        "id": "issue_crane_clearance",
+        "title": "Crane clearance",
+        "body": "Confirm the imported tower mesh leaves room for the swing path.",
+        "type": "hazard",
+        "severity": "high",
+        "status": "resolved",
+        "assignee": "Partner Ops",
+        "author": "Partner Ops",
+        "anchor_position": [
+          2.4,
+          0.8,
+          -1.4
+        ],
+        "anchor_view_id": "view_hero",
+        "version_id": "20260316T173000000Z",
+        "created_at": "2026-03-16T17:11:00.000Z",
+        "updated_at": "2026-03-16T17:39:00.000Z"
+      }
+    ]
+  },
+  "exportedAt": "2026-03-16T17:45:00.000Z",
+  "summary": {
+    "assetCount": 1,
+    "hasEnvironment": true
+  }
+}

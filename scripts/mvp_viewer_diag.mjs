@@ -1,11 +1,18 @@
 import { chromium } from "@playwright/test";
+import hostGuard from "./mvp_host_guard.cjs";
+import { collectViewerDiagnostics, detectHydrationMismatchMessages, resolveViewerProof } from "./mvp_viewer_runtime_shared.mjs";
 
-const url = process.argv[2] ?? "http://127.0.0.1:3000/mvp";
+const { assertLocalMvpUrl } = hostGuard;
+
+const url = assertLocalMvpUrl(process.argv[2] ?? "http://localhost:3000/mvp", "scripts/mvp_viewer_diag.mjs");
 const screenshotPath = process.argv[3] ?? "/tmp/mvp-viewer-diag.png";
 const draftJson = process.env.MVP_DRAFT_JSON ?? "";
 const headless = process.env.HEADLESS !== "0";
 const channel = process.env.PW_CHANNEL || undefined;
 const waitMs = Number(process.env.WAIT_MS ?? "10000");
+const expectedViewerLane = process.env.MVP_EXPECT_VIEWER_LANE ?? "any";
+const forceWebgl2Unavailable = process.env.MVP_FORCE_WEBGL2_UNAVAILABLE === "1";
+const failOnHydrationMismatch = process.env.MVP_FAIL_ON_HYDRATION_MISMATCH !== "0";
 
 const browser = await chromium.launch({ headless, channel });
 const context = await browser.newContext({ viewport: { width: 2048, height: 1124 } });
@@ -55,51 +62,52 @@ if (draftJson) {
     }, draftJson);
 }
 
+if (forceWebgl2Unavailable) {
+    await page.addInitScript(() => {
+        const originalGetContext = HTMLCanvasElement.prototype.getContext;
+        HTMLCanvasElement.prototype.getContext = function patchedGetContext(type, ...args) {
+            if (type === "webgl2") {
+                return null;
+            }
+            return originalGetContext.call(this, type, ...args);
+        };
+    });
+}
+
 await page.goto(url, { waitUntil: "networkidle", timeout: 120000 });
 await page.waitForTimeout(waitMs);
 await page.screenshot({ path: screenshotPath, fullPage: true });
 
-const diagnostics = await page.evaluate(() => {
-    const viewerSurface = document.querySelector('[data-testid="mvp-viewer-surface"]');
-    const fallbackCard = document.querySelector('[data-testid="mvp-empty-viewer-state"]');
-    const referenceCard = document.querySelector('[data-testid="mvp-reference-card"]');
-    const canvas = viewerSurface?.querySelector("canvas") ?? null;
-    const statusRoot = document.querySelector("[data-testid='mvp-viewer-surface']")?.previousElementSibling ?? null;
-    const webglProbe = document.createElement("canvas");
-    const webglContext =
-        webglProbe.getContext("webgl2") ??
-        webglProbe.getContext("webgl") ??
-        webglProbe.getContext("experimental-webgl");
-
-    return {
-        hasViewerSurface: Boolean(viewerSurface),
-        hasCanvas: Boolean(canvas),
-        hasFallbackCard: Boolean(fallbackCard),
-        hasReferenceCard: Boolean(referenceCard),
-        webglContextAvailable: Boolean(webglContext),
-        viewerBackground: viewerSurface ? window.getComputedStyle(viewerSurface).backgroundImage || window.getComputedStyle(viewerSurface).backgroundColor : null,
-        canvasBackground: canvas ? window.getComputedStyle(canvas).backgroundColor : null,
-        canvasOpacity: canvas ? window.getComputedStyle(canvas).opacity : null,
-        canvasSize:
-            canvas && "width" in canvas && "height" in canvas
-                ? {
-                      width: canvas.width,
-                      height: canvas.height,
-                      clientWidth: canvas.clientWidth,
-                      clientHeight: canvas.clientHeight,
-                  }
-                : null,
-        statusSnippet: statusRoot?.textContent?.replace(/\s+/g, " ").trim().slice(0, 180) ?? null,
-    };
-});
+const diagnostics = await collectViewerDiagnostics(page);
+const viewerLane = diagnostics.classification.viewerLane;
+const hostCapabilityLane = diagnostics.classification.hostCapabilityLane;
+const operationalMode = diagnostics.classification.operationalMode;
+const surfaceMode = diagnostics.classification.surfaceMode;
+const coverage = diagnostics.classification.coverage;
+const viewerProof = resolveViewerProof(diagnostics);
+const expectationSatisfied = expectedViewerLane === "any" || expectedViewerLane === viewerLane;
+const hydrationMismatchMessages = detectHydrationMismatchMessages(consoleMessages);
+const hydrationMismatchDetected = hydrationMismatchMessages.length > 0;
 
 console.log(
     JSON.stringify(
         {
             url,
             screenshotPath,
+            expectedViewerLane,
+            viewerLane,
+            hostCapabilityLane,
+            operationalMode,
+            surfaceMode,
+            coverage,
+            viewerProof,
+            expectationSatisfied,
+            forceWebgl2Unavailable,
+            failOnHydrationMismatch,
             diagnostics,
             consoleMessages,
+            hydrationMismatchDetected,
+            hydrationMismatchMessages,
             pageErrors,
             requestFailures,
             failingResponses,
@@ -110,3 +118,13 @@ console.log(
 );
 
 await browser.close();
+
+if (!expectationSatisfied) {
+    console.error(`viewer lane mismatch: expected ${expectedViewerLane}, received ${viewerLane}`);
+    process.exit(1);
+}
+
+if (failOnHydrationMismatch && hydrationMismatchDetected) {
+    console.error(`viewer hydration mismatch detected (${hydrationMismatchMessages.length} message${hydrationMismatchMessages.length === 1 ? "" : "s"})`);
+    process.exit(1);
+}

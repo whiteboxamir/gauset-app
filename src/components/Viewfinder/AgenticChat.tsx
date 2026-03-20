@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Sparkles, Send, X, ShieldAlert, Cpu } from "lucide-react";
+import { Sparkles, Send, X, Cpu } from "lucide-react";
 import type { Annotation } from "@/components/Viewfinder/AnnotationSystem";
 
 export interface AgentAction {
@@ -58,7 +58,7 @@ export function AgenticChat({ splatUrl, annotations, onAgentAction }: AgenticCha
             } else {
                 setMessages((prev) => [...prev, { role: "ai", content: "Error parsing agent command." }]);
             }
-        } catch (err) {
+        } catch {
             setMessages((prev) => [...prev, { role: "ai", content: "Connection to Agentic Layer failed." }]);
         } finally {
             setIsLoading(false);
@@ -105,7 +105,7 @@ export function AgenticChat({ splatUrl, annotations, onAgentAction }: AgenticCha
                         <div className="bg-indigo-500/10 border-b border-indigo-500/20 p-3 px-5 flex items-start gap-3">
                             <Sparkles className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
                             <p className="text-xs text-indigo-200/90 leading-relaxed">
-                                <strong className="text-indigo-400">AWS Workspace:</strong> Send commands to orchestrate the set (e.g., "Fly to the door", "Make it sunset").
+                                <strong className="text-indigo-400">Experimental workspace:</strong> Commands are simulated locally and do not call a live provider.
                             </p>
                         </div>
 

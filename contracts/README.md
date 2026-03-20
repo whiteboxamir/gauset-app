@@ -26,4 +26,6 @@ This directory documents the current repo-implemented API contract for the MVP e
 ## Files
 
 - `mvp-api.md`: human-readable endpoint contract snapshot, proxy behavior, backend diffs, and error handling.
-- `schemas/`: machine-readable JSON examples for the main request and response families.
+- `world-ingest.md`: named multi-source ingest contract for internal sources plus external world packages and third-party world-model outputs.
+- `downstream-handoff.md`: named downstream handoff contract for Unreal and related explicit delivery targets.
+- `schemas/`: machine-readable JSON examples for the main request and response families, plus world-ingest, review-package, and downstream-handoff fixtures.

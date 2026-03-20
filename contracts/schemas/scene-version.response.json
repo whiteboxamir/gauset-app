@@ -7,13 +7,185 @@
     "asset_count": 0,
     "has_environment": true
   },
+  "scene_document": {
+    "version": 2,
+    "rootIds": [
+      "splat_scene_093091ff"
+    ],
+    "nodes": {
+      "splat_scene_093091ff": {
+        "id": "splat_scene_093091ff",
+        "kind": "splat",
+        "parentId": null,
+        "childIds": [],
+        "name": "Saved environment",
+        "visible": true,
+        "locked": false,
+        "transform": {
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        }
+      }
+    },
+    "groups": {},
+    "cameras": {},
+    "lights": {},
+    "meshes": {},
+    "splats": {
+      "splat_scene_093091ff": {
+        "id": "splat_scene_093091ff",
+        "sceneId": "scene_093091ff",
+        "viewerUrl": "/api/mvp/storage/scenes/scene_093091ff/environment",
+        "splatUrl": "/api/mvp/storage/scenes/scene_093091ff/environment/splats.ply",
+        "camerasUrl": "/api/mvp/storage/scenes/scene_093091ff/environment/cameras.json",
+        "metadataUrl": "/api/mvp/storage/scenes/scene_093091ff/environment/metadata.json",
+        "metadata": {
+          "lane": "preview",
+          "truth_label": "Instant Preview",
+          "source_provenance": {
+            "version": "gauset.source_provenance.v1",
+            "source_id": "ingest_scene_093091ff_preview",
+            "source_kind": "single_image_preview",
+            "label": "Instant Preview Scout"
+          },
+          "world_source": {
+            "version": "gauset.world_source.v1",
+            "kind": "single_image_preview",
+            "label": "Instant Preview Scout",
+            "ingest_record_id": "ingest_scene_093091ff_preview"
+          },
+          "lane_metadata": {
+            "lane": "preview",
+            "blockers": [
+              "preview_not_reconstruction"
+            ]
+          },
+          "handoff_manifest": {
+            "status": "blocked",
+            "target_label": "Unreal preview scout",
+            "summary": "Preview scout only. Promote to reconstruction and approve review before downstream handoff.",
+            "blockers": [
+              "preview_not_reconstruction",
+              "review_not_approved"
+            ]
+          },
+          "delivery": {
+            "status": "blocked",
+            "summary": "Preview scout only. Promote to reconstruction and approve review before downstream handoff.",
+            "blockers": [
+              "preview_not_reconstruction",
+              "review_not_approved"
+            ]
+          }
+        }
+      }
+    },
+    "direction": {
+      "cameraViews": [
+        {
+          "id": "view_entry",
+          "label": "Entry 50mm",
+          "position": [
+            5,
+            4,
+            6
+          ],
+          "target": [
+            0,
+            0,
+            0
+          ],
+          "fov": 27,
+          "lens_mm": 50,
+          "note": "Hold the doorway reveal."
+        }
+      ],
+      "pins": [
+        {
+          "id": "pin_egress",
+          "label": "Left egress",
+          "type": "egress",
+          "position": [
+            1.2,
+            0.15,
+            -0.4
+          ],
+          "created_at": "2026-03-11T09:00:00.000Z"
+        }
+      ],
+      "directorPath": [
+        {
+          "time": 0,
+          "position": [
+            5,
+            4,
+            6
+          ],
+          "target": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "fov": 27
+        },
+        {
+          "time": 0.32,
+          "position": [
+            4.5,
+            4.1,
+            5.4
+          ],
+          "target": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0.1,
+            0,
+            0.99
+          ],
+          "fov": 27
+        }
+      ],
+      "directorBrief": "50mm push with clear left egress."
+    },
+    "review": null,
+    "viewer": {
+      "fov": 27,
+      "lens_mm": 50,
+      "activeCameraNodeId": null
+    }
+  },
   "scene_graph": {
     "environment": {
       "id": "scene_093091ff",
       "urls": {
         "splats": "/api/mvp/storage/scenes/scene_093091ff/environment/splats.ply",
         "cameras": "/api/mvp/storage/scenes/scene_093091ff/environment/cameras.json",
-        "metadata": "/api/mvp/storage/scenes/scene_093091ff/environment/metadata.json"
+        "metadata": "/api/mvp/storage/scenes/scene_093091ff/environment/metadata.json",
+        "preview_projection": "/api/mvp/storage/scenes/scene_093091ff/environment/preview-projection.png"
       },
       "files": {
         "splats": "/Users/amirboz/gauset-app/scenes/scene_093091ff/environment/splats.ply",
@@ -21,6 +193,85 @@
         "metadata": "/Users/amirboz/gauset-app/scenes/scene_093091ff/environment/metadata.json"
       }
     },
-    "assets": []
+    "assets": [],
+    "camera_views": [
+      {
+        "id": "view_entry",
+        "label": "Entry 50mm",
+        "position": [
+          5,
+          4,
+          6
+        ],
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "fov": 27,
+        "lens_mm": 50,
+        "note": "Hold the doorway reveal."
+      }
+    ],
+    "pins": [
+      {
+        "id": "pin_egress",
+        "label": "Left egress",
+        "type": "egress",
+        "position": [
+          1.2,
+          0.15,
+          -0.4
+        ],
+        "created_at": "2026-03-11T09:00:00.000Z"
+      }
+    ],
+    "director_path": [
+      {
+        "time": 0,
+        "position": [
+          5,
+          4,
+          6
+        ],
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "fov": 27
+      },
+      {
+        "time": 0.32,
+        "position": [
+          4.5,
+          4.1,
+          5.4
+        ],
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0.1,
+          0,
+          0.99
+        ],
+        "fov": 27
+      }
+    ],
+    "director_brief": "50mm push with clear left egress.",
+    "viewer": {
+      "fov": 27,
+      "lens_mm": 50
+    }
   }
 }

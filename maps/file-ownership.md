@@ -1,82 +1,67 @@
 # File Ownership Matrix
 
-This matrix is tuned for parallel work. "Runtime-critical" means a change can break the current app without touching any other layer.
+Date: March 18, 2026
 
-## Ownership Matrix
+Status: Active from `codex/truth-freeze-baseline-20260318`. New implementation lanes should start from this baseline in fresh worktrees.
 
-| Zone | Purpose | Runtime-Critical | Conflict Risk | Isolation Guidance |
-| --- | --- | --- | --- | --- |
-| `src/app/mvp`, `src/app/mvp/review` | Active MVP editor and read-only review routes | High | High | Keep one owner at a time unless work is split cleanly between editor shell and review shell |
-| `src/components/Editor` | MVP upload, generation, viewer, save, review, comment UI | High | High | Shared hot path; any UI contract change here usually requires backend awareness |
-| `src/lib/mvp-api.ts`, `src/lib/mvp-product.ts`, `src/lib/mvp-review.ts` | Shared MVP URL helpers and payload normalization | High | High | Treat as contract files, not as leaf utilities |
-| `src/app/api/mvp/[...path]/route.ts` | Sole transport bridge from Next to Python backend | High | Very High | Single-owner zone; path or header changes affect all MVP flows |
-| `backend/server.py`, `backend/api`, `backend/models` | Local backend, local storage mounts, model wrappers, local reconstruction | High | High | Separate owner from frontend if possible; coordinate on payload shape only |
-| `vercel-backend` | Deployed Python backend, storage backend abstraction, `/storage` proxy | High | High | Separate owner from local backend only if a clear API contract freeze exists |
-| `uploads`, `assets`, `scenes`, `captures`, `reconstruction_cache` | Runtime-generated state and artifacts | High state impact | Medium | Do not use for source edits; safe to inspect, unsafe as a merge surface |
-| `src/app/pro`, `src/components/Viewfinder`, `src/app/api/generate`, `src/app/api/agent`, `src/app/api/interrogate` | Separate prototype workspace and mock APIs | Medium | Low | Good isolated thread; does not use `/api/mvp` |
-| `src/app/login`, `src/app/dashboard`, `src/app/api/waitlist`, `src/app/api/auth/logout`, `src/app/actions.ts`, `src/lib/db.ts`, `src/lib/supabase.ts` | Auth, waitlist, lightweight app shell state | Medium | Low to Medium | Good isolated thread; overlap mostly limited to shared styling and env config |
-| `src/components/ui/LoginForm.tsx`, `src/components/ui/BackgroundNoise.tsx` | UI used by active login/dashboard routes | Medium | Low | Safe as long as auth owners coordinate |
-| `src/components/experience`, `src/components/layout` | Currently unwired experience/marketing components | Low | Low | Strong low-conflict zone; confirm future intent before major rewrites |
-| `src/components/ui/WaitlistForm.tsx`, `SuccessOverlay.tsx`, `GlitchText.tsx`, `EngineSimulation.tsx`, `WordFadeIn.tsx`, `FadeIn.tsx` | Mostly tied to dormant experience components | Low | Low | Safe isolated work; low immediate app risk |
-| `public` | Static media assets | Low | Low | Usually isolated unless an active page starts referencing them |
-| `tests`, `scripts` | Validation, smoke coverage, audits | Low runtime risk | Medium contract risk | Safe parallel work if tests track existing contracts rather than redefine them |
-| `docs`, `maps`, empty `contracts`, empty `runbooks` | Documentation and planning | None | Low | Best zone for analysis-only work |
-| `package.json`, `next.config.mjs`, `setup.sh` | Repo-wide build/runtime/config | Very High | Very High | Never split casually; single-owner changes only |
-| `backend/ml-sharp`, `backend/TripoSR` | Vendored model repos used by local backend | High local impact | Medium | Avoid concurrent edits unless doing model integration work only |
+Base reference:
 
-## Highest-Risk Shared Files
+- `/Users/amirboz/gauset-app/docs/post-merge-truth-freeze-baseline.md`
 
-If two threads touch any of these, expect rebasing and behavior drift:
+## Stop-Sign Surfaces
 
-- `src/app/api/mvp/[...path]/route.ts`
-- `src/lib/mvp-product.ts`
+- `src/app/mvp/_components/MVPWorkspaceRuntime.tsx`
+- `src/components/Editor/ViewerPanel.tsx`
 - `src/components/Editor/LeftPanel.tsx`
 - `src/components/Editor/RightPanel.tsx`
 - `src/components/Editor/ThreeOverlay.tsx`
-- `src/app/mvp/page.tsx`
-- `backend/api/routes.py`
-- `vercel-backend/app.py`
+- `src/app/api/mvp/[...path]/route.ts`
+- `src/components/Editor/useThreeOverlayViewerRuntimeController.ts`
+- `src/components/Editor/useThreeOverlaySurfaceController.ts` when shell semantics are touched
+- `src/components/Editor/useViewerPanelController.ts` when toolbar action semantics are touched
+- `package.json`
+- `next.config.mjs`
+- `tsconfig.json`
+- `src/app/layout.tsx`
+- `src/app/globals.css`
 
-## Best Non-Overlapping Thread Lanes
+These files remain high-conflict and require deliberate single-owner coordination.
 
-Use these lanes when splitting work:
+## Ownership Matrix
 
-1. MVP frontend lane
-   - Owns: `src/app/mvp`, `src/components/Editor`, `src/lib/mvp-*`
-   - Avoids: both Python backends unless a contract change is explicitly coordinated
+| Zone | Purpose | Runtime Critical | Conflict Risk | Guidance |
+| --- | --- | --- | --- | --- |
+| Viewer-first stop-sign set | `/mvp` shell composition and transport chokepoints | Very High | Stop-sign | Only edit in isolated owner lanes |
+| World-workflow entrypoints | authenticated `/app` landing flow and world-library framing | Medium | Medium | Safe first refocus lane from the new baseline |
+| Contracts + validation | product contracts, schema/runtime drift, scenario gates | High | High | Keep canonical interfaces aligned with runtime truth |
+| `backend`, `backend/api` | local ingest/save/public truth plumbing | High | High | Coordinate via explicit contracts and tests |
+| `vercel-backend` | public runtime parity | High | High | Keep public truth honest and separate from local assumptions |
+| `src/server/projects`, `src/server/review-shares`, `src/components/worlds` | project/world/review-share truth and lifecycle | High | High | Avoid reopening Wave 0 truth work during Wave 1 |
+| `docs`, `maps`, `scripts/test_*`, `tests/*` | verification and coordination surface | Low | Medium | Safe for baseline and gate updates |
 
-2. Local backend lane
-   - Owns: `backend/server.py`, `backend/api`, `backend/models`
-   - Avoids: `vercel-backend`, frontend UI files
+## Branch Ownership
 
-3. Vercel backend lane
-   - Owns: `vercel-backend`
-   - Avoids: local backend internals unless intentionally syncing contracts
+- `codex/truth-freeze-baseline-20260318`
+  - owns baseline docs and stop-sign coordination
+- `codex/world-workflow-refocus-entrypoints`
+  - owns:
+    - `src/app/(app)/app/page.tsx`
+    - `src/app/(app)/layout.tsx`
+    - `src/app/(app)/app/worlds/page.tsx`
+    - `src/components/platform/Sidebar.tsx`
+    - world-library framing surfaces that do not depend on freshly changed review-share internals
+  - avoids:
+    - `src/components/Editor/RightPanel.tsx`
+    - `src/lib/mvp-review.ts`
+    - `backend/api/routes.py`
+    - `vercel-backend/app.py`
+    - `src/components/worlds/ReviewSharePanel.tsx`
+- `codex/world-workflow-refocus-contracts`
+  - owns canonical `world-ingest/v1` and `downstream-handoff/v1` runtime interfaces after Wave 1
 
-4. Pro workspace lane
-   - Owns: `src/app/pro`, `src/components/Viewfinder`, mock API routes under `src/app/api/{generate,agent,interrogate}`
-   - Avoids: MVP proxy and Python backend
+## Exit Condition
 
-5. Auth/waitlist lane
-   - Owns: login/dashboard/waitlist/actions/db/supabase
-   - Avoids: MVP stack
-
-6. Validation and docs lane
-   - Owns: `tests`, `scripts`, `docs`, `maps`
-   - Avoids: product code unless fixing broken tests
-
-## Areas That Look Isolated But Are Not
-
-- `src/lib/mvp-product.ts`: looks like a small helper file but defines the frontend interpretation of backend capabilities and metadata.
-- `src/components/Editor/ViewerPanel.tsx`: looks visual-only but it drives the active scene state presented to save/review flows.
-- `backend/api/routes.py` vs `vercel-backend/app.py`: similar API shape, different implementation details; changing only one creates environment-specific bugs.
-- Runtime data directories: safe to inspect, but generated files can mislead developers if treated as source of truth instead of outputs.
-
-## Areas That Are Actually Safe
-
-- `src/components/Viewfinder/*`
-- `src/app/pro/page.tsx`
-- dormant experience/layout components
-- docs, maps, and test-only automation scripts
-
-Those zones have low direct coupling to the live MVP request spine.
+- New lanes start from `codex/truth-freeze-baseline-20260318`
+- Stop-sign surfaces stay isolated
+- Wave 1 keeps its scope to authenticated `/app` product-centering surfaces
+- Later contract work builds on the verified truth/save/public-readiness hardening instead of reopening it

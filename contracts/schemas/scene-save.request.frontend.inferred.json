@@ -1,5 +1,179 @@
 {
   "scene_id": "scene_093091ff",
+  "scene_document": {
+    "version": 2,
+    "rootIds": [
+      "splat_scene_093091ff",
+      "mesh_asset_0a26ff14"
+    ],
+    "nodes": {
+      "splat_scene_093091ff": {
+        "id": "splat_scene_093091ff",
+        "kind": "splat",
+        "parentId": null,
+        "childIds": [],
+        "name": "Preview environment",
+        "visible": true,
+        "locked": false,
+        "transform": {
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        }
+      },
+      "mesh_asset_0a26ff14": {
+        "id": "mesh_asset_0a26ff14",
+        "kind": "mesh",
+        "parentId": null,
+        "childIds": [],
+        "name": "asset_0a26ff14",
+        "visible": true,
+        "locked": false,
+        "transform": {
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        }
+      }
+    },
+    "groups": {},
+    "cameras": {},
+    "lights": {},
+    "meshes": {
+      "mesh_asset_0a26ff14": {
+        "id": "mesh_asset_0a26ff14",
+        "assetId": "asset_0a26ff14",
+        "meshUrl": "/api/mvp/storage/assets/asset_0a26ff14/mesh.glb",
+        "textureUrl": "/api/mvp/storage/assets/asset_0a26ff14/texture.png",
+        "previewUrl": "/api/mvp/storage/assets/asset_0a26ff14/preview.png",
+        "metadata": {}
+      }
+    },
+    "splats": {
+      "splat_scene_093091ff": {
+        "id": "splat_scene_093091ff",
+        "sceneId": "scene_093091ff",
+        "viewerUrl": "/api/mvp/storage/scenes/scene_093091ff/environment",
+        "splatUrl": "/api/mvp/storage/scenes/scene_093091ff/environment/splats.ply",
+        "camerasUrl": "/api/mvp/storage/scenes/scene_093091ff/environment/cameras.json",
+        "metadataUrl": "/api/mvp/storage/scenes/scene_093091ff/environment/metadata.json",
+        "metadata": {
+          "lane": "preview",
+          "truth_label": "Instant Preview",
+          "quality_tier": "single_image_preview"
+        }
+      }
+    },
+    "direction": {
+      "cameraViews": [
+        {
+          "id": "view_entry",
+          "label": "Entry 50mm",
+          "position": [
+            5,
+            4,
+            6
+          ],
+          "target": [
+            0,
+            0,
+            0
+          ],
+          "fov": 27,
+          "lens_mm": 50,
+          "note": "Hold the doorway reveal."
+        }
+      ],
+      "pins": [
+        {
+          "id": "pin_egress",
+          "label": "Left egress",
+          "type": "egress",
+          "position": [
+            1.2,
+            0.15,
+            -0.4
+          ],
+          "created_at": "2026-03-11T09:00:00.000Z"
+        }
+      ],
+      "directorPath": [
+        {
+          "time": 0,
+          "position": [
+            5,
+            4,
+            6
+          ],
+          "target": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "fov": 27
+        },
+        {
+          "time": 0.32,
+          "position": [
+            4.5,
+            4.1,
+            5.4
+          ],
+          "target": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0.1,
+            0,
+            0.99
+          ],
+          "fov": 27
+        }
+      ],
+      "directorBrief": "50mm push with clear left egress."
+    },
+    "review": null,
+    "viewer": {
+      "fov": 27,
+      "lens_mm": 50,
+      "activeCameraNodeId": null
+    }
+  },
   "scene_graph": {
     "environment": {
       "id": "scene_093091ff",
@@ -7,7 +181,8 @@
       "urls": {
         "splats": "/api/mvp/storage/scenes/scene_093091ff/environment/splats.ply",
         "cameras": "/api/mvp/storage/scenes/scene_093091ff/environment/cameras.json",
-        "metadata": "/api/mvp/storage/scenes/scene_093091ff/environment/metadata.json"
+        "metadata": "/api/mvp/storage/scenes/scene_093091ff/environment/metadata.json",
+        "preview_projection": "/api/mvp/storage/scenes/scene_093091ff/environment/preview-projection.png"
       },
       "files": {
         "splats": "/Users/amirboz/gauset-app/scenes/scene_093091ff/environment/splats.ply",
@@ -44,7 +219,86 @@
           1
         ]
       }
-    ]
+    ],
+    "camera_views": [
+      {
+        "id": "view_entry",
+        "label": "Entry 50mm",
+        "position": [
+          5,
+          4,
+          6
+        ],
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "fov": 27,
+        "lens_mm": 50,
+        "note": "Hold the doorway reveal."
+      }
+    ],
+    "pins": [
+      {
+        "id": "pin_egress",
+        "label": "Left egress",
+        "type": "egress",
+        "position": [
+          1.2,
+          0.15,
+          -0.4
+        ],
+        "created_at": "2026-03-11T09:00:00.000Z"
+      }
+    ],
+    "director_path": [
+      {
+        "time": 0,
+        "position": [
+          5,
+          4,
+          6
+        ],
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "fov": 27
+      },
+      {
+        "time": 0.32,
+        "position": [
+          4.5,
+          4.1,
+          5.4
+        ],
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0.1,
+          0,
+          0.99
+        ],
+        "fov": 27
+      }
+    ],
+    "director_brief": "50mm push with clear left egress.",
+    "viewer": {
+      "fov": 27,
+      "lens_mm": 50
+    }
   },
   "source": "manual"
 }

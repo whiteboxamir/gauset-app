@@ -1,0 +1,39 @@
+{
+  "contract": "world-ingest/v1",
+  "request_id": "ingest_req_worldmodel_backlot_01",
+  "source": {
+    "kind": "third_party_world_model_output",
+    "label": "Backlot reconstruction drop",
+    "vendor": "nerfstudio",
+    "format": "splatfacto/gaussian-splat/v1",
+    "captured_at": "2026-03-15T02:12:00.000Z",
+    "source_uri": "s3://partner-drop/backlot-reconstruction/output/"
+  },
+  "package": {
+    "media_type": "application/json",
+    "checksum_sha256": "db2d3c566f62b8f1ca9245233bfb9412ef483dc1d9b1f66e92da31088d8ac2f0",
+    "entrypoints": {
+      "environment_splat": "output/environment/splats.ply",
+      "metadata": "output/environment/metadata.json",
+      "reference_image": "output/reference/source-frame.png"
+    },
+    "files": [
+      {
+        "path": "output/environment/splats.ply",
+        "kind": "environment_splat"
+      },
+      {
+        "path": "output/environment/metadata.json",
+        "kind": "metadata"
+      },
+      {
+        "path": "output/reference/source-frame.png",
+        "kind": "reference_image"
+      }
+    ]
+  },
+  "binding": {
+    "project_id": "proj_backlot_scout_01",
+    "scene_id": null
+  }
+}

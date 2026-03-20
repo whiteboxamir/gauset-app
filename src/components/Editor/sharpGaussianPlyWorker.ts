@@ -1,12 +1,18 @@
 /// <reference lib="webworker" />
 
 import { DataUtils } from "three";
+import {
+    MAX_CHUNK_OCTREE_LEVEL,
+    MAX_POINTS_PER_CHUNK,
+    SH_MAX_BASIS_COUNT,
+    SH_REST_COMPONENT_COUNT,
+    TARGET_POINTS_PER_CHUNK,
+    type SerializedSharpGaussianChunk,
+    type SerializedSharpGaussianPayload,
+    type SharpGaussianColorPayloadMode as ColorPayloadMode,
+    type SharpGaussianDebugSample as SerializedSharpGaussianDebugSample,
+} from "./sharpGaussianShared";
 
-const SH_REST_COMPONENT_COUNT = 45;
-const SH_MAX_BASIS_COUNT = SH_REST_COMPONENT_COUNT / 3;
-const TARGET_POINTS_PER_CHUNK = 16384;
-const MAX_POINTS_PER_CHUNK = 32768;
-const MAX_CHUNK_OCTREE_LEVEL = 6;
 const PROGRESS_INTERVAL = 262144;
 const HALF_FLOAT_MAX = 65504;
 const DEFAULT_SPLAT_SCALE = 0.02;
@@ -15,8 +21,6 @@ const PREVIEW_FOCUS_MIN_QUANTILE = 0.12;
 const PREVIEW_FOCUS_MAX_QUANTILE = 0.88;
 const PREVIEW_FOCUS_RADIUS_QUANTILE = 0.9;
 const PREVIEW_FOCUS_RADIUS_MARGIN = 1.08;
-
-type ColorPayloadMode = "albedo_linear" | "albedo_srgb" | "sh_dc";
 
 type WorkerProperty = {
     name: string;
@@ -53,58 +57,12 @@ type WorkerChunk = {
     bounds: WorkerBounds;
 };
 
-type SerializedSharpGaussianChunk = {
-    start: number;
-    count: number;
-    code: number;
-    boundingBoxMin: [number, number, number];
-    boundingBoxMax: [number, number, number];
-    boundingSphereCenter: [number, number, number];
-    boundingSphereRadius: number;
-};
-
-type SerializedSharpGaussianDebugSample = {
-    sampleIndex: number;
-    sourceIndex: number;
-    position: [number, number, number];
-    scale: [number, number, number];
-    color: [number, number, number];
-    colorPayloadMode: ColorPayloadMode;
-};
-
-type SerializedSharpGaussianPayload = {
-    centerAlphaData: Uint16Array;
-    colorData: Uint16Array;
-    scaleData: Uint16Array;
-    rotationData: Uint16Array;
-    shData: Uint16Array;
-    shTextureWidth: number;
-    shTextureHeight: number;
-    shTextureDepth: number;
-    colorPayloadMode: ColorPayloadMode;
-    shBasisCount: number;
-    textureWidth: number;
-    textureHeight: number;
-    count: number;
-    chunks: SerializedSharpGaussianChunk[];
-    sceneRadius: number;
-    boundingBoxMin: [number, number, number];
-    boundingBoxMax: [number, number, number];
-    boundingSphereCenter: [number, number, number];
-    boundingSphereRadius: number;
-    previewFocusCenter: [number, number, number];
-    previewFocusRadius: number;
-    previewFocusForward: [number, number, number];
-    debugSamples: SerializedSharpGaussianDebugSample[];
-};
-
 type ParseRequest = {
     type: "parse";
     buffer: ArrayBuffer;
     pointBudget: number;
     maxTextureSize: number;
     colorEncoding?: string | null;
-    isSingleImagePreview?: boolean;
     applyPreviewOrientation?: boolean;
 };
 
@@ -575,8 +533,6 @@ function parseHeader(data: ArrayBuffer): WorkerHeader {
     const bytes = new Uint8Array(data);
     const { headerText, headerLength } = readHeader(bytes);
     const lines = headerText.split(/\r\n|\r|\n/);
-    const elements: WorkerElement[] = [];
-    let currentElement: WorkerElement | null = null;
 
     for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
         const rawLine = lines[lineIndex].trim();
@@ -752,14 +708,12 @@ export function parsePackedSharpGaussianPayload({
     pointBudget,
     maxTextureSize,
     colorEncoding,
-    isSingleImagePreview = false,
     applyPreviewOrientation = false,
 }: {
     buffer: ArrayBuffer;
     pointBudget: number;
     maxTextureSize: number;
     colorEncoding?: string | null;
-    isSingleImagePreview?: boolean;
     applyPreviewOrientation?: boolean;
 }): SerializedSharpGaussianPayload {
     const header = parseHeader(buffer);
@@ -1153,7 +1107,6 @@ if (typeof self !== "undefined") {
                 pointBudget: event.data.pointBudget,
                 maxTextureSize: event.data.maxTextureSize,
                 colorEncoding: event.data.colorEncoding,
-                isSingleImagePreview: event.data.isSingleImagePreview,
                 applyPreviewOrientation: event.data.applyPreviewOrientation,
             });
 

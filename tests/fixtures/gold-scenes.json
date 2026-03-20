@@ -1,0 +1,95 @@
+[
+  {
+    "scene_id": "scene_benchmark_5m",
+    "label": "5M Stability Fixture",
+    "expectation": "stability",
+    "fixture_kind": "synthetic_benchmark",
+    "premium_gates": {
+      "max_frame_p95_ms": 33,
+      "max_frame_over_50_ratio": 0.02,
+      "max_context_loss_count": 0
+    }
+  },
+  {
+    "scene_id": "scene_gold_cinematic_ribbons",
+    "label": "Cinematic Ribbons",
+    "expectation": "beauty",
+    "fixture_kind": "synthetic_gold",
+    "hero_view_id": "hero-ribbons",
+    "shots": [
+      { "id": "hero-ribbons", "label": "Hero still", "kind": "still" },
+      { "id": "orbit-ribbons", "label": "Slow orbit", "kind": "motion" }
+    ],
+    "camera_views": [
+      {
+        "id": "hero-ribbons",
+        "label": "Hero still",
+        "position": [0.4, 0.55, 7.6],
+        "target": [0.0, 0.2, 0.0],
+        "fov": 40,
+        "lens_mm": 43,
+        "note": "Balanced hero composition across the ribbon span."
+      },
+      {
+        "id": "orbit-ribbons",
+        "label": "Slow orbit",
+        "position": [2.4, 0.7, 6.9],
+        "target": [0.0, 0.25, 0.0],
+        "fov": 42,
+        "lens_mm": 40,
+        "note": "Parallax-friendly orbit start for motion certification."
+      }
+    ],
+    "director_path": [
+      { "time": 0, "position": [2.4, 0.7, 6.9], "target": [0.0, 0.25, 0.0], "rotation": [0, 0, 0, 1], "fov": 42 },
+      { "time": 3.5, "position": [-2.2, 0.75, 6.5], "target": [0.0, 0.22, 0.0], "rotation": [0, 0, 0, 1], "fov": 42 }
+    ],
+    "premium_gates": {
+      "min_visual_richness_score": 16,
+      "max_frame_p95_ms": 33,
+      "max_frame_over_50_ratio": 0.02,
+      "max_context_loss_count": 0
+    }
+  },
+  {
+    "scene_id": "scene_gold_luminous_atrium",
+    "label": "Luminous Atrium",
+    "expectation": "beauty",
+    "fixture_kind": "synthetic_gold",
+    "hero_view_id": "hero-atrium",
+    "shots": [
+      { "id": "hero-atrium", "label": "Hero still", "kind": "still" },
+      { "id": "push-atrium", "label": "Push in", "kind": "motion" }
+    ],
+    "camera_views": [
+      {
+        "id": "hero-atrium",
+        "label": "Hero still",
+        "position": [0.0, 0.9, 8.2],
+        "target": [0.0, 0.25, 0.0],
+        "fov": 38,
+        "lens_mm": 46,
+        "note": "Centered architectural hero shot."
+      },
+      {
+        "id": "push-atrium",
+        "label": "Push in",
+        "position": [0.0, 1.1, 9.1],
+        "target": [0.0, 0.4, 0.0],
+        "fov": 36,
+        "lens_mm": 49,
+        "note": "Forward motion path for shimmer and pacing checks."
+      }
+    ],
+    "director_path": [
+      { "time": 0, "position": [0.0, 1.1, 9.1], "target": [0.0, 0.4, 0.0], "rotation": [0, 0, 0, 1], "fov": 36 },
+      { "time": 3.0, "position": [0.0, 0.95, 7.2], "target": [0.0, 0.35, 0.0], "rotation": [0, 0, 0, 1], "fov": 35 }
+    ],
+    "premium_gates": {
+      "min_visual_richness_score": 16,
+      "max_frame_p95_ms": 33,
+      "max_frame_over_50_ratio": 0.02,
+      "max_context_loss_count": 0
+    }
+  }
+]

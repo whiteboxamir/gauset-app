@@ -28,11 +28,11 @@ export function AssetOrchestrator({ onImportComplete }: AssetOrchestratorProps) 
     const [importStep, setImportStep] = useState(0);
 
     const importPhases = [
-        { name: "Phase 1: Backend Resolve & QuarkXR Auth", delay: 800 },
-        { name: "Phase 2: Downloading Core Asset", delay: 1500 },
-        { name: "Phase 3: Client ACK Flow & Validation", delay: 600 },
-        { name: "Phase 4: Applying Dynamic Lighting Presets", delay: 900 },
-        { name: "Phase 5: Environment Ready", delay: 400 },
+        { name: "Phase 1: Selecting asset source", delay: 800 },
+        { name: "Phase 2: Loading preview fixture", delay: 1500 },
+        { name: "Phase 3: Validating scene inputs", delay: 600 },
+        { name: "Phase 4: Applying lighting preset", delay: 900 },
+        { name: "Phase 5: Scene ready", delay: 400 },
     ];
 
     const handleImport = async () => {
@@ -53,8 +53,11 @@ export function AssetOrchestrator({ onImportComplete }: AssetOrchestratorProps) 
         <div className="bg-black/80 backdrop-blur-2xl p-5 rounded-2xl border border-white/10 shadow-2xl mb-4 w-full relative overflow-hidden text-sm">
             <div className="flex items-center gap-3 mb-4">
                 <Server className="w-5 h-5 text-indigo-400" />
-                <h3 className="text-white font-bold uppercase tracking-wider text-xs">Environment Orchestrator</h3>
+                <h3 className="text-white font-bold uppercase tracking-wider text-xs">Environment Fixture Orchestrator</h3>
             </div>
+            <p className="mb-4 text-[11px] leading-5 text-white/35">
+                These demo sources are prewired preview fixtures, not live provider calls.
+            </p>
 
             <AnimatePresence mode="wait">
                 {!isImporting ? (
@@ -84,7 +87,7 @@ export function AssetOrchestrator({ onImportComplete }: AssetOrchestratorProps) 
 
                         {/* URL Input */}
                         <div>
-                            <label className="text-white/50 text-[10px] uppercase font-bold tracking-widest mb-1.5 block">Asset Source URL</label>
+                            <label className="text-white/50 text-[10px] uppercase font-bold tracking-widest mb-1.5 block">Preview Source URL</label>
                             <input
                                 type="text"
                                 value={url}
@@ -132,7 +135,6 @@ export function AssetOrchestrator({ onImportComplete }: AssetOrchestratorProps) 
                             {importPhases.map((phase, idx) => {
                                 const isPast = idx < importStep;
                                 const isActive = idx === importStep;
-                                const isFuture = idx > importStep;
 
                                 return (
                                     <div key={idx} className={`flex items-center gap-3 text-xs ${isActive ? "text-indigo-400" : isPast ? "text-white/60" : "text-white/20"} font-medium transition-colors`}>

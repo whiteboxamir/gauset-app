@@ -1,10 +1,18 @@
 import fs from "fs/promises";
 import path from "path";
 import crypto from "crypto";
+import hostGuard from "./mvp_host_guard.cjs";
 
-const BASE = process.env.GAUSET_MVP_BASE_URL || "http://127.0.0.1:3015";
+const { assertLocalMvpBaseUrl } = hostGuard;
+
+const BASE = assertLocalMvpBaseUrl(
+  process.env.GAUSET_MVP_BASE_URL || "http://localhost:3015",
+  "scripts/hostile_local_reconstruction_audit.mjs",
+);
 const FIXTURE_DIR = path.resolve("tests/fixtures/public-scenes");
-const REPORT_PATH = path.resolve("test-results/local-reconstruction/hostile-audit-report.json");
+const REPORT_PATH = path.resolve(
+  process.env.GAUSET_HOSTILE_LOCAL_REPORT_PATH || "artifacts/local-reconstruction/hostile-audit-report.json",
+);
 const CAPTURE_FRAMES = Number(process.env.GAUSET_CAPTURE_FRAMES || "8");
 const API_BASE = `${BASE}/api/mvp`;
 
@@ -63,6 +71,16 @@ async function createCaptureSession() {
   return payload;
 }
 
+async function fetchSetupStatus() {
+  const { response, payload } = await jsonFetch(`${API_BASE}/setup/status`, {
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    throw new Error(`setup status failed: ${response.status} ${JSON.stringify(payload)}`);
+  }
+  return payload;
+}
+
 async function addCaptureFrames(sessionId, imageIds) {
   const { response, payload } = await jsonFetch(`${API_BASE}/capture/session/${sessionId}/frames`, {
     method: "POST",
@@ -83,6 +101,17 @@ async function startReconstruction(sessionId) {
     throw new Error(`reconstruction start failed: ${response.status} ${JSON.stringify(payload)}`);
   }
   return payload;
+}
+
+async function probeUnavailableReconstruction(sessionId) {
+  const { response, payload } = await jsonFetch(`${API_BASE}/reconstruct/session/${sessionId}`, {
+    method: "POST",
+  });
+  return {
+    status: response.status,
+    ok: response.ok,
+    payload,
+  };
 }
 
 async function pollJob(jobId) {
@@ -196,13 +225,59 @@ function classify(metadata, cameras, ply) {
   return failures;
 }
 
+function classifyTruthfulUnavailable(setupStatus, captureReady, reconstructionProbe) {
+  const failures = [];
+  const reconstructionCapability = setupStatus?.capabilities?.reconstruction;
+  const laneTruth = String(setupStatus?.lane_truth?.reconstruction || "");
+  const blockers = Array.isArray(captureReady?.reconstruction_blockers) ? captureReady.reconstruction_blockers : [];
+  const captureStatus = String(captureReady?.status || "");
+  const hasDuplicateGuard = blockers.some((blocker) => /distinct camera positions|duplicate|near-identical/i.test(String(blocker)));
+  const reconstructionDetail = String(
+    reconstructionProbe?.payload?.detail ?? reconstructionProbe?.payload?.raw ?? "",
+  );
+
+  if (reconstructionCapability?.available !== false) {
+    failures.push(`reconstruction_available=${String(reconstructionCapability?.available)}`);
+  }
+  if (laneTruth !== "gpu_worker_not_connected") {
+    failures.push(`lane_truth=${laneTruth || "missing"}`);
+  }
+  if (captureReady?.ready_for_reconstruction) {
+    failures.push(`capture_ready=${String(Boolean(captureReady?.ready_for_reconstruction))}`);
+  }
+  if (captureStatus !== "blocked") {
+    failures.push(`capture_status=${captureStatus || "missing"}`);
+  }
+  if (!hasDuplicateGuard) {
+    failures.push("capture_blockers_missing_duplicate_guard");
+  }
+  if (!reconstructionProbe || reconstructionProbe.ok) {
+    failures.push(`reconstruction_probe_status=${String(reconstructionProbe?.status ?? "missing")}`);
+  } else if (Number(reconstructionProbe.status) === 422) {
+    if (!/duplicate|unique|capture|overlap/i.test(reconstructionDetail)) {
+      failures.push(`reconstruction_probe_status=${String(reconstructionProbe.status)}`);
+    }
+  } else if (![404, 405, 410, 501, 503].includes(Number(reconstructionProbe.status))) {
+    failures.push(`reconstruction_probe_status=${String(reconstructionProbe.status)}`);
+  }
+
+  return failures;
+}
+
 async function main() {
   await fs.mkdir(path.dirname(REPORT_PATH), { recursive: true });
+  const setupStatus = await fetchSetupStatus();
+  const reconstructionAvailable = Boolean(setupStatus?.capabilities?.reconstruction?.available);
 
   const report = {
     base: BASE,
     executed_at: new Date().toISOString(),
     capture_frames: CAPTURE_FRAMES,
+    mode: reconstructionAvailable ? "live_reconstruction" : "truthful_capture_only",
+    setup_status: {
+      lane_truth: setupStatus?.lane_truth ?? null,
+      capabilities: setupStatus?.capabilities ?? null,
+    },
     summary: {
       waves: WAVES.length,
       passed_hostile_checks: 0,
@@ -225,6 +300,27 @@ async function main() {
       capture.session_id,
       uploads.map((upload) => upload.image_id),
     );
+
+    if (!reconstructionAvailable) {
+      const reconstructionProbe = await probeUnavailableReconstruction(capture.session_id);
+      const failures = classifyTruthfulUnavailable(setupStatus, captureReady, reconstructionProbe);
+
+      report.waves.push({
+        name: wave.name,
+        fixture: wave.file,
+        session_id: capture.session_id,
+        scene_id: null,
+        duration_ms: Date.now() - startedAt,
+        capture_ready: Boolean(captureReady.ready_for_reconstruction),
+        capture_status: captureReady.status,
+        frame_count: captureReady.frame_count,
+        reconstruction_blockers: captureReady.reconstruction_blockers ?? [],
+        reconstruction_probe: reconstructionProbe,
+        hostile_failures: failures,
+      });
+      continue;
+    }
+
     const reconstruction = await startReconstruction(capture.session_id);
     const jobId = reconstruction.job_id || reconstruction.scene_id;
     const job = await pollJob(jobId);
@@ -254,6 +350,9 @@ async function main() {
 
   const wavesByHash = new Map();
   for (const wave of report.waves) {
+    if (!wave.ply?.sha256) {
+      continue;
+    }
     const key = wave.ply.sha256;
     if (!wavesByHash.has(key)) {
       wavesByHash.set(key, []);
@@ -266,7 +365,7 @@ async function main() {
     if (names.length > 1) {
       duplicateHashes.push({ sha256, waves: names });
       for (const wave of report.waves) {
-        if (wave.ply.sha256 === sha256) {
+        if (wave.ply?.sha256 === sha256) {
           wave.hostile_failures.push(`duplicate_splats_hash=${sha256.slice(0, 12)}`);
         }
       }
@@ -280,6 +379,9 @@ async function main() {
 
   await fs.writeFile(REPORT_PATH, JSON.stringify(report, null, 2));
   console.log(JSON.stringify(report, null, 2));
+  if (report.summary.failed_hostile_checks > 0) {
+    process.exitCode = 1;
+  }
 }
 
 main().catch((error) => {

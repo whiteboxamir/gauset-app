@@ -1,10 +1,16 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { Play, Sparkles, Scissors, Trash2, SlidersHorizontal } from "lucide-react";
+import { Sparkles, Scissors, Trash2, SlidersHorizontal } from "lucide-react";
+
+type TimelinePathFrame = {
+    time: number;
+    position: [number, number, number];
+    rotation: [number, number, number, number];
+};
 
 interface TimelineEditorProps {
-    pathData: any[];
+    pathData: TimelinePathFrame[];
     onGenerate: () => void;
     onDiscard: () => void;
 }
@@ -36,7 +42,7 @@ export function TimelineEditor({ pathData, onGenerate, onDiscard }: TimelineEdit
                     </button>
                     <button onClick={onGenerate} className="bg-white text-black text-xs font-bold px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-indigo-50 transition-colors">
                         <Sparkles className="w-4 h-4 text-indigo-600" />
-                        Send path to Google Veo
+                        Run experimental render
                     </button>
                 </div>
             </div>
