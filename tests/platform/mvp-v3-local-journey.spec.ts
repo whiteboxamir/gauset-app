@@ -1,13 +1,25 @@
-import { expect, test, type Page } from "@playwright/test";
+import { readFile, writeFile } from "node:fs/promises";
+
+import { expect, test, type Page, type TestInfo } from "@playwright/test";
 
 import { platformE2EEnv } from "./support/env";
 
 const BASE = platformE2EEnv.baseUrl;
 const sampleProjectId = "11111111-1111-4111-8111-111111111111";
-const envImage = "/Users/amirboz/gauset-app/backend/ml-sharp/data/teaser.jpg";
-const envImageName = "teaser.jpg";
-const largeEnvImage = "/Users/amirboz/gauset-app/uploads/images/69dd947d6b00404f8a2358f0e74a5395.jpeg";
-const largeEnvImageName = "69dd947d6b00404f8a2358f0e74a5395.jpeg";
+const envImage = `${process.cwd()}/public/images/hero_render.png`;
+const envImageName = "hero_render.png";
+const largeEnvImageName = "hero_render-large.png";
+
+async function createLargeStillFixture(testInfo: TestInfo) {
+    const sourceBuffer = await readFile(envImage);
+    const minimumLargeSizeInBytes = 5 * 1024 * 1024;
+    const paddingByteCount = Math.max(0, minimumLargeSizeInBytes - sourceBuffer.byteLength);
+    const largeStillPath = testInfo.outputPath(largeEnvImageName);
+
+    await writeFile(largeStillPath, Buffer.concat([sourceBuffer, Buffer.alloc(paddingByteCount)]));
+
+    return largeStillPath;
+}
 
 async function uploadSource(page: Page) {
     await expect(page.getByText(/^Import scout stills$/)).toBeVisible();
@@ -95,7 +107,7 @@ test.describe("v3 project-bound local journey", () => {
         await expect(page.getByText("Version History")).toHaveCount(0);
     });
 
-    test("local direct backend intake accepts larger stills without proxying through /api/mvp/upload", async ({ page }) => {
+    test("local direct backend intake accepts larger stills without proxying through /api/mvp/upload", async ({ page }, testInfo) => {
         const proxyUploadRequests: string[] = [];
         const directUploadRequests: string[] = [];
         page.on("request", (request) => {
@@ -116,6 +128,7 @@ test.describe("v3 project-bound local journey", () => {
         await openProjectWorldStart(page);
         await expect(page.getByText("Direct backend intake is available here for stills up to 64 MB.")).toBeVisible();
         await expect(page.getByTestId("mvp-upload-cap-warning")).toHaveCount(0);
+        const largeEnvImage = await createLargeStillFixture(testInfo);
 
         const importTrigger = page.getByText(/^Bring in scout stills$/).first();
         await importTrigger.click();
