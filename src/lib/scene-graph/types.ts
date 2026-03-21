@@ -6,7 +6,6 @@ import type {
     SpatialPin,
     Vector3Tuple,
     ViewerState,
-    WorldContinuityRecord,
 } from "../mvp-workspace";
 
 export type SceneNodeId = string;
@@ -91,7 +90,6 @@ export interface SceneDocumentV2 {
     meshes: Record<SceneNodeId, MeshNodeData>;
     splats: Record<SceneNodeId, SplatNodeData>;
     direction: SceneDirectionState;
-    continuity: WorldContinuityRecord;
     review: SceneReviewRecord | null;
     viewer: ViewerDocumentState;
 }
@@ -101,3 +99,4 @@ export interface NodeTransformPatch {
     rotation?: QuaternionTuple;
     scale?: Vector3Tuple;
 }
+

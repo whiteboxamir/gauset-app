@@ -2,7 +2,6 @@
 
 import React, { createContext, useCallback, useContext, useMemo, useRef, useSyncExternalStore } from "react";
 
-import { DEFAULT_TRANSFORM_SNAP_SETTINGS } from "../lib/render/transformSessions.ts";
 import { createEmptySceneDocumentV2 } from "../lib/scene-graph/document.ts";
 import type { SceneDocumentV2 } from "../lib/scene-graph/types.ts";
 import { createRenderableSceneDocumentSnapshotGetter } from "./mvpRenderableSceneDocument.ts";
@@ -22,11 +21,6 @@ const EMPTY_SCENE_STORE_STATE: MvpSceneStoreState = {
     hoveredNodeId: null,
     activeTool: "select",
     draftTransforms: {},
-    transformSpace: "world",
-    transformSnap: {
-        ...DEFAULT_TRANSFORM_SNAP_SETTINGS,
-    },
-    transformSession: null,
     dirty: false,
     history: [],
     future: [],
@@ -42,13 +36,6 @@ const EMPTY_SCENE_ACTIONS: MvpSceneStoreActions = {
     clearSelection: () => undefined,
     setHoveredNodeId: () => undefined,
     setActiveTool: () => undefined,
-    setTransformSpace: () => undefined,
-    setTransformSnapEnabled: () => undefined,
-    patchTransformSnap: () => undefined,
-    beginTransformSession: () => undefined,
-    updateTransformSessionDrafts: () => undefined,
-    cancelTransformSession: () => undefined,
-    commitTransformSession: () => undefined,
     updateDraftTransform: () => undefined,
     updateDraftTransformByAssetInstanceId: () => undefined,
     clearDraftTransforms: () => undefined,
@@ -57,24 +44,12 @@ const EMPTY_SCENE_ACTIONS: MvpSceneStoreActions = {
     appendAsset: () => undefined,
     duplicateAsset: () => undefined,
     removeAsset: () => undefined,
-    appendGroup: () => undefined,
-    appendCamera: () => undefined,
-    appendLight: () => undefined,
-    removeNode: () => undefined,
-    renameNode: () => undefined,
-    setNodeVisibility: () => undefined,
-    setNodeLocked: () => undefined,
-    reparentNode: () => undefined,
-    updateNodeTransform: () => undefined,
-    patchCameraNode: () => undefined,
-    patchLightNode: () => undefined,
     appendPin: () => undefined,
     removePin: () => undefined,
     appendCameraView: () => undefined,
     removeCameraView: () => undefined,
     setDirectorPath: () => undefined,
     setDirectorBrief: () => undefined,
-    patchContinuity: () => undefined,
     patchViewer: () => undefined,
     undo: () => undefined,
     redo: () => undefined,

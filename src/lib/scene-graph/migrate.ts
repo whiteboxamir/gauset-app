@@ -1,4 +1,4 @@
-import { createStableId, normalizeWorkspaceSceneGraph, type PersistedSceneGraphV1, type WorkspaceSceneGraph } from "../mvp-workspace.ts";
+import { normalizeWorkspaceSceneGraph, type WorkspaceSceneGraph } from "../mvp-workspace";
 import {
     addRootNode,
     createCameraNodeData,
@@ -7,10 +7,8 @@ import {
     createSceneNodeRecord,
     createSplatNodeData,
     ensureReviewRecord,
-    mergeWorkspaceSceneGraphIntoSceneDocument,
-    normalizeSceneDocumentDefaults,
     sceneDocumentToWorkspaceSceneGraph,
-} from "./document.ts";
+} from "./document";
 import type { SceneDocumentV2 } from "./types";
 
 function normalizeRotationTuple(input: unknown) {
@@ -30,47 +28,8 @@ function normalizeRotationTuple(input: unknown) {
     return undefined;
 }
 
-function createStableEnvironmentNodeId(environment: Record<string, unknown>) {
-    return createStableId(
-        "splat",
-        "environment",
-        typeof environment.id === "string" ? environment.id : null,
-        typeof environment.sourceLabel === "string" ? environment.sourceLabel : null,
-    );
-}
-
-function createStableAssetNodeId(assetRecord: Record<string, unknown>, index: number) {
-    return createStableId(
-        "mesh",
-        "asset",
-        assetRecord.instanceId,
-        assetRecord.instance_id,
-        assetRecord.id,
-        assetRecord.name,
-        index,
-    );
-}
-
-function withStableAssetInstanceId(assetRecord: Record<string, unknown>, index: number) {
-    if (
-        (typeof assetRecord.instanceId === "string" && assetRecord.instanceId) ||
-        (typeof assetRecord.instance_id === "string" && assetRecord.instance_id)
-    ) {
-        return assetRecord;
-    }
-
-    return {
-        ...assetRecord,
-        instanceId: createStableId("inst", assetRecord.id, assetRecord.name, assetRecord.mesh, assetRecord.preview, index),
-    };
-}
-
-function createStableViewerCameraNodeId() {
-    return createStableId("camera", "viewer");
-}
-
 export function migratePersistedSceneGraphV1ToSceneDocumentV2(
-    sceneGraph: PersistedSceneGraphV1 | WorkspaceSceneGraph | unknown,
+    sceneGraph: WorkspaceSceneGraph | unknown,
 ): SceneDocumentV2 {
     const normalized = normalizeWorkspaceSceneGraph(sceneGraph);
     let document = createEmptySceneDocumentV2();
@@ -89,7 +48,6 @@ export function migratePersistedSceneGraphV1ToSceneDocumentV2(
 
     if (normalized.environment && typeof normalized.environment === "object") {
         const node = createSceneNodeRecord("splat", {
-            id: createStableEnvironmentNodeId(normalized.environment as Record<string, unknown>),
             name: typeof normalized.environment.sourceLabel === "string" ? normalized.environment.sourceLabel : "Environment",
         });
         document = addRootNode(document, node);
@@ -101,9 +59,8 @@ export function migratePersistedSceneGraphV1ToSceneDocumentV2(
             return;
         }
 
-        const assetRecord = withStableAssetInstanceId(asset as Record<string, unknown>, index);
+        const assetRecord = asset as Record<string, unknown>;
         const node = createSceneNodeRecord("mesh", {
-            id: createStableAssetNodeId(assetRecord, index),
             name: typeof assetRecord.name === "string" && assetRecord.name ? assetRecord.name : `Asset ${index + 1}`,
             transform: {
                 position: Array.isArray(assetRecord.position) ? (assetRecord.position as [number, number, number]) : undefined,
@@ -116,7 +73,6 @@ export function migratePersistedSceneGraphV1ToSceneDocumentV2(
     });
 
     const viewerCameraNode = createSceneNodeRecord("camera", {
-        id: createStableViewerCameraNodeId(),
         name: "Viewer Camera",
     });
     document = addRootNode(document, viewerCameraNode);
@@ -132,7 +88,7 @@ export function migratePersistedSceneGraphV1ToSceneDocumentV2(
 
 export function migrateSceneGraphToSceneDocument(sceneGraph: unknown): SceneDocumentV2 {
     if (sceneGraph && typeof sceneGraph === "object" && (sceneGraph as { version?: unknown }).version === 2) {
-        return normalizeSceneDocumentDefaults(structuredClone(sceneGraph as SceneDocumentV2));
+        return structuredClone(sceneGraph as SceneDocumentV2);
     }
 
     if (
@@ -140,8 +96,7 @@ export function migrateSceneGraphToSceneDocument(sceneGraph: unknown): SceneDocu
         typeof sceneGraph === "object" &&
         (sceneGraph as { __scene_document_v2?: { version?: unknown } }).__scene_document_v2?.version === 2
     ) {
-        const embeddedDocument = structuredClone((sceneGraph as { __scene_document_v2: SceneDocumentV2 }).__scene_document_v2);
-        return normalizeSceneDocumentDefaults(mergeWorkspaceSceneGraphIntoSceneDocument(embeddedDocument, normalizeWorkspaceSceneGraph(sceneGraph)));
+        return structuredClone((sceneGraph as { __scene_document_v2: SceneDocumentV2 }).__scene_document_v2);
     }
 
     return migratePersistedSceneGraphV1ToSceneDocumentV2(sceneGraph);

@@ -719,6 +719,27 @@ export function normalizeSetupStatus(raw: unknown): SetupStatusResponse {
     };
 }
 
+export function isLegacyDegradedSingleImagePreviewMetadata(metadata: any) {
+    const lane = typeof metadata?.lane === "string" ? metadata.lane.trim().toLowerCase() : "";
+    const qualityTier = typeof metadata?.quality_tier === "string" ? metadata.quality_tier.trim().toLowerCase() : "";
+    const sourceFormat =
+        typeof metadata?.rendering?.source_format === "string" ? metadata.rendering.source_format.trim().toLowerCase() : "";
+    const colorEncoding =
+        typeof metadata?.rendering?.color_encoding === "string" ? metadata.rendering.color_encoding.trim().toLowerCase() : "";
+    const applyPreviewOrientation =
+        typeof metadata?.rendering?.apply_preview_orientation === "boolean" ? metadata.rendering.apply_preview_orientation : null;
+    const hasSourceCamera = Boolean(metadata?.source_camera && typeof metadata.source_camera === "object");
+
+    if (lane !== "preview") {
+        return false;
+    }
+
+    return (
+        qualityTier === "single_image_preview" &&
+        (sourceFormat === "single_image_preview_binary_ply" || colorEncoding === "albedo_linear" || applyPreviewOrientation === false || !hasSourceCamera)
+    );
+}
+
 export function describeEnvironment(environment: any) {
     const lane = typeof environment?.lane === "string" ? environment.lane : environment?.metadata?.lane;
     const renderState = resolveEnvironmentRenderState(environment);
@@ -736,6 +757,7 @@ export function describeEnvironment(environment: any) {
         typeof environment?.metadata?.delivery?.label === "string" ? environment.metadata.delivery.label : null;
     const colorEncoding =
         typeof environment?.metadata?.rendering?.color_encoding === "string" ? environment.metadata.rendering.color_encoding : null;
+    const legacyDegradedPreview = isLegacyDegradedSingleImagePreviewMetadata(environment?.metadata);
     const previewIsLrm =
         lane === "preview" &&
         (typeof environment?.metadata?.training_backend === "string"
@@ -754,7 +776,9 @@ export function describeEnvironment(environment: any) {
                 ? "Benchmarked Reconstruction Loaded"
                 : "Hybrid Reconstruction Loaded"
             : lane === "preview"
-              ? previewIsLrm
+              ? legacyDegradedPreview
+                  ? "Refreshing Preview"
+                  : previewIsLrm
                   ? "Image-to-Splat Preview Loaded"
                   : "Preview Loaded"
               : environment
@@ -779,12 +803,17 @@ export function describeEnvironment(environment: any) {
             ? environment?.metadata?.release_gates?.world_class_ready
                 ? "Benchmarked multi-view reconstruction"
                 : "Hybrid local reconstruction"
-            : lane === "preview"
-              ? previewIsLrm
+        : lane === "preview"
+              ? legacyDegradedPreview
+                  ? "Legacy preview detected"
+                  : previewIsLrm
                   ? "Single-photo AI splat preview"
                   : "Single-photo synthesized preview"
               : "No environment yet";
     const detailParts: string[] = [];
+    if (legacyDegradedPreview) {
+        detailParts.push("refreshing into upgraded Gaussian preview");
+    }
     if (laneTruth) {
         detailParts.push(laneTruth);
     }
