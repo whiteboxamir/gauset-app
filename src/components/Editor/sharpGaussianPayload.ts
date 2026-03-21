@@ -1,6 +1,6 @@
 import * as THREE from "three";
 
-import { isLegacyDegradedSingleImagePreviewMetadata, type GeneratedEnvironmentMetadata } from "@/lib/mvp-product";
+import type { GeneratedEnvironmentMetadata } from "@/lib/mvp-product";
 import { isSingleImagePreviewMetadata } from "@/lib/mvp-viewer";
 
 import {
@@ -43,9 +43,6 @@ function isDenseFallbackPreviewMetadata(metadata?: GeneratedEnvironmentMetadata 
 
 function shouldApplyPreviewOrientation(metadata?: GeneratedEnvironmentMetadata | null) {
     if (typeof metadata?.rendering?.apply_preview_orientation === "boolean") {
-        if (metadata.rendering.apply_preview_orientation === false && isLegacyDegradedSingleImagePreviewMetadata(metadata)) {
-            return true;
-        }
         return metadata.rendering.apply_preview_orientation;
     }
 

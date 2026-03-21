@@ -1,4 +1,4 @@
-import { selectActiveTool, selectSelectedNodeIds, selectSelectedPinId, selectSelectedViewId } from "./mvpSceneSelectors.ts";
+import { selectActiveTool, selectSelectedNodeIds, selectSelectedPinId, selectSelectedViewId, selectTransformSession, selectTransformSnap, selectTransformSpace } from "./mvpSceneSelectors.ts";
 import { useMvpSceneStoreSelector } from "./mvpSceneStoreContext.tsx";
 
 function arrayEqual<T>(previous: T[], next: T[]) {
@@ -32,18 +32,13 @@ function jsonValueEqual<T>(previous: T, next: T) {
 }
 
 export function useSceneTransformSpace() {
-    return "world" as const;
+    return useMvpSceneStoreSelector(selectTransformSpace, Object.is);
 }
 
 export function useSceneTransformSnap() {
-    return {
-        enabled: false,
-        translate: 0.5,
-        rotate: Math.PI / 12,
-        scale: 0.1,
-    };
+    return useMvpSceneStoreSelector(selectTransformSnap, jsonValueEqual);
 }
 
 export function useSceneTransformSession() {
-    return null;
+    return useMvpSceneStoreSelector(selectTransformSession, jsonValueEqual);
 }
